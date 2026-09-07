@@ -1,6 +1,7 @@
 import {
   GoogleAuthProvider,
   OAuthProvider,
+  reauthenticateWithPopup,
   signInWithPopup,
   type User,
   type UserCredential,
@@ -37,6 +38,17 @@ export function signInWithGoogle(): Promise<UserCredential> {
 
 export function signInWithApple(): Promise<UserCredential> {
   return signInWithPopup(getFirebaseAuth(), appleProvider());
+}
+
+export async function reauthenticateCurrentUser(user: User): Promise<void> {
+  const providerId = user.providerData[0]?.providerId;
+  if (providerId === "google.com") {
+    await reauthenticateWithPopup(user, googleProvider());
+    return;
+  }
+  if (providerId === "apple.com") {
+    await reauthenticateWithPopup(user, appleProvider());
+  }
 }
 
 export function authErrorMessage(error: unknown): string {

@@ -1,12 +1,50 @@
-import type { ChatArtifact } from "@/types/chat";
-import type { ActiveArtifact, ActiveArtifactStatus } from "@/types/project";
+import type { ChatArtifact, ChatArtifactKind } from "@/types/chat";
+import type { ActiveArtifact, ActiveArtifactKind, ActiveArtifactStatus } from "@/types/project";
+
+export function parseChatArtifact(value: unknown): ChatArtifact | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.kind !== "string" || !row.kind.trim()) return null;
+  if (typeof row.id !== "string" || !row.id || typeof row.title !== "string") return null;
+  return compactChatArtifact({
+    kind: row.kind.trim() as ChatArtifactKind,
+    id: row.id,
+    title: row.title,
+    count: typeof row.count === "number" ? row.count : undefined,
+    ids: Array.isArray(row.ids) ? row.ids.filter((id): id is string => typeof id === "string") : undefined,
+  });
+}
+
+export function compactChatArtifact(artifact: ChatArtifact | null | undefined): ChatArtifact | null {
+  if (!artifact?.id || !artifact.kind) return null;
+  const next: ChatArtifact = {
+    kind: artifact.kind,
+    id: artifact.id,
+    title: artifact.title || artifact.kind,
+  };
+  if (typeof artifact.count === "number" && Number.isFinite(artifact.count)) next.count = artifact.count;
+  if (artifact.ids?.length) next.ids = artifact.ids;
+  return next;
+}
+
+export function toActiveKind(kind: string): ActiveArtifactKind {
+  if (kind === "practice") return "practice_set";
+  if (kind === "sheet" || kind === "plan") return "study_sheet";
+  return kind;
+}
+
+export function toChatArtifactKind(kind: string): ChatArtifactKind {
+  if (kind === "practice_set") return "practice";
+  if (kind === "study_sheet") return "sheet";
+  return kind;
+}
 
 export function chatArtifactToActive(
   artifact: ChatArtifact,
   status: ActiveArtifactStatus = "ready",
 ): ActiveArtifact {
   return {
-    kind: artifact.kind === "practice" ? "practice_set" : "study_sheet",
+    kind: toActiveKind(artifact.kind),
     id: artifact.id,
     status,
     title: artifact.title,
@@ -25,11 +63,20 @@ export function activeToChatArtifact(active: ActiveArtifact): ChatArtifact {
       ids: active.ids,
     };
   }
+  if (active.kind === "study_sheet") {
+    return {
+      kind: active.title === "Study plan" ? "plan" : "sheet",
+      id: active.id,
+      title: active.title || "Notes",
+      count: active.count,
+    };
+  }
   return {
-    kind: active.title === "Study plan" ? "plan" : "sheet",
+    kind: toChatArtifactKind(active.kind),
     id: active.id,
-    title: active.title || "Notes",
+    title: active.title || active.kind,
     count: active.count,
+    ids: active.ids,
   };
 }
 

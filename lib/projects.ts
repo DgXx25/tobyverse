@@ -17,7 +17,7 @@ import { trackEvent } from "@/lib/analytics/track";
 import { preferredChatModeForGoal } from "@/lib/core/chat-modes";
 import { DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { recipeForGoal } from "@/lib/core/recipes";
-import { COLLECTIONS } from "@/lib/firestore";
+import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { listMaterials, removeMaterial } from "@/lib/materials";
 import { deleteStudySheet, listStudySheets } from "@/lib/study-sheets";
@@ -65,15 +65,15 @@ function asRecipe(value: unknown, goal: ProjectGoal): LessonRecipe {
 function asActiveArtifact(value: unknown): ActiveArtifact | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
-  if (row.kind !== "practice_set" && row.kind !== "study_sheet") return null;
-  if (typeof row.id !== "string" || !row.id) return null;
+  if (typeof row.kind !== "string" || !row.kind.trim() || typeof row.id !== "string" || !row.id) return null;
   const status =
     row.status === "open" || row.status === "in_progress" || row.status === "ready" ? row.status : "ready";
+  const fallbackTitle = row.kind === "practice_set" ? "Practice set" : row.kind === "study_sheet" ? "Notes" : row.kind;
   return {
-    kind: row.kind,
+    kind: row.kind.trim(),
     id: row.id,
     status,
-    title: asString(row.title, row.kind === "practice_set" ? "Practice set" : "Notes"),
+    title: asString(row.title, fallbackTitle),
     count: typeof row.count === "number" ? row.count : undefined,
     ids: Array.isArray(row.ids) ? row.ids.filter((item): item is string => typeof item === "string") : undefined,
   };
@@ -228,10 +228,13 @@ export async function updateProjectActiveArtifact(
   active: ActiveArtifact | null,
 ): Promise<void> {
   await getOwnedProject(projectId, userId);
-  await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), {
-    activeArtifact: active,
-    updatedAt: serverTimestamp(),
-  });
+  await updateDoc(
+    doc(getFirebaseDb(), COLLECTIONS.projects, projectId),
+    omitUndefined({
+      activeArtifact: active,
+      updatedAt: serverTimestamp(),
+    }),
+  );
 }
 
 export function subscribeProjectsForUser(

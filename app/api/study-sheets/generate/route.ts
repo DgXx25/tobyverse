@@ -2,7 +2,7 @@ import { generateJson } from "@/lib/ai/json";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { clipText, SHEET_TOTAL_CHARS } from "@/lib/materials/limits";
 import { collectNoteProse } from "@/lib/notes/compat";
-import { normalizeNoteBlocks } from "@/lib/notes/blocks";
+import { splitNotePayload } from "@/lib/notes/blocks";
 import { studySheetSystemPrompt } from "@/lib/study-sheets/prompt";
 import { notesDocumentSchema } from "@/lib/visuals/schemas";
 
@@ -91,10 +91,10 @@ export async function POST(request: Request) {
     content: sheet.content,
     sections: sheet.sections,
   }).prose;
-  const blocks = normalizeNoteBlocks(sheet.blocks ?? fallback, fallback);
-  if (blocks.length === 0) {
+  const { blocks, content } = splitNotePayload(sheet.blocks, fallback);
+  if (blocks.length === 0 && !content.trim()) {
     return Response.json({ error: "Notes JSON was invalid." }, { status: 422 });
   }
 
-  return Response.json({ title, blocks });
+  return Response.json({ title, blocks, content });
 }

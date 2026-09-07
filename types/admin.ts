@@ -70,7 +70,7 @@ export type EvalTranscriptMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  artifact?: { kind: "practice" | "sheet" | "plan"; id: string; title: string; count?: number } | null;
+  artifact?: { kind: string; id: string; title: string; count?: number } | null;
 };
 
 export type EvalPracticePreviewItem = {

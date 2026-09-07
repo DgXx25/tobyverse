@@ -1,7 +1,7 @@
 import { authHeaders } from "@/lib/api/client";
+import { incrementUsage } from "@/lib/account/store";
 import { createStudySheet, updateStudySheet } from "@/lib/study-sheets/store";
 import { collectProjectSources } from "@/lib/composer/sources";
-import { normalizeNoteBlocks } from "@/lib/notes/blocks";
 import type { Material } from "@/types/material";
 import { NOTES_SCHEMA_VERSION } from "@/types/study-sheet";
 import type { VisualBlock } from "@/types/visual";
@@ -21,8 +21,10 @@ export async function generateStudySheetFromPrompt(input: {
     userId: input.userId,
     title,
     blocks: generated.blocks,
+    content: generated.content,
     sourceMaterialIds: input.materials.map((item) => item.id),
   });
+  await incrementUsage(input.userId, "notesGenerated");
   return { id, title };
 }
 
@@ -49,6 +51,7 @@ export async function rewriteStudySheetFromPrompt(input: {
   await updateStudySheet(input.projectId, input.sheetId, {
     title,
     blocks: generated.blocks,
+    content: generated.content,
     schemaVersion: NOTES_SCHEMA_VERSION,
   });
   return { title };
@@ -62,7 +65,7 @@ async function requestNotes(input: {
   currentBlocks?: VisualBlock[];
   currentTitle?: string;
   currentContent?: string;
-}): Promise<{ title: string; blocks: VisualBlock[] }> {
+}): Promise<{ title: string; blocks: VisualBlock[]; content: string }> {
   const sources = await collectProjectSources({
     projectId: input.projectId,
     materials: input.materials,
@@ -87,10 +90,13 @@ async function requestNotes(input: {
   const data = (await response.json()) as {
     title?: string;
     blocks?: VisualBlock[];
+    content?: string;
     error?: string;
   };
-  if (!response.ok || !Array.isArray(data.blocks) || data.blocks.length === 0) {
+  const blocks = Array.isArray(data.blocks) ? data.blocks : [];
+  const content = typeof data.content === "string" ? data.content : "";
+  if (!response.ok || (blocks.length === 0 && !content.trim())) {
     throw new Error(data.error ?? "Could not update the notes.");
   }
-  return { title: data.title?.trim() || "Notes", blocks: normalizeNoteBlocks(data.blocks) };
+  return { title: data.title?.trim() || "Notes", blocks, content };
 }

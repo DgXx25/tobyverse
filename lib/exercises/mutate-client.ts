@@ -7,6 +7,7 @@ import {
   updateExercise,
   type ProjectExercise,
 } from "@/lib/exercises/store";
+import { practiceFamilyFromTypes } from "@/lib/exercises/plan";
 import { collectProjectSources } from "@/lib/composer/sources";
 import type { Material } from "@/types/material";
 import type { Project } from "@/types/project";
@@ -104,14 +105,20 @@ export async function appendPracticeItems(input: {
   materials: Material[];
   prompt: string;
   count: number;
+  setIds?: string[];
   onStatus?: (status: string) => void;
 }): Promise<string[]> {
+  const existing = await listExercises(input.project.id);
+  const setItems = input.setIds?.length
+    ? existing.filter((item) => input.setIds?.includes(item.id))
+    : existing;
   const extra = await generatePracticeSet({
     project: input.project,
     userId: input.userId,
     materials: input.materials,
     prompt: input.prompt,
     count: input.count,
+    family: practiceFamilyFromTypes(setItems.map((item) => item.type)),
     onStatus: input.onStatus,
   });
   return extra.ids;

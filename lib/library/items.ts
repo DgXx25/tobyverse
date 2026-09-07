@@ -6,6 +6,7 @@ import { listStudySheets } from "@/lib/study-sheets";
 import { displayProjectTitle } from "@/lib/workspace/title";
 import { blockPreviewText } from "@/lib/visuals/validate";
 import type { ChatArtifact } from "@/types/chat";
+import type { MaterialImage, MaterialType } from "@/types/material";
 
 export type LibraryKind = "material" | "sheet" | "practice";
 
@@ -20,6 +21,12 @@ export type LibraryItem = {
   meta: string;
   createdAt: string | null;
   artifact?: ChatArtifact;
+  materialType?: MaterialType;
+  sizeBytes?: number;
+  pageCount?: number;
+  hasImages?: boolean;
+  images?: MaterialImage[];
+  storagePath?: string;
 };
 
 export async function listLibraryItems(userId: string): Promise<LibraryItem[]> {
@@ -45,6 +52,12 @@ export async function listLibraryItems(userId: string): Promise<LibraryItem[]> {
           preview: item.extractedTextPreview,
           meta: [item.type, formatBytes(item.sizeBytes)].filter(Boolean).join(" · "),
           createdAt: item.createdAt,
+          materialType: item.type,
+          sizeBytes: item.sizeBytes,
+          pageCount: item.pageCount,
+          hasImages: item.hasImages,
+          images: item.images,
+          storagePath: item.storagePath,
         });
       }
 

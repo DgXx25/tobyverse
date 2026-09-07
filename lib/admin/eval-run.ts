@@ -1,6 +1,7 @@
 import { DEFAULT_AI_PROVIDER } from "@/lib/ai/catalog";
 import { readChatSse } from "@/lib/ai/sse";
-import { isArtifactTool, type ChatToolCall } from "@/lib/ai/tools";
+import { type ChatToolCall } from "@/lib/ai/tools";
+import { dispatchChatTool } from "@/lib/chat/dispatch";
 import {
   EVAL_FIXTURE_COUNT,
   EVAL_SUITES,
@@ -14,11 +15,9 @@ import {
 import { authHeaders } from "@/lib/api/client";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { addChatMessage } from "@/lib/chats";
-import { extractAppendCount, intentFromTool } from "@/lib/composer/intent";
+import { intentFromTool, pendingCreateFromMessages, resolvePendingKind } from "@/lib/composer/intent";
 import { artifactFacts, historyTurnsFromMessages, latestArtifact } from "@/lib/composer/memory";
 import { DEFAULT_CHAT_THREAD_ID, DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
-import { generatePracticeSet } from "@/lib/exercises/generate-set";
-import { appendPracticeItems, rewritePracticeItems } from "@/lib/exercises/mutate-client";
 import { exerciseStem, getExercise } from "@/lib/exercises/store";
 import {
   createProject,
@@ -26,7 +25,6 @@ import {
   getProjectById,
   updateProjectActiveArtifact,
 } from "@/lib/projects";
-import { generateStudySheetFromPrompt, rewriteStudySheetFromPrompt } from "@/lib/study-sheets/generate-client";
 import { getStudySheet } from "@/lib/study-sheets/store";
 import type {
   EvalArtifactPreview,
@@ -100,6 +98,9 @@ async function record(
     content: string;
     intent: ChatMessage["intent"];
     artifact?: ChatArtifact | null;
+    options?: string[];
+    pendingKind?: "practice" | "sheet";
+    images?: ChatMessage["images"];
   },
 ): Promise<ChatMessage> {
   const id = await addChatMessage({
@@ -110,6 +111,9 @@ async function record(
     content: input.content,
     intent: input.intent,
     artifact: input.artifact ?? null,
+    options: input.options,
+    pendingKind: input.pendingKind,
+    images: input.images,
   });
   const message: ChatMessage = {
     id,
@@ -124,6 +128,9 @@ async function record(
     relatedExerciseType: null,
     intent: input.intent,
     artifact: input.artifact ?? null,
+    options: input.options,
+    pendingKind: input.pendingKind,
+    images: input.images,
     createdAt: new Date().toISOString(),
   };
   pushMessage(session, message);
@@ -146,6 +153,8 @@ function activeContext(active: ActiveArtifact | null) {
 
 async function streamChat(session: Session, prompt: string): Promise<{ text: string; tool: ChatToolCall }> {
   const history: ChatTurn[] = historyTurnsFromMessages(session.messages);
+  const pending = pendingCreateFromMessages(session.messages);
+  const pendingKind = resolvePendingKind(prompt, pending);
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: await authHeaders(),
@@ -165,6 +174,9 @@ async function streamChat(session: Session, prompt: string): Promise<{ text: str
         latestArtifact: latestArtifact(session.messages),
         activeArtifact: activeContext(session.active),
         hasMaterials: false,
+        priorClarify: pending.priorClarify,
+        pendingTopic: pending.pendingTopic ?? undefined,
+        pendingKind: pendingKind ?? undefined,
       },
     }),
   });
@@ -231,151 +243,57 @@ async function emitSheetPreview(session: Session): Promise<number> {
   return sheet.content.trim().length;
 }
 
-async function applyArtifact(
+async function applyDispatch(
   session: Session,
   input: {
     prompt: string;
+    text: string;
     tool: ChatToolCall;
     onStatus: (status: string) => void;
   },
 ): Promise<{ artifact: ChatArtifact | null; error?: string }> {
-  const { tool, prompt } = input;
-  const generatePrompt = tool.args.topic || tool.args.instruction || prompt;
-
   try {
-    if (tool.name === "create_practice") {
-      input.onStatus("Generating practice…");
-      const set = await generatePracticeSet({
-        project: session.project,
-        userId: session.userId,
-        materials: [],
-        prompt: generatePrompt,
-        count: EVAL_FIXTURE_COUNT,
-        onStatus: input.onStatus,
-      });
-      const artifact: ChatArtifact = {
-        kind: "practice",
-        id: set.ids[0],
-        title: tool.args.topic?.trim() || "Practice set",
-        count: set.count,
-        ids: set.ids,
-      };
-      session.practice = { id: artifact.id, title: artifact.title, count: set.count, ids: set.ids };
-      await record(session, {
-        role: "assistant",
-        content: "Practice set is ready.",
-        intent: "practice",
-        artifact,
-      });
-      await remember(session, artifact);
-      await emitPracticePreview(session);
-      return { artifact };
-    }
-
-    if (tool.name === "create_sheet") {
-      input.onStatus("Writing sheet…");
-      const sheet = await generateStudySheetFromPrompt({
-        projectId: session.project.id,
-        userId: session.userId,
-        projectTitle: session.project.title,
-        materials: [],
-        prompt: generatePrompt,
-      });
-      const artifact: ChatArtifact = { kind: "sheet", id: sheet.id, title: sheet.title };
-      session.sheet = { id: sheet.id, title: sheet.title };
-      await record(session, {
-        role: "assistant",
-        content: "Study sheet is ready.",
-        intent: "study",
-        artifact,
-      });
-      await remember(session, artifact);
-      await emitSheetPreview(session);
-      return { artifact };
-    }
-
-    if (tool.name === "edit_practice" || tool.name === "append_practice") {
-      const active = session.practice;
-      if (!active) throw new Error("No practice set to edit.");
-      const ids = active.ids;
-      let nextIds = ids;
-      if (tool.name === "append_practice") {
-        const count = tool.args.count ?? extractAppendCount(prompt);
-        input.onStatus(`Appending ${count}…`);
-        const extra = await appendPracticeItems({
-          project: session.project,
-          userId: session.userId,
-          materials: [],
-          prompt: `Add ${count} more items to the current practice set "${active.title}". Same topic. User request: ${prompt}`,
-          count,
-          onStatus: input.onStatus,
-        });
-        nextIds = [...ids, ...extra];
-      } else {
-        input.onStatus("Editing practice…");
-        await rewritePracticeItems({
-          project: session.project,
-          userId: session.userId,
-          ids,
-          instruction: tool.args.instruction || prompt,
-          materials: [],
-          onStatus: input.onStatus,
-        });
+    const dispatched = await dispatchChatTool({
+      tool: input.tool,
+      text: input.text,
+      prompt: input.prompt,
+      project: session.project,
+      userId: session.userId,
+      materials: [],
+      active: session.active,
+      messages: session.messages,
+      count: input.tool.name === "create_practice" ? EVAL_FIXTURE_COUNT : undefined,
+      pendingKind: resolvePendingKind(input.prompt, pendingCreateFromMessages(session.messages)),
+      onStatus: input.onStatus,
+    });
+    await record(session, {
+      role: "assistant",
+      content: dispatched.content || input.text || "(empty)",
+      intent: dispatched.intent,
+      artifact: dispatched.artifact ?? null,
+      options: dispatched.options,
+      pendingKind: dispatched.pendingKind,
+      images: dispatched.images,
+    });
+    if (dispatched.artifact) {
+      await remember(session, dispatched.artifact);
+      if (dispatched.artifact.kind === "practice") {
+        session.practice = {
+          id: dispatched.artifact.id,
+          title: dispatched.artifact.title,
+          count: dispatched.artifact.count ?? dispatched.artifact.ids?.length ?? 0,
+          ids: dispatched.artifact.ids ?? [],
+        };
+        await emitPracticePreview(session);
+      } else if (dispatched.artifact.kind === "sheet" || dispatched.artifact.kind === "plan") {
+        session.sheet = { id: dispatched.artifact.id, title: dispatched.artifact.title };
+        await emitSheetPreview(session);
       }
-      const artifact: ChatArtifact = {
-        kind: "practice",
-        id: active.id,
-        title: active.title,
-        count: nextIds.length,
-        ids: nextIds,
-      };
-      session.practice = { ...active, count: nextIds.length, ids: nextIds };
-      await record(session, {
-        role: "assistant",
-        content: `Updated practice set · ${nextIds.length} items`,
-        intent: tool.name === "append_practice" ? "append" : "edit",
-        artifact,
-      });
-      await remember(session, artifact);
-      await emitPracticePreview(session);
-      return { artifact };
     }
-
-    if (tool.name === "edit_sheet") {
-      const sheetId = session.sheet?.id ?? session.active?.id;
-      if (!sheetId) throw new Error("No study sheet to edit.");
-      const sheet = await getStudySheet(session.project.id, sheetId);
-      if (!sheet) throw new Error("That study sheet is gone.");
-      input.onStatus("Updating sheet…");
-      await rewriteStudySheetFromPrompt({
-        projectId: session.project.id,
-        sheetId: sheet.id,
-        projectTitle: session.project.title,
-        materials: [],
-        prompt: tool.args.instruction || prompt,
-        currentContent: sheet.content,
-      });
-      const artifact: ChatArtifact = {
-        kind: "sheet",
-        id: sheet.id,
-        title: session.sheet?.title || sheet.title,
-      };
-      session.sheet = { id: sheet.id, title: artifact.title };
-      await record(session, {
-        role: "assistant",
-        content: "Updated study sheet.",
-        intent: "rewrite_sheet",
-        artifact,
-      });
-      await remember(session, artifact);
-      await emitSheetPreview(session);
-      return { artifact };
-    }
+    return { artifact: dispatched.artifact ?? null };
   } catch (error) {
     return { artifact: null, error: error instanceof Error ? error.message : "Artifact step failed." };
   }
-
-  return { artifact: null };
 }
 
 async function runTurn(session: Session, prompt: string, onStatus: (status: string) => void): Promise<TurnResult> {
@@ -386,33 +304,24 @@ async function runTurn(session: Session, prompt: string, onStatus: (status: stri
   const chips = tool.name === "suggest_practice" || tool.name === "suggest_sheet";
   const created = tool.name === "create_practice" || tool.name === "create_sheet";
 
-  if (isArtifactTool(tool.name)) {
-    session.live.onStream?.("");
-    const applied = await applyArtifact(session, { prompt, tool, onStatus });
-    if (applied.error) {
-      await record(session, {
-        role: "assistant",
-        content: applied.error,
-        intent: intentFromTool(tool.name),
-      }).catch(() => undefined);
-    }
-    return {
-      tool,
-      text,
-      chips,
-      created,
-      card: Boolean(applied.artifact),
-      artifact: applied.artifact,
-      error: applied.error,
-    };
+  session.live.onStream?.(created ? "" : text);
+  const applied = await applyDispatch(session, { prompt, text, tool, onStatus });
+  if (applied.error) {
+    await record(session, {
+      role: "assistant",
+      content: applied.error,
+      intent: intentFromTool(tool.name),
+    }).catch(() => undefined);
   }
-
-  await record(session, {
-    role: "assistant",
-    content: text || "(empty)",
-    intent: intentFromTool(tool.name),
-  });
-  return { tool, text, chips, created: false, card: false, artifact: null };
+  return {
+    tool,
+    text,
+    chips,
+    created,
+    card: Boolean(applied.artifact),
+    artifact: applied.artifact,
+    error: applied.error,
+  };
 }
 
 function snapshotPractice(session: Session) {

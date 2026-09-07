@@ -2,7 +2,9 @@
  * Firestore layout (project-scoped subcollections).
  *
  * users/{userId}
- *   profile fields: displayName, email, photoURL, createdAt, updatedAt
+ *   displayName, email, photoURL, plan ("free" in beta; not client-writable to other values),
+ *   usage { weekStart, chatTurns, practiceGenerated, notesGenerated, storageBytes },
+ *   createdAt, updatedAt
  *
  * projects/{projectId}
  *   title, description, userId, goal, recipe, preferredChatMode, createdAt, updatedAt
@@ -141,4 +143,26 @@ export function materialStoragePath(
   fileName: string,
 ): string {
   return `users/${userId}/projects/${projectId}/materials/${materialId}/${fileName}`;
+}
+
+function isPlainObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** Firestore rejects `undefined`. Drop those keys; keep null and real values. */
+export function omitUndefined<T>(value: T): T {
+  if (value === undefined || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => omitUndefined(item)) as T;
+  }
+  if (!isPlainObject(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (nested === undefined) continue;
+    out[key] = omitUndefined(nested);
+  }
+  return out as T;
 }

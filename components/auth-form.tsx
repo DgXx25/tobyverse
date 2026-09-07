@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import { authErrorMessage, signInWithApple, signInWithGoogle } from "@/lib/auth";
 import { useAuth } from "@/components/auth-provider";
+import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 
 type Provider = "google" | "apple";
 
@@ -40,7 +40,6 @@ function AppleIcon() {
 }
 
 export function AuthForm() {
-  const router = useRouter();
   const { user, loading } = useAuth();
   const [pending, setPending] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +47,10 @@ export function AuthForm() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.replace("/dashboard");
+      writeSignedInCookie(true);
+      window.location.replace("/");
     }
-  }, [loading, user, router]);
+  }, [loading, user]);
 
   async function signIn(provider: Provider) {
     setError(null);
@@ -63,7 +63,8 @@ export function AuthForm() {
         await signInWithApple();
       }
 
-      router.replace("/dashboard");
+      writeSignedInCookie(true);
+      window.location.replace("/");
     } catch (err) {
       const message = authErrorMessage(err);
       if (message) setError(message);
@@ -83,29 +84,26 @@ export function AuthForm() {
   }
 
   return (
-    <div className="w-full max-w-sm rounded-lg border border-border bg-surface p-6">
-      <h1 className="text-center text-sm font-medium text-foreground">Sign in</h1>
-      <p className="mt-1 mb-6 text-center text-xs text-muted">Google or Apple only.</p>
-
+    <div className="w-full">
       <div className="space-y-3">
         <button
           type="button"
           disabled={pending !== null}
           onClick={() => signIn("google")}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
         >
           <GoogleIcon />
-          {pending === "google" ? "Connecting…" : "Continue with Google"}
+          {pending === "google" ? "Connecting…" : "Login with Google"}
         </button>
 
         <button
           type="button"
           disabled={pending !== null}
           onClick={() => signIn("apple")}
-          className="flex w-full items-center justify-center gap-2 rounded-md bg-foreground px-3 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
         >
           <AppleIcon />
-          {pending === "apple" ? "Connecting…" : "Continue with Apple"}
+          {pending === "apple" ? "Connecting…" : "Login with Apple"}
         </button>
       </div>
 

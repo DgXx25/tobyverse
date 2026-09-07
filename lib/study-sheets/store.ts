@@ -10,11 +10,11 @@ import {
   updateDoc,
   type Unsubscribe,
 } from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore";
+import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { mapNoteRecord } from "@/lib/notes/compat";
-import { normalizeNoteBlocks } from "@/lib/notes/blocks";
+import { splitNotePayload } from "@/lib/notes/blocks";
 import { NOTES_SCHEMA_VERSION } from "@/types/study-sheet";
 import type { VisualBlock } from "@/types/visual";
 import type { StudySheet } from "@/types/study-sheet";
@@ -47,16 +47,23 @@ export async function createStudySheet(input: {
   sourceMaterialIds: string[];
   content?: string;
 }): Promise<string> {
-  const ref = await addDoc(sheetsRef(input.projectId), {
-    projectId: input.projectId,
-    userId: input.userId,
-    title: input.title.trim() || "Notes",
-    schemaVersion: NOTES_SCHEMA_VERSION,
-    blocks: normalizeNoteBlocks(input.blocks, input.content ?? ""),
-    content: input.content ?? "",
-    sourceMaterialIds: input.sourceMaterialIds,
-    createdAt: serverTimestamp(),
-  });
+  const { blocks, content } = splitNotePayload(input.blocks, input.content ?? "");
+  if (blocks.length === 0 && !content.trim()) {
+    throw new Error("Could not save notes.");
+  }
+  const ref = await addDoc(
+    sheetsRef(input.projectId),
+    omitUndefined({
+      projectId: input.projectId,
+      userId: input.userId,
+      title: input.title.trim() || "Notes",
+      schemaVersion: NOTES_SCHEMA_VERSION,
+      blocks,
+      content,
+      sourceMaterialIds: input.sourceMaterialIds ?? [],
+      createdAt: serverTimestamp(),
+    }),
+  );
   return ref.id;
 }
 
@@ -93,12 +100,18 @@ export async function updateStudySheet(
   sheetId: string,
   patch: Partial<Pick<StudySheet, "title" | "blocks" | "content" | "sourceMaterialIds" | "schemaVersion">>,
 ): Promise<void> {
-  const payload: Record<string, unknown> = { ...patch };
-  if (patch.blocks) {
-    payload.blocks = normalizeNoteBlocks(patch.blocks, patch.content ?? "");
+  const payload: Record<string, unknown> = {};
+  if (patch.title !== undefined) payload.title = patch.title;
+  if (patch.sourceMaterialIds !== undefined) payload.sourceMaterialIds = patch.sourceMaterialIds;
+  if (patch.blocks !== undefined || patch.content !== undefined) {
+    const { blocks, content } = splitNotePayload(patch.blocks ?? [], patch.content ?? "");
+    payload.blocks = blocks;
+    payload.content = content;
     payload.schemaVersion = NOTES_SCHEMA_VERSION;
+  } else if (patch.schemaVersion !== undefined) {
+    payload.schemaVersion = patch.schemaVersion;
   }
-  await updateDoc(doc(sheetsRef(projectId), sheetId), payload);
+  await updateDoc(doc(sheetsRef(projectId), sheetId), omitUndefined(payload));
 }
 
 export async function deleteStudySheet(projectId: string, sheetId: string): Promise<void> {

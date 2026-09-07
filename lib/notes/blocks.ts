@@ -22,6 +22,10 @@ const PAIR_HINTS: Array<[string, string]> = [
   ["short-run", "long-run"],
   ["მოკლევადიან", "გრძელვადიან"],
   ["გრძელვადიან", "მოკლევადიან"],
+  ["პროკარიოტ", "ევკარიოტ"],
+  ["ევკარიოტ", "პროკარიოტ"],
+  ["prokaryot", "eukaryot"],
+  ["eukaryot", "prokaryot"],
   ["left", "right"],
   ["pros", "cons"],
   ["before", "after"],
@@ -102,7 +106,10 @@ function pickCopy(value: unknown): { title: string; text: string; icon?: string 
     (item): item is string => typeof item === "string" && item.trim().length > 0,
   );
   if (!title && !text) return null;
-  const icon = typeof row.icon === "string" ? row.icon : undefined;
+  const iconRaw = [row.icon, row.iconName].find(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+  const icon = iconRaw?.trim();
   return { title: (title || "Note").trim(), text: (text || title || "Note").trim(), icon };
 }
 
@@ -110,6 +117,12 @@ function asTerm(value: unknown): TermCardFields | null {
   const copy = pickCopy(value);
   if (!copy) return null;
   return { title: copy.title, text: copy.text, icon: copy.icon };
+}
+
+function isHeadingOnly(title: string, text: string): boolean {
+  const heading = title.replace(/\s+/g, " ").trim().toLowerCase();
+  const body = text.replace(/\s+/g, " ").trim().toLowerCase();
+  return !body || body === heading;
 }
 
 function flattenIncoming(raw: unknown): VisualBlock[] {
@@ -223,6 +236,7 @@ function compactLayout(blocks: VisualBlock[]): VisualBlock[] {
         formulas.push({ type: "formula_card", title: clip(block.title, MAX_TITLE), formula: clip(block.text || block.title, 160) });
         continue;
       }
+      if (isHeadingOnly(block.title, block.text)) continue;
       if (isEssayText(block.text)) essays.push(block);
       else shorts.push({ title: clip(block.title, MAX_TITLE), text: clipLine(block.text), icon: block.icon });
       continue;
@@ -270,8 +284,6 @@ function compactLayout(blocks: VisualBlock[]): VisualBlock[] {
     }
   }
 
-  stepBits.push(...essays.map((item) => item.text));
-
   const steps = forceSteps(stepBits);
 
   const out: VisualBlock[] = [];
@@ -295,10 +307,51 @@ function compactLayout(blocks: VisualBlock[]): VisualBlock[] {
     .filter((block) => {
       if (block.type === "steps") return block.items.length >= 3;
       if (block.type === "concept_row") return block.items.length >= 2;
-      if (block.type === "term_card") return !isEssayText(block.text);
+      if (block.type === "term_card") return !isEssayText(block.text) && !isHeadingOnly(block.title, block.text);
+      if (block.type === "compare_vs") {
+        return !isHeadingOnly(block.left.title, block.left.text) && !isHeadingOnly(block.right.title, block.right.text);
+      }
       return true;
     })
     .slice(0, MAX_BLOCKS);
+}
+
+function visualBlocksToProse(blocks: VisualBlock[]): string {
+  return blocks
+    .map((block) => {
+      if (block.type === "term_card") {
+        const heading = block.title && block.title !== "Note" ? `## ${block.title}` : "";
+        return [heading, block.text].filter(Boolean).join("\n\n");
+      }
+      if (block.type === "example" || block.type === "pitfall") return block.text;
+      if (block.type === "steps") return block.items.map((item, index) => `${index + 1}. ${item}`).join("\n");
+      if (block.type === "formula_card") return [block.title, block.formula].filter(Boolean).join("\n");
+      if (block.type === "compare_vs") {
+        return [block.title, `**${block.left.title}** ${block.left.text}`, `**${block.right.title}** ${block.right.text}`]
+          .filter(Boolean)
+          .join("\n\n");
+      }
+      if (block.type === "concept_row") {
+        return block.items.map((item) => `**${item.title}** ${item.text}`).join("\n");
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+}
+
+export function readNoteBlocks(raw: unknown): VisualBlock[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  return flattenIncoming(raw);
+}
+
+export function splitNotePayload(raw: unknown, fallbackProse = ""): { blocks: VisualBlock[]; content: string } {
+  const collected = flattenIncoming(raw);
+  const blocks = compactLayout(collected);
+  const fallback = fallbackProse.trim();
+  if (blocks.length > 0) return { blocks, content: fallback };
+  return { blocks: [], content: fallback || visualBlocksToProse(collected) };
 }
 
 export function proseToBlocks(prose: string): VisualBlock[] {
@@ -336,7 +389,7 @@ export function proseToBlocks(prose: string): VisualBlock[] {
         continue;
       }
     }
-    if (chunk.title && !isEssayText(body)) {
+    if (chunk.title && !isEssayText(body) && !isHeadingOnly(chunk.title, body)) {
       raw.push(term(chunk.title, body));
       continue;
     }
@@ -360,13 +413,6 @@ export function proseToBlocks(prose: string): VisualBlock[] {
   return compactLayout(raw);
 }
 
-export function normalizeNoteBlocks(raw: unknown, fallbackProse = ""): VisualBlock[] {
-  const collected = flattenIncoming(raw);
-  const next = compactLayout(collected);
-  if (next.length > 0) return next;
-  const fromProse = proseToBlocks(fallbackProse);
-  if (fromProse.length > 0) return fromProse;
-  const first = collected.find((block) => block.type === "term_card");
-  if (first?.type === "term_card") return [term(first.title, first.text, first.icon)];
-  return [];
+export function normalizeNoteBlocks(raw: unknown): VisualBlock[] {
+  return compactLayout(flattenIncoming(raw));
 }

@@ -52,11 +52,20 @@ export function ArtifactPanel({
   const [tab, setTab] = useState<TabId>("materials");
   const [materialId, setMaterialId] = useState<string | null>(null);
   const [sheetId, setSheetId] = useState<string | null>(null);
+  const [sheetError, setSheetError] = useState<string | null>(null);
   const [practiceId, setPracticeId] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
 
   useEffect(() => subscribeMaterials(projectId, setMaterials), [projectId]);
-  useEffect(() => subscribeStudySheets(projectId, setSheets), [projectId]);
+  useEffect(
+    () =>
+      subscribeStudySheets(
+        projectId,
+        setSheets,
+        (err) => setSheetError(err.message),
+      ),
+    [projectId],
+  );
   useEffect(() => subscribeChatMessages(projectId, setMessages), [projectId]);
   useEffect(() => {
     setProgress(loadPracticeProgress(projectId));
@@ -90,6 +99,7 @@ export function ArtifactPanel({
     }
     if (focus.kind === "sheet" || focus.kind === "plan") {
       setTab("sheets");
+      setSheetError(null);
       setSheetId(focus.id);
       return;
     }
@@ -111,12 +121,12 @@ export function ArtifactPanel({
   const selectedSet = practiceSets.find((item) => item.id === practiceId) ?? null;
 
   return (
-    <aside className="relative z-[1] flex h-full shrink-0 flex-col bg-transparent py-2 pl-1 pr-2" style={{ width }}>
+    <aside className="relative z-[1] flex h-full shrink-0 flex-col bg-transparent py-2 pl-1 pr-2 max-md:!w-full" style={{ width }}>
       <button
         type="button"
         aria-label="Resize panel"
         onMouseDown={onResizeStart}
-        className="absolute inset-y-0 left-0 z-10 w-2 cursor-col-resize"
+        className="absolute inset-y-0 left-0 z-10 hidden w-2 cursor-col-resize md:block"
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-transparent">
         {session ? (
@@ -186,7 +196,9 @@ export function ArtifactPanel({
                 <SheetsView
                   items={sheets}
                   selected={selectedSheet}
+                  error={sheetError}
                   onSelect={(id) => {
+                    setSheetError(null);
                     setSheetId(id);
                     const sheet = sheets.find((item) => item.id === id);
                     if (sheet) {
@@ -339,14 +351,20 @@ function MaterialsView({
 function SheetsView({
   items,
   selected,
+  error,
   onSelect,
   onBack,
 }: {
   items: StudySheet[];
   selected: StudySheet | null;
+  error: string | null;
   onSelect: (id: string) => void;
   onBack: () => void;
 }) {
+  if (error && items.length === 0) {
+    return <EmptyState title="Could not save notes" body={error} />;
+  }
+
   if (items.length === 0) {
     return (
       <EmptyState title="No notes yet" body="Ask for notes in chat and they will open here." />
@@ -366,6 +384,7 @@ function SheetsView({
 
   return (
     <div className="space-y-1 px-3 py-3">
+      {error ? <p className="px-3 pb-2 text-xs text-red-400">{error}</p> : null}
       {items.map((item) => (
         <button
           key={item.id}

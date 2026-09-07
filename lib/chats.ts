@@ -11,11 +11,13 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { DEFAULT_CHAT_THREAD_ID } from "@/lib/core/constants";
-import { COLLECTIONS } from "@/lib/firestore";
+import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
+import { compactChatAttachment } from "@/lib/composer/attach";
+import { parseChatArtifact, compactChatArtifact } from "@/lib/artifacts/active";
 import { getFirebaseDb } from "@/lib/firebase";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { isComposerIntent } from "@/lib/composer/intent";
-import type { ChatArtifact, ChatAttachment, ChatMessage, ChatMode, ChatRole } from "@/types/chat";
+import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole } from "@/types/chat";
 import type { ExerciseType } from "@/types/exercise";
 
 function chatRef(projectId: string, threadId = DEFAULT_CHAT_THREAD_ID) {
@@ -73,6 +75,9 @@ function mapMessage(
         : null,
     intent: isComposerIntent(data.intent) ? data.intent : null,
     artifact: asArtifact(data.artifact),
+    options: asOptions(data.options, data.clarify),
+    pendingKind: data.pendingKind === "sheet" || data.pendingKind === "practice" ? data.pendingKind : undefined,
+    images: asImages(data.images),
     createdAt: toIsoDate(data.createdAt) ?? toIsoDate(data.createdAtClient),
   };
 }
@@ -82,32 +87,46 @@ function asAttachments(value: unknown): ChatAttachment[] {
   return value.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
-    const title = typeof row.title === "string" ? row.title.trim() : "";
-    if (!title) return [];
-    const type = typeof row.type === "string" && row.type.trim() ? row.type.trim() : "file";
-    return [
-      {
-        title,
-        type,
-        materialId: typeof row.materialId === "string" ? row.materialId : undefined,
-        storagePath: typeof row.storagePath === "string" ? row.storagePath : undefined,
-      },
-    ];
+    const next = compactChatAttachment({
+      title: typeof row.title === "string" ? row.title : "",
+      type: typeof row.type === "string" ? row.type : "file",
+      materialId: typeof row.materialId === "string" ? row.materialId : undefined,
+      storagePath: typeof row.storagePath === "string" ? row.storagePath : undefined,
+    });
+    return next ? [next] : [];
   });
 }
 
+function asOptions(value: unknown, clarify: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+  }
+  if (clarify === true) return [];
+  return undefined;
+}
+
+function asImages(value: unknown): ChatImageHit[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const hits = value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const url = typeof row.url === "string" ? row.url.trim() : "";
+    if (!url) return [];
+    return [
+      {
+        url,
+        title: typeof row.title === "string" && row.title.trim() ? row.title.trim() : url,
+        source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : "web",
+        pageUrl: typeof row.pageUrl === "string" ? row.pageUrl.trim() || undefined : undefined,
+        thumb: typeof row.thumb === "string" ? row.thumb.trim() || undefined : undefined,
+      },
+    ];
+  });
+  return hits.length ? hits : undefined;
+}
+
 function asArtifact(value: unknown): ChatArtifact | null {
-  if (!value || typeof value !== "object") return null;
-  const row = value as Record<string, unknown>;
-  if (row.kind !== "plan" && row.kind !== "sheet" && row.kind !== "practice") return null;
-  if (typeof row.id !== "string" || typeof row.title !== "string") return null;
-  return {
-    kind: row.kind,
-    id: row.id,
-    title: row.title,
-    count: typeof row.count === "number" ? row.count : undefined,
-    ids: Array.isArray(row.ids) ? row.ids.filter((item): item is string => typeof item === "string") : undefined,
-  };
+  return parseChatArtifact(value);
 }
 
 export async function ensureChatThread(input: {
@@ -153,24 +172,37 @@ export async function addChatMessage(input: {
   intent?: ChatMessage["intent"];
   artifact?: ChatArtifact | null;
   attachments?: ChatAttachment[];
+  options?: string[];
+  pendingKind?: "practice" | "sheet";
+  images?: ChatImageHit[];
 }): Promise<string> {
   const threadId = input.threadId ?? DEFAULT_CHAT_THREAD_ID;
   const createdAtClient = new Date().toISOString();
-  const ref = await addDoc(messagesCollection(input.projectId, threadId), {
-    projectId: input.projectId,
-    threadId,
-    lessonId: null,
-    exerciseId: null,
-    role: input.role,
-    mode: input.mode,
-    content: input.content,
-    attachments: input.attachments ?? [],
-    intent: input.intent ?? null,
-    artifact: input.artifact ?? null,
-    relatedExerciseType: null,
-    createdAt: createdAtClient,
-    createdAtClient,
+  const attachments = (input.attachments ?? []).flatMap((item) => {
+    const next = compactChatAttachment(item);
+    return next ? [next] : [];
   });
+  const ref = await addDoc(
+    messagesCollection(input.projectId, threadId),
+    omitUndefined({
+      projectId: input.projectId,
+      threadId,
+      lessonId: null,
+      exerciseId: null,
+      role: input.role,
+      mode: input.mode,
+      content: input.content,
+      attachments,
+      intent: input.intent ?? null,
+      artifact: compactChatArtifact(input.artifact),
+      relatedExerciseType: null,
+      createdAt: createdAtClient,
+      createdAtClient,
+      ...(input.options !== undefined ? { options: input.options, clarify: true } : {}),
+      ...(input.pendingKind ? { pendingKind: input.pendingKind } : {}),
+      ...(input.images?.length ? { images: input.images } : {}),
+    }),
+  );
 
   await updateDoc(chatRef(input.projectId, threadId), {
     updatedAt: serverTimestamp(),

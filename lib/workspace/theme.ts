@@ -1,6 +1,6 @@
 export const THEME_KEY = "tv.theme";
 
-export const THEMES = ["light", "dark", "razer", "coffee"] as const;
+export const THEMES = ["light", "dark", "razer", "crimson", "coffee"] as const;
 
 export type ThemeId = (typeof THEMES)[number];
 
@@ -25,12 +25,17 @@ export const THEME_OPTIONS: { id: ThemeId; label: string; preview: ThemePreview 
   {
     id: "razer",
     label: "Razer",
-    preview: { bg: "#050705", sidebar: "#101410", text: "#f4f7f4", muted: "#2a4a32" },
+    preview: { bg: "#0a0a0a", sidebar: "#161616", text: "#ececec", muted: "#00ff00" },
+  },
+  {
+    id: "crimson",
+    label: "Crimson",
+    preview: { bg: "#0a0a0a", sidebar: "#161616", text: "#ececec", muted: "#ff0000" },
   },
   {
     id: "coffee",
     label: "Coffee",
-    preview: { bg: "#f7efe6", sidebar: "#ead9c6", text: "#2c1810", muted: "#d2b496" },
+    preview: { bg: "#f7eee4", sidebar: "#ffffff", text: "#2c1810", muted: "#e2d0bc" },
   },
 ];
 

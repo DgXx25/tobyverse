@@ -11,10 +11,17 @@ export {
 } from "@/lib/exercises/templates";
 export {
   planExerciseSet,
+  planPracticeSet,
+  planExerciseSetFromRecipe,
+  practiceFamilyForTopic,
+  practiceFamilyFromTypes,
   choosePracticeSetSize,
   EXERCISE_SET_CAP,
   FREE_PRACTICE_SET_CAP,
   PRACTICE_SET_SIZES,
+  GENERABLE_EXERCISE_TYPES,
+  CLICK_FIRST_TYPES,
+  type PracticeFamily,
 } from "@/lib/exercises/plan";
 export { gradeObjective, isObjectiveType, isProblemTypeForHints } from "@/lib/exercises/grade";
 export {

@@ -17,10 +17,10 @@ export function ProjectNav({
   return (
     <aside className="flex h-full w-[220px] shrink-0 flex-col border-r border-border bg-background">
       <div className="border-b border-border px-3 py-3">
-        <Link href="/dashboard" className="text-[11px] font-medium tracking-tight text-foreground">
+        <Link href="/" className="text-[11px] font-medium tracking-tight text-foreground">
           TobyVerse
         </Link>
-        <Link href="/dashboard" className="mt-2 block text-[11px] text-muted hover:text-foreground">
+        <Link href="/" className="mt-2 block text-[11px] text-muted hover:text-foreground">
           ← Projects
         </Link>
         <h1 className="mt-2 truncate text-sm font-medium tracking-tight text-foreground">

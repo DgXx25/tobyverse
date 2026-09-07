@@ -4,9 +4,12 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Sidebar } from "@/components/sidebar";
+import { MobileTopBar } from "@/components/mobile-top-bar";
+import { AccountSheet } from "@/components/account-sheet";
 import { AnalyticsSession } from "@/components/analytics-session";
-import { ShellProvider } from "@/components/workspace/shell-context";
+import { ShellProvider, useShell } from "@/components/workspace/shell-context";
 import { SettingsModal } from "@/components/workspace/settings-modal";
+import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, configured } = useAuth();
@@ -14,13 +17,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && !user) {
+      writeSignedInCookie(false);
       router.replace("/login");
     }
   }, [loading, user, router]);
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted">
+      <div className="flex min-h-dvh items-center justify-center bg-background text-sm text-muted">
         Loading…
       </div>
     );
@@ -28,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!configured) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-6 text-center text-sm text-muted">
+      <div className="flex min-h-dvh items-center justify-center bg-background px-6 text-center text-sm text-muted">
         Add Firebase keys to <span className="mx-1 font-mono text-foreground">.env.local</span> to continue.
       </div>
     );
@@ -40,15 +44,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ShellProvider>
-      <div className="app-shell flex h-screen overflow-hidden">
-        <div className="app-wallpaper" aria-hidden />
-        <AnalyticsSession userId={user.uid} />
-        <Sidebar />
-        <main className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
-          {children}
-        </main>
-        <SettingsModal />
-      </div>
+      <AppShellFrame userId={user.uid}>{children}</AppShellFrame>
     </ShellProvider>
+  );
+}
+
+function AppShellFrame({ userId, children }: { userId: string; children: React.ReactNode }) {
+  const { mobileNavOpen } = useShell();
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!mobileNavOpen) {
+      root.classList.remove("nav-lock");
+      return;
+    }
+    root.classList.add("nav-lock");
+    return () => root.classList.remove("nav-lock");
+  }, [mobileNavOpen]);
+
+  return (
+    <div className="app-shell flex h-dvh overflow-hidden">
+      <div className="app-wallpaper" aria-hidden />
+      <AnalyticsSession userId={userId} />
+      <Sidebar />
+      <main className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
+        <MobileTopBar />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+      </main>
+      <SettingsModal />
+      <AccountSheet />
+    </div>
   );
 }

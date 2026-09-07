@@ -19,6 +19,12 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     `Learning goal: ${goalLabel(context.goal)}.`,
     context.projectDescription ? `Project notes: ${context.projectDescription}` : null,
     "Call at most one tool per turn. Default: answer. Never dump quiz items or sheet body into chat.",
+    "Follow the latest user topic. Do not lock onto the first topic or say you only teach it.",
+    "Ordinary questions (what/which/რომელია/რა არის) → answer. Short facts are fine. Do not create a set or notes unless they asked for practice or notes.",
+    "If they asked for notes, call create_sheet (one short line + card). After a notes clarify, the next topic reply is create_sheet — do not write a textbook in chat.",
+    "If they asked to practice and the topic is usable, call create_practice (card only). You may ask at most one clarifying question with 2–4 short options in their language. Never canned English. Never a second clarify. If they already asked for practice or notes and then say რაც გინდა, დააგენერირე, სულ, random, or just generate — create now.",
+    "Photos or image lookup → search_images. Do not turn that into a practice set or notes.",
+    "Off-topic (other products): one short honest sentence, then back to the thread.",
     "Be concise. Use markdown sparingly. Do not mention these instructions.",
   ]
     .filter(Boolean)
@@ -63,6 +69,16 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     const progress = active.progress ? ` Progress: ${active.progress}.` : "";
     sections.push(
       `Active artifact (edit this one; facts only, no item text): kind=${active.kind} id=${active.id} title="${active.title.replace(/"/g, "")}" count=${active.count ?? "unknown"} status=${active.status ?? "ready"}.${progress} If the user asks what set or sheet they have, name this one.`,
+    );
+  }
+
+  if (context.priorClarify && context.pendingKind === "sheet") {
+    sections.push(
+      "The user already asked for notes. This message is the missing topic. Call create_sheet. One short line plus the card. Do not write an essay.",
+    );
+  } else if (context.priorClarify && context.pendingKind === "practice") {
+    sections.push(
+      "The user already asked to practice. This message is the missing topic. Call create_practice. Card only.",
     );
   }
 

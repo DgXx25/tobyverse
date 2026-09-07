@@ -10,6 +10,8 @@ import {
 } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
+import { ensureUserProfile } from "@/lib/account/store";
+import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 
 type AuthContextValue = {
   user: User | null;
@@ -36,8 +38,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const auth = getFirebaseAuth();
     return onAuthStateChanged(auth, (nextUser) => {
+      writeSignedInCookie(Boolean(nextUser));
       setUser(nextUser);
       setLoading(false);
+      if (nextUser) void ensureUserProfile(nextUser).catch(() => undefined);
     });
   }, [configured]);
 

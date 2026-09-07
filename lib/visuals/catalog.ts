@@ -115,6 +115,38 @@ const ELEMENTS = new Map(ELEMENT_LIST.map((item) => [item.toUpperCase(), item]))
 export const CATALOG_ICON_IDS = Object.keys(ICONS);
 export const CATALOG_ELEMENT_IDS = ELEMENT_LIST;
 
+const LABEL_ICONS: Array<[RegExp, string]> = [
+  [/prokaryot|პროკარიოტ|bacter|ბაქტერ/i, "bug"],
+  [/eukaryot|ევკარიოტ/i, "brain"],
+  [/virus|ვირუს/i, "virus"],
+  [/dna|დნმ/i, "dna"],
+  [/nucleus|ბირთვ/i, "atom"],
+  [/cell|უჯრედ/i, "cell"],
+  [/leaf|ფოთოლ|plant|მცენარ/i, "leaf"],
+  [/heart|გულ/i, "heart"],
+  [/lung|ფილტვ/i, "lungs"],
+  [/atom|ატომ|molecule|მოლეკულ/i, "atom"],
+  [/brain|ტვინ/i, "brain"],
+  [/bone|ძვლ/i, "bone"],
+  [/water|წყალ|membrane|მემბრან/i, "droplet"],
+  [/flask|ლაბ|chem|ქიმ/i, "flask"],
+  [/energy|ენერგ|zap|ელექტრ/i, "zap"],
+  [/warning|საფრთხ/i, "warning"],
+  [/shield|დაცვ|immune|იმუნ/i, "shield"],
+];
+
+/** Known catalog id, or null when the name is unknown (caller shows a generic mark). */
+export function catalogIconId(name?: string | null, label?: string | null): string | null {
+  const key = name?.trim().toLowerCase();
+  if (key) return ICONS[key] ? key : null;
+  const hay = label?.trim() ?? "";
+  if (!hay) return null;
+  for (const [pattern, id] of LABEL_ICONS) {
+    if (pattern.test(hay)) return id;
+  }
+  return null;
+}
+
 export function isCatalogKind(value: unknown): value is CatalogKind {
   return typeof value === "string" && (CATALOG_KINDS as readonly string[]).includes(value);
 }

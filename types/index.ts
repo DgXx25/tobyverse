@@ -1,5 +1,6 @@
 export type { EntityId, IsoDateString } from "@/types/common";
-export type { AppUser, UserProfile } from "@/types/user";
+export type { AppUser, UserPlan, UserProfile, UserUsage } from "@/types/user";
+export { USER_PLANS } from "@/types/user";
 export { PROJECT_GOALS, type ProjectGoal } from "@/types/goals";
 export type {
   Project,
@@ -11,10 +12,12 @@ export type {
 export type { Lesson, LessonRecipe, LessonStatus } from "@/types/lesson";
 export {
   CHAT_MODES,
+  CHAT_ARTIFACT_KINDS,
   type ChatMode,
   type ChatRole,
   type ChatThread,
   type ChatMessage,
+  type ChatImageHit,
   type ChatAttachment,
   type ChatArtifact,
   type ChatArtifactKind,

@@ -9,7 +9,9 @@ export type ChatRole = "user" | "assistant" | "system";
 
 export const CHAT_ARTIFACT_KINDS = ["plan", "sheet", "practice"] as const;
 
-export type ChatArtifactKind = (typeof CHAT_ARTIFACT_KINDS)[number];
+export type KnownChatArtifactKind = (typeof CHAT_ARTIFACT_KINDS)[number];
+/** Known kinds plus any future tool card (append to CHAT_ARTIFACT_KINDS when it ships). */
+export type ChatArtifactKind = KnownChatArtifactKind | (string & {});
 
 export type ChatArtifact = {
   kind: ChatArtifactKind;
@@ -44,7 +46,19 @@ export type ChatMessage = {
   relatedExerciseType: ExerciseType | null;
   intent: "ask" | "plan" | "study" | "practice" | "edit" | "append" | "regenerate_one" | "rewrite_sheet" | null;
   artifact: ChatArtifact | null;
+  /** Present on a clarify turn, including []. */
+  options?: string[];
+  pendingKind?: "practice" | "sheet";
+  images?: ChatImageHit[];
   createdAt: IsoDateString | null;
+};
+
+export type ChatImageHit = {
+  url: string;
+  title: string;
+  source: string;
+  pageUrl?: string;
+  thumb?: string;
 };
 
 export type ChatAttachment = {
@@ -85,7 +99,7 @@ export type ChatGenerationContext = {
   artifacts?: ChatArtifact[];
   latestArtifact?: ChatArtifact | null;
   activeArtifact?: {
-    kind: "practice_set" | "study_sheet";
+    kind: string;
     id: string;
     title: string;
     count?: number;
@@ -95,6 +109,9 @@ export type ChatGenerationContext = {
   hasMaterials?: boolean;
   confirmed?: boolean;
   acceptedTool?: "create_practice" | "create_sheet";
+  priorClarify?: boolean;
+  pendingTopic?: string;
+  pendingKind?: "practice" | "sheet";
   materials: ChatMaterialContext[];
   figures?: ChatFigureContext[];
   knowledgeItems: ChatKnowledgeContext[];

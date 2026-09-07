@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
-import { storageDownloadUrl } from "@/lib/materials/storage";
+import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
 import type { ChatAttachment } from "@/types/chat";
 
 export function MessageAttachments({ items }: { items: ChatAttachment[] }) {
@@ -33,7 +33,7 @@ function AttachmentChip({ item }: { item: ChatAttachment }) {
 function ImageThumb({ path, title }: { path: string; title: string }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!path.startsWith("users/")) return;
+    if (!path.startsWith("users/") || isMissingMaterialFile(path)) return;
     let objectUrl: string | null = null;
     let cancelled = false;
     storageDownloadUrl(path)

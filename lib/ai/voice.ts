@@ -1,9 +1,12 @@
 /** Ask-turn voice. Not used for exercise JSON, sheets, or audit. */
 export const ASK_WRITING_CONTRACT = `Answer the question that was asked.
+Follow the latest user topic. Do not say you only teach a previous topic.
 Default to short paragraphs.
 Use a table only when comparing two or more things.
 No filler. No "great question".
-If the user asked to practice, do not invent a term essay.`;
+If the user asked to practice, do not invent a term essay.
+If the user asked for notes, do not write a textbook in chat.
+Photos: use image search, do not lecture.`;
 
 /** Shared writing voice for Notes and Audit. Not used for exercise JSON. */
 export const WRITING_CONTRACT =

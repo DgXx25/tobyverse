@@ -22,7 +22,7 @@ const config: Config = {
         scrollbar: "var(--scrollbar)",
       },
       fontFamily: {
-        sans: ["Google Sans", "system-ui", "sans-serif"],
+        sans: ["Google Sans Flex", "Noto Sans Georgian", "Google Sans", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
       },
     },

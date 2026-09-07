@@ -4,7 +4,9 @@ import type { ProjectGoal } from "@/types/goals";
 import type { LessonRecipe } from "@/types/lesson";
 
 export const ACTIVE_ARTIFACT_KINDS = ["practice_set", "study_sheet"] as const;
-export type ActiveArtifactKind = (typeof ACTIVE_ARTIFACT_KINDS)[number];
+export type KnownActiveArtifactKind = (typeof ACTIVE_ARTIFACT_KINDS)[number];
+/** Known kinds plus a generic { kind, id, title } for future tools. */
+export type ActiveArtifactKind = KnownActiveArtifactKind | (string & {});
 export type ActiveArtifactStatus = "ready" | "open" | "in_progress";
 
 export type ActiveArtifact = {

@@ -10,6 +10,7 @@ export const termCardFieldsSchema = z.object({
   title: short,
   text: phrase,
   icon,
+  iconName: icon,
 });
 
 export const termCardSchema = termCardFieldsSchema.extend({

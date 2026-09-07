@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import { attachFileKey, fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
 import { formatBytes } from "@/lib/format";
@@ -20,35 +20,39 @@ export type ComposerChip = {
   storagePath?: string;
 };
 
-export function ChatComposer({
-  draft,
-  onDraft,
-  sending,
-  error,
-  chips,
-  onRemoveChip,
-  onSend,
-  onFile,
-  onPasteText,
-  onUrl,
-  placeholder = "Ask anything",
-}: {
-  draft: string;
-  onDraft: (value: string) => void;
-  sending: boolean;
-  error: string | null;
-  chips: ComposerChip[];
-  onRemoveChip: (id: string) => void;
-  onSend: () => void;
-  onFile: (file: File) => void;
-  onPasteText: (text: string) => void;
-  onUrl: (url: string) => void;
-  placeholder?: string;
-}) {
+export type ChatComposerHandle = {
+  focus: () => void;
+};
+
+export const ChatComposer = forwardRef<
+  ChatComposerHandle,
+  {
+    draft: string;
+    onDraft: (value: string) => void;
+    sending: boolean;
+    error: string | null;
+    chips: ComposerChip[];
+    onRemoveChip: (id: string) => void;
+    onSend: () => void;
+    onFile: (file: File) => void;
+    onPasteText: (text: string) => void;
+    onUrl: (url: string) => void;
+    placeholder?: string;
+  }
+>(function ChatComposer(
+  { draft, onDraft, sending, error, chips, onRemoveChip, onSend, onFile, onPasteText, onUrl, placeholder = "Ask anything" },
+  ref,
+) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const lastDropRef = useRef<{ at: number; keys: Set<string> }>({ at: 0, keys: new Set() });
   const [dropOver, setDropOver] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    focus() {
+      areaRef.current?.focus();
+    },
+  }));
 
   useEffect(() => {
     const node = areaRef.current;
@@ -64,6 +68,7 @@ export function ChatComposer({
     event?.preventDefault();
     if (!canSend) return;
     onSend();
+    requestAnimationFrame(() => areaRef.current?.focus());
   }
 
   function onKey(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -149,7 +154,7 @@ export function ChatComposer({
       }}
       onDragLeave={() => setDropOver(false)}
       onDrop={onDrop}
-      className="px-4 pb-5 pt-2"
+      className="composer-pad px-4 pt-2"
     >
       <div
         className={`rounded-[28px] border bg-surface-2 px-3 py-2 ${
@@ -200,8 +205,7 @@ export function ChatComposer({
           onPaste={onPaste}
           placeholder={placeholder}
           rows={1}
-          disabled={sending}
-          className="max-h-[160px] min-h-[40px] w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted/80 disabled:opacity-60"
+          className="max-h-[160px] min-h-[40px] w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted"
         />
         <div className="flex items-center gap-1 pb-0.5">
           <input
@@ -236,4 +240,6 @@ export function ChatComposer({
       {error ? <p className="mt-2 px-1 text-xs text-red-400">{error}</p> : null}
     </form>
   );
-}
+});
+
+ChatComposer.displayName = "ChatComposer";

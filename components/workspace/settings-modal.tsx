@@ -1,32 +1,39 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { useAuth } from "@/components/auth-provider";
+import { useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useShell, type SettingsSection } from "@/components/workspace/shell-context";
-import { useTheme } from "@/components/workspace/theme-provider";
+import { ThemePicker } from "@/components/workspace/theme-picker";
+import { BillingCard } from "@/components/account/billing-card";
+import { UsageMeters } from "@/components/account/usage-meters";
+import { AccountDataControls } from "@/components/account/data-controls";
+import { useUserProfile } from "@/components/account/use-user-profile";
+import { emptyUsage } from "@/lib/account/plan";
 import {
   IconAccount,
   IconAppearance,
   IconBilling,
+  IconData,
   IconHelp,
+  IconUsage,
   IconX,
 } from "@/components/workspace/icons";
-import { THEME_OPTIONS, type ThemePreview } from "@/lib/workspace/theme";
 
 const NAV: { id: SettingsSection; label: string; group: string; icon: ReactNode }[] = [
   { id: "account", label: "Account", group: "General", icon: <IconAccount className="h-[18px] w-[18px]" /> },
   { id: "appearance", label: "Appearance", group: "General", icon: <IconAppearance className="h-[18px] w-[18px]" /> },
   { id: "help", label: "Help", group: "TobyVerse", icon: <IconHelp className="h-[18px] w-[18px]" /> },
-  { id: "upgrade", label: "Upgrade", group: "TobyVerse", icon: <IconBilling className="h-[18px] w-[18px]" /> },
+  { id: "billing", label: "Billing", group: "Payments", icon: <IconBilling className="h-[18px] w-[18px]" /> },
+  { id: "usage", label: "Usage", group: "Payments", icon: <IconUsage className="h-[18px] w-[18px]" /> },
+  { id: "data", label: "Data", group: "Data & Information", icon: <IconData className="h-[18px] w-[18px]" /> },
 ];
 
-const GROUPS = ["General", "TobyVerse"];
+const GROUPS = ["General", "TobyVerse", "Payments", "Data & Information"];
 
 export function SettingsModal() {
-  const { user } = useAuth();
-  const { settingsOpen, settingsSection, openSettings, closeSettings, projectSettings } = useShell();
-  const { theme, setTheme } = useTheme();
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const router = useRouter();
+  const { settingsOpen, settingsSection, openSettings, closeSettings } = useShell();
+  const { profile } = useUserProfile();
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -37,14 +44,19 @@ export function SettingsModal() {
     return () => window.removeEventListener("keydown", onKey);
   }, [settingsOpen, closeSettings]);
 
-  useEffect(() => {
-    setConfirmDelete(false);
-  }, [settingsSection, settingsOpen]);
-
   if (!settingsOpen) return null;
 
+  function onNav(id: SettingsSection) {
+    if (id === "account") {
+      closeSettings();
+      router.push("/account");
+      return;
+    }
+    openSettings(id);
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4" onClick={closeSettings}>
+    <div className="fixed inset-0 z-50 hidden items-center justify-center bg-overlay p-4 md:flex" onClick={closeSettings}>
       <div
         role="dialog"
         aria-modal="true"
@@ -62,7 +74,7 @@ export function SettingsModal() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => openSettings(item.id)}
+                    onClick={() => onNav(item.id)}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] ${
                       active ? "bg-surface-2 text-foreground" : "text-foreground/90 hover:bg-surface-2/70"
                     }`}
@@ -89,45 +101,17 @@ export function SettingsModal() {
           {settingsSection === "account" && (
             <div>
               <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Account</h2>
-              <div className="mt-6 divide-y divide-border">
-                <div className="flex items-center justify-between py-5">
-                  <div className="flex items-center gap-3">
-                    <Avatar src={user?.photoURL} name={user?.displayName || user?.email} />
-                    <div>
-                      <p className="text-[15px] font-medium text-foreground">{user?.displayName || "Signed in"}</p>
-                      <p className="text-[13px] text-muted">{user?.email}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {projectSettings && (
-                  <div className="py-5">
-                    <p className="text-[15px] text-foreground">Delete current project</p>
-                    <p className="mt-1 truncate text-[13px] text-muted">{projectSettings.projectTitle}</p>
-                    <p className="mt-1 text-[13px] text-muted">Removes chat, materials, notes, and exercises.</p>
-                    {projectSettings.deleteError && (
-                      <p className="mt-2 text-[13px] text-red-400">{projectSettings.deleteError}</p>
-                    )}
-                    {confirmDelete ? (
-                      <div className="mt-4 flex gap-2">
-                        <GhostButton onClick={() => setConfirmDelete(false)}>Cancel</GhostButton>
-                        <button
-                          type="button"
-                          onClick={projectSettings.onDelete}
-                          disabled={projectSettings.deleting}
-                          className="rounded-lg border border-red-500/40 px-3 py-1.5 text-[13px] text-red-400 hover:bg-red-500/10"
-                        >
-                          {projectSettings.deleting ? "Deleting…" : "Confirm delete"}
-                        </button>
-                      </div>
-                    ) : (
-                      <GhostButton className="mt-4" onClick={() => setConfirmDelete(true)}>
-                        Delete
-                      </GhostButton>
-                    )}
-                  </div>
-                )}
-              </div>
+              <p className="mt-6 text-[15px] leading-7 text-muted">Name, email, plan, and sign-in methods live on your account page.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  closeSettings();
+                  router.push("/account");
+                }}
+                className="mt-6 rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background"
+              >
+                Open account
+              </button>
             </div>
           )}
 
@@ -135,16 +119,8 @@ export function SettingsModal() {
             <div>
               <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Appearance</h2>
               <p className="mt-8 text-[15px] font-medium text-foreground">Theme</p>
-              <div className="mt-4 flex flex-wrap gap-4">
-                {THEME_OPTIONS.map((option) => (
-                  <ThemeCard
-                    key={option.id}
-                    label={option.label}
-                    preview={option.preview}
-                    selected={theme === option.id}
-                    onSelect={() => setTheme(option.id)}
-                  />
-                ))}
+              <div className="mt-4">
+                <ThemePicker />
               </div>
             </div>
           )}
@@ -156,79 +132,34 @@ export function SettingsModal() {
             </div>
           )}
 
-          {settingsSection === "upgrade" && (
+          {settingsSection === "billing" && (
             <div>
-              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Upgrade</h2>
-              <p className="mt-6 text-[15px] leading-7 text-muted">Plans are not available yet.</p>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Billing</h2>
+              <div className="mt-8 max-w-sm">
+                <BillingCard />
+              </div>
+            </div>
+          )}
+
+          {settingsSection === "usage" && (
+            <div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Usage</h2>
+              <div className="mt-8 max-w-md">
+                <UsageMeters usage={profile?.usage ?? emptyUsage()} />
+              </div>
+            </div>
+          )}
+
+          {settingsSection === "data" && (
+            <div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Data</h2>
+              <div className="mt-6">
+                <AccountDataControls />
+              </div>
             </div>
           )}
         </div>
       </div>
     </div>
-  );
-}
-
-function ThemeCard({
-  label,
-  preview,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  preview: ThemePreview;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button type="button" onClick={onSelect} aria-pressed={selected} className="w-[128px] text-center">
-      <div
-        className={`overflow-hidden rounded-xl border p-1 ${
-          selected ? "border-foreground" : "border-transparent hover:border-border"
-        }`}
-      >
-        <div className="flex h-[78px] overflow-hidden rounded-lg border border-black/10" style={{ background: preview.bg }}>
-          <div className="w-[30%] shrink-0" style={{ background: preview.sidebar }} />
-          <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-            <div className="h-1.5 w-9 rounded-full" style={{ background: preview.text, opacity: 0.9 }} />
-            <div className="h-1 w-full rounded-full" style={{ background: preview.muted }} />
-            <div className="h-1 w-[72%] rounded-full" style={{ background: preview.muted }} />
-            <div className="mt-auto h-4 w-full rounded" style={{ background: preview.sidebar }} />
-          </div>
-        </div>
-      </div>
-      <span className={`mt-2.5 block text-[13px] ${selected ? "text-foreground" : "text-muted"}`}>{label}</span>
-    </button>
-  );
-}
-
-function GhostButton({
-  children,
-  onClick,
-  className = "",
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-lg border border-border px-3 py-1.5 text-[13px] text-foreground hover:bg-surface-2 ${className}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Avatar({ src, name }: { src?: string | null; name?: string | null }) {
-  if (src) {
-    return <img src={src} alt="" className="h-11 w-11 rounded-full object-cover" />;
-  }
-  const letter = (name ?? "T").trim().charAt(0).toUpperCase();
-  return (
-    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-2 text-sm text-foreground">
-      {letter}
-    </span>
   );
 }

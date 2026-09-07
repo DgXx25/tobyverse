@@ -6,14 +6,14 @@ const RECIPES: Record<ProjectGoal, Omit<LessonRecipe, "id" | "goal">> = {
     theoryCount: 6,
     problemCount: 8,
     essayCount: 1,
-    theoryTypes: ["mcq", "true_false", "fill_blank"],
+    theoryTypes: ["mcq", "connect", "fill_blank"],
     problemTypes: ["problem_steps", "analysis"],
   },
   understand_topic: {
     theoryCount: 8,
     problemCount: 3,
     essayCount: 1,
-    theoryTypes: ["mcq", "connect", "true_false", "open_short"],
+    theoryTypes: ["mcq", "connect", "open_short"],
     problemTypes: ["problem_steps", "case_tree"],
   },
   deep_understanding: {
@@ -27,14 +27,14 @@ const RECIPES: Record<ProjectGoal, Omit<LessonRecipe, "id" | "goal">> = {
     theoryCount: 3,
     problemCount: 10,
     essayCount: 0,
-    theoryTypes: ["mcq", "true_false", "fill_blank"],
+    theoryTypes: ["mcq", "connect", "fill_blank"],
     problemTypes: ["problem_steps"],
   },
   review: {
     theoryCount: 8,
     problemCount: 4,
     essayCount: 0,
-    theoryTypes: ["mcq", "true_false", "connect"],
+    theoryTypes: ["mcq", "connect"],
     problemTypes: ["problem_steps", "analysis"],
   },
 };

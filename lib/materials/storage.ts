@@ -89,7 +89,20 @@ export async function uploadExtractedText(path: string, text: string) {
   await postStorageUpload(path, text, "text/plain; charset=utf-8");
 }
 
+const missingMaterialFiles = new Set<string>();
+
+export function isMissingMaterialFile(path: string): boolean {
+  return missingMaterialFiles.has(path);
+}
+
+function markMissingMaterialFile(path: string) {
+  missingMaterialFiles.add(path);
+}
+
 async function fetchMaterialFile(path: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+  if (missingMaterialFiles.has(path)) {
+    throw new Error("File not found.");
+  }
   const user = await requireSignedInUser();
   const parsed = parseMaterialStoragePath(path);
   if (!parsed || parsed.userId !== user.uid) {
@@ -110,6 +123,7 @@ async function fetchMaterialFile(path: string): Promise<{ bytes: Uint8Array; con
     throw new Error("Could not read file.");
   }
   if (!response.ok) {
+    if (response.status === 404) markMissingMaterialFile(path);
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error?.trim() || `Could not read file (${response.status}).`);
   }

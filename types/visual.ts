@@ -32,6 +32,7 @@ export type TermCardFields = {
   title: string;
   text: string;
   icon?: string;
+  iconName?: string;
 };
 
 export type TermCardVisual = {

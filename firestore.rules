@@ -1,6 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid} (Firebase Auth uid)
+    // Fields:
+    //   - plan: string (required, "free" only in beta, immutable after create)
+    //   - usage: map (required) weekStart string YYYY-MM-DD, chatTurns int,
+    //            practiceGenerated int, notesGenerated int, storageBytes number
+    //   - displayName: string|null (optional, <= 120)
+    //   - email: string|null (optional, <= 320)
+    //   - photoURL: string|null (optional, <= 2048)
+    //   - createdAt: timestamp (set on create, immutable)
+    //   - updatedAt: timestamp
+    //
+    // Collection: projects — existing owner-scoped project documents
+    // ===============================================================
+
     function signedIn() {
       return request.auth != null;
     }
@@ -9,9 +28,58 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email == "davit.gvakharia@gmail.com";
     }
 
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
     function ownsProject(projectId) {
       return signedIn() &&
         get(/databases/$(database)/documents/projects/$(projectId)).data.userId == request.auth.uid;
+    }
+
+    function isValidUsage(usage) {
+      return usage is map
+        && usage.keys().hasOnly(["weekStart", "chatTurns", "practiceGenerated", "notesGenerated", "storageBytes"])
+        && usage.weekStart is string
+        && usage.weekStart.matches("^\\d{4}-\\d{2}-\\d{2}$")
+        && usage.chatTurns is number && usage.chatTurns >= 0 && usage.chatTurns <= 1000000
+        && usage.practiceGenerated is number && usage.practiceGenerated >= 0 && usage.practiceGenerated <= 1000000
+        && usage.notesGenerated is number && usage.notesGenerated >= 0 && usage.notesGenerated <= 1000000
+        && usage.storageBytes is number && usage.storageBytes >= 0 && usage.storageBytes <= 1099511627776;
+    }
+
+    function isValidOptionalText(data, field, maxLen) {
+      return !(field in data)
+        || data[field] == null
+        || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasOnly(["displayName", "email", "photoURL", "plan", "usage", "createdAt", "updatedAt"])
+        && data.keys().hasAll(["plan", "usage"])
+        && data.plan == "free"
+        && isValidUsage(data.usage)
+        && isValidOptionalText(data, "displayName", 120)
+        && isValidOptionalText(data, "email", 320)
+        && isValidOptionalText(data, "photoURL", 2048)
+        && (!("createdAt" in data) || data.createdAt is timestamp || data.createdAt is string)
+        && (!("updatedAt" in data) || data.updatedAt is timestamp || data.updatedAt is string);
+    }
+
+    function userPlanLocked() {
+      return request.resource.data.plan == "free"
+        && (!("plan" in resource.data) || resource.data.plan == request.resource.data.plan);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId)
+        && isValidUser(request.resource.data)
+        && userPlanLocked()
+        && (!("createdAt" in resource.data)
+          || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isOwner(userId);
     }
 
     match /projects/{projectId} {

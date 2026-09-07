@@ -4,6 +4,7 @@ import {
   SchemaType,
   type Content,
   type FunctionDeclaration,
+  type FunctionDeclarationSchemaProperty,
   type Part,
 } from "@google/generative-ai";
 import type { ChatTurn } from "@/types/chat";
@@ -36,13 +37,19 @@ function toContents(prompt: string, history: ChatTurn[] = [], images: GenerateOp
 
 function toGeminiDeclarations(): FunctionDeclaration[] {
   return CHAT_TOOL_DEFINITIONS.map((def) => {
-    const properties: Record<string, { type: typeof SchemaType.STRING; description: string } | { type: typeof SchemaType.INTEGER; description: string }> =
-      {};
+    const properties: Record<string, FunctionDeclarationSchemaProperty> = {};
     for (const [key, spec] of Object.entries(def.parameters.properties)) {
-      properties[key] =
-        spec.type === "integer"
-          ? { type: SchemaType.INTEGER, description: spec.description }
-          : { type: SchemaType.STRING, description: spec.description };
+      if (spec.type === "integer") {
+        properties[key] = { type: SchemaType.INTEGER, description: spec.description };
+      } else if (spec.type === "array") {
+        properties[key] = {
+          type: SchemaType.ARRAY,
+          description: spec.description,
+          items: { type: SchemaType.STRING },
+        };
+      } else {
+        properties[key] = { type: SchemaType.STRING, description: spec.description };
+      }
     }
     const declaration: FunctionDeclaration = {
       name: def.name,

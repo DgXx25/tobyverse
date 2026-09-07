@@ -97,41 +97,38 @@ export function StartScreen() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-24">
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6">
         <h1 className="text-center text-[32px] font-medium tracking-tight text-foreground">
-          What do you want to learn?
+          რას ვისწავლოთ?
         </h1>
-        <p className="mt-3 max-w-md text-center text-sm leading-6 text-muted">
-          Ask anything, or attach a file. Practice and notes appear as cards when you ask for them.
-        </p>
-        <div className="mt-10 w-full max-w-2xl">
-          <ChatComposer
-            draft={draft}
-            onDraft={setDraft}
-            sending={sending || loading}
-            error={error}
-            chips={chips}
-            onRemoveChip={(id) => {
-              setAttachments((current) => current.filter((item) => item.id !== id));
-              const url = previews[id];
-              if (url) URL.revokeObjectURL(url);
-              setPreviews((current) => {
-                const next = { ...current };
-                delete next[id];
-                return next;
-              });
-            }}
-            onSend={() => void start()}
-            onFile={addFile}
-            onPasteText={(text) =>
-              setAttachments((current) => [
-                ...current,
-                { id: newChipId(), kind: "paste", text, title: "Pasted notes" },
-              ])
-            }
-            onUrl={(url) => setAttachments((current) => [...current, { id: newChipId(), kind: "url", url }])}
-          />
-        </div>
+      </div>
+      <div className="mx-auto w-full max-w-2xl">
+        <ChatComposer
+          draft={draft}
+          onDraft={setDraft}
+          sending={sending || loading}
+          error={error}
+          chips={chips}
+          onRemoveChip={(id) => {
+            setAttachments((current) => current.filter((item) => item.id !== id));
+            const url = previews[id];
+            if (url) URL.revokeObjectURL(url);
+            setPreviews((current) => {
+              const next = { ...current };
+              delete next[id];
+              return next;
+            });
+          }}
+          onSend={() => void start()}
+          onFile={addFile}
+          onPasteText={(text) =>
+            setAttachments((current) => [
+              ...current,
+              { id: newChipId(), kind: "paste", text, title: "Pasted notes" },
+            ])
+          }
+          onUrl={(url) => setAttachments((current) => [...current, { id: newChipId(), kind: "url", url }])}
+        />
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { DEFAULT_AI_PROVIDER, isEnabledProvider } from "@/lib/ai/catalog";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
+import { parseChatArtifact } from "@/lib/artifacts/active";
 import { fallbackChatTool, gateChatTool } from "@/lib/composer/intent";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
 import { CHAT_MODES, type ChatArtifact, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
@@ -93,16 +94,19 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     hasMaterials: row.hasMaterials === true || (Array.isArray(row.materials) && row.materials.length > 0),
     confirmed: row.confirmed === true,
     acceptedTool: asAcceptedTool(row.acceptedTool),
+    priorClarify: row.priorClarify === true,
+    pendingTopic: typeof row.pendingTopic === "string" ? row.pendingTopic.trim() || undefined : undefined,
+    pendingKind: row.pendingKind === "sheet" ? "sheet" : row.pendingKind === "practice" ? "practice" : undefined,
   };
 }
 
 function asActive(value: unknown): ChatGenerationContext["activeArtifact"] {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
-  if (row.kind !== "practice_set" && row.kind !== "study_sheet") return null;
+  if (typeof row.kind !== "string" || !row.kind.trim()) return null;
   if (typeof row.id !== "string" || typeof row.title !== "string") return null;
   return {
-    kind: row.kind,
+    kind: row.kind.trim(),
     id: row.id,
     title: row.title,
     count: typeof row.count === "number" ? row.count : undefined,
@@ -135,19 +139,8 @@ function asFigures(value: unknown): ChatFigureContext[] {
 function asArtifacts(value: unknown): ChatArtifact[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const row = item as Record<string, unknown>;
-    if (row.kind !== "plan" && row.kind !== "sheet" && row.kind !== "practice") return [];
-    if (typeof row.id !== "string" || typeof row.title !== "string") return [];
-    return [
-      {
-        kind: row.kind,
-        id: row.id,
-        title: row.title,
-        count: typeof row.count === "number" ? row.count : undefined,
-        ids: Array.isArray(row.ids) ? row.ids.filter((id): id is string => typeof id === "string") : undefined,
-      },
-    ];
+    const parsed = parseChatArtifact(item);
+    return parsed ? [parsed] : [];
   });
 }
 
@@ -161,6 +154,9 @@ function gateFromContext(tool: ChatToolCall | null, prompt: string, context: Cha
     prompt,
     hasMaterials: Boolean(context.hasMaterials || context.materials.length > 0),
     confirmed: context.confirmed,
+    priorClarify: context.priorClarify,
+    pendingTopic: context.pendingTopic,
+    pendingKind: context.pendingKind,
     active: context.activeArtifact,
   });
 }
@@ -234,7 +230,8 @@ export async function POST(request: Request) {
           })) {
             if (part.tool && !raw) raw = part.tool;
             const preview = raw ? gateFromContext(raw, prompt, context) : null;
-            if (part.text && (!preview || toolStreamsText(preview.name))) {
+            const waitForTool = Boolean(context.priorClarify && context.pendingKind);
+            if (part.text && (!waitForTool || preview) && (!preview || toolStreamsText(preview.name))) {
               streamed = true;
               textChars += part.text.length;
               controller.enqueue(encodeSse({ delta: part.text }));
@@ -245,6 +242,9 @@ export async function POST(request: Request) {
             prompt,
             active: context.activeArtifact,
             accepted: context.acceptedTool,
+            priorClarify: context.priorClarify,
+            pendingTopic: context.pendingTopic,
+            pendingKind: context.pendingKind,
           });
           const preview = gateFromContext(raw, prompt, context);
           if (toolStreamsText(preview.name)) {
@@ -265,8 +265,22 @@ export async function POST(request: Request) {
         if ((tool.name === "suggest_practice" || tool.name === "suggest_sheet") && textChars < 280) {
           tool = { name: "answer", args: {} };
         }
-        if (tool.name === "clarify" && !streamed && tool.args.question) {
-          controller.enqueue(encodeSse({ delta: tool.args.question }));
+        if (toolStreamsText(tool.name) && !streamed) {
+          if (tool.name === "clarify" && tool.args.question) {
+            streamed = true;
+            controller.enqueue(encodeSse({ delta: tool.args.question }));
+          } else {
+            for await (const delta of generateTextStream(prompt, {
+              mode,
+              history,
+              systemInstruction,
+              images: context.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+            })) {
+              streamed = true;
+              textChars += delta.length;
+              controller.enqueue(encodeSse({ delta }));
+            }
+          }
         }
         controller.enqueue(encodeSse({ tool }));
         controller.enqueue(encodeSse({ done: true }));

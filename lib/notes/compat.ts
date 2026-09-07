@@ -1,4 +1,4 @@
-import { normalizeNoteBlocks } from "@/lib/notes/blocks";
+import { readNoteBlocks } from "@/lib/notes/blocks";
 import type { NoteSchemaVersion, StudySheet } from "@/types/study-sheet";
 
 const V1_TEXT_KEYS = [
@@ -63,7 +63,7 @@ export function mapNoteRecord(
 ): StudySheet {
   const rawBlocks = Array.isArray(data.blocks) ? data.blocks : data.visuals;
   const { content, sections, prose } = collectNoteProse(data);
-  const blocks = normalizeNoteBlocks(rawBlocks, prose);
+  const blocks = readNoteBlocks(rawBlocks);
   return {
     id,
     projectId,

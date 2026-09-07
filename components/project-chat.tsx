@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createChunkBuffer } from "@/lib/ai/chunk-stream";
 import { readChatSse } from "@/lib/ai/sse";
-import { isArtifactTool, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
+import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
+import { dispatchChatTool, dispatchStatus } from "@/lib/chat/dispatch";
 import { trackEvent } from "@/lib/analytics/track";
 import { addChatMessage, ensureChatThread, subscribeChatMessages } from "@/lib/chats";
+import { incrementUsage } from "@/lib/account/store";
 import { excerptsForChat } from "@/lib/materials/chat-context";
 import { pickChatFigures } from "@/lib/materials/figures";
 import { listMaterials, removeMaterial } from "@/lib/materials";
@@ -16,28 +18,27 @@ import {
   type PendingStart,
 } from "@/lib/workspace/pending-start";
 import { authHeaders } from "@/lib/api/client";
-import { getStudySheet } from "@/lib/study-sheets/store";
-import { generateStudySheetFromPrompt, rewriteStudySheetFromPrompt } from "@/lib/study-sheets/generate-client";
-import { generatePracticeSet } from "@/lib/exercises/generate-set";
-import { appendPracticeItems, regenerateOneItem, rewritePracticeItems } from "@/lib/exercises/mutate-client";
 import {
-  extractAppendCount,
   intentFromTool,
-  isMutationIntent,
+  pendingCreateFromMessages,
+  resolvePendingKind,
   type ComposerIntent,
 } from "@/lib/composer/intent";
 import { inferProjectGoal } from "@/lib/composer/goal";
 import { artifactFacts, historyTurnsFromMessages, latestArtifact } from "@/lib/composer/memory";
-import { activeToChatArtifact, chatArtifactToActive } from "@/lib/artifacts/active";
+import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { autoNameProject } from "@/lib/workspace/auto-title";
 import { isRealUserPrompt, needsAutoTitle } from "@/lib/workspace/title";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
 import { recipeForGoal } from "@/lib/core/recipes";
 import { updateProjectActiveArtifact, updateProjectGoal } from "@/lib/projects";
 import { RichContent } from "@/components/rich-content";
-import { ChatComposer, type ComposerChip } from "@/components/workspace/chat-composer";
+import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
+import { ClarifyChips } from "@/components/workspace/clarify-chips";
 import { MessageAttachments } from "@/components/workspace/message-attachments";
 import { ArtifactCard } from "@/components/workspace/artifact-card";
+import { ImageGallery } from "@/components/workspace/image-gallery";
+import { getStudySheet } from "@/lib/study-sheets/store";
 import type { AiProviderId } from "@/lib/ai/catalog";
 import type { ActiveArtifact, ActiveArtifactStatus, ChatArtifact, ChatAttachment, ChatMessage, ChatTurn, Project } from "@/types";
 import type { Material } from "@/types/material";
@@ -81,11 +82,13 @@ export function ProjectChat({
   const [chips, setChips] = useState<ComposerChip[]>([]);
   const [suggest, setSuggest] = useState<{ messageId: string; kind: "practice" | "sheet" } | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const composerBoxRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<ChatComposerHandle>(null);
   const pinRef = useRef(true);
   const sendingRef = useRef(false);
   const bootstrapped = useRef(false);
   const namedRef = useRef(false);
+  const [composerH, setComposerH] = useState(128);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,6 +126,30 @@ export function ProjectChat({
   }, [project.id]);
 
   useEffect(() => {
+    const node = composerBoxRef.current;
+    if (!node) return;
+    const sync = () => setComposerH(node.offsetHeight);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  function keepComposerFocus() {
+    composerRef.current?.focus();
+  }
+
+  function stickToBottom() {
+    const node = scrollerRef.current;
+    if (!node || !pinRef.current) return;
+    node.scrollTop = node.scrollHeight;
+  }
+
+  useLayoutEffect(() => {
+    stickToBottom();
+  }, [messages, stream, composerH]);
+
+  useEffect(() => {
     if (loading || namedRef.current) return;
     if (!needsAutoTitle(project.title)) {
       namedRef.current = true;
@@ -144,11 +171,6 @@ export function ProjectChat({
         namedRef.current = false;
       });
   }, [loading, messages, project.id, project.title, userId, onProjectPatch]);
-
-  useEffect(() => {
-    if (!pinRef.current) return;
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, stream]);
 
   useEffect(() => {
     if (loading || bootstrapped.current) return;
@@ -251,6 +273,8 @@ export function ProjectChat({
     const facts = artifactFacts(messages);
     const latest = latestArtifact(messages);
     const active = resolveActive();
+    const pending = pendingCreateFromMessages(messages);
+    const pendingKind = resolvePendingKind(input.prompt, pending);
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: await authHeaders(),
@@ -273,6 +297,9 @@ export function ProjectChat({
           hasMaterials: poolFrom().length > 0 || input.materialExcerpts.length > 0,
           confirmed: input.confirmed,
           acceptedTool: input.acceptedTool,
+          priorClarify: pending.priorClarify,
+          pendingTopic: pending.pendingTopic ?? undefined,
+          pendingKind: pendingKind ?? undefined,
         },
       }),
     });
@@ -280,7 +307,7 @@ export function ProjectChat({
     setStream({ content: "", intent: "ask", status: "Thinking" });
     let tool: ChatToolCall = { name: "answer", args: {} };
     const chunks = createChunkBuffer((text) => {
-      if (isArtifactTool(tool.name)) return;
+      if (!toolStreamsText(tool.name)) return;
       setStream({
         content: text,
         intent: intentFromTool(tool.name),
@@ -291,11 +318,12 @@ export function ProjectChat({
       onDelta: (delta) => chunks.push(delta),
       onTool: (next) => {
         tool = next;
-        if (isArtifactTool(next.name)) {
+        if (!toolStreamsText(next.name)) {
+          const intent = intentFromTool(next.name);
           setStream({
             content: "",
-            intent: intentFromTool(next.name),
-            status: workingLabel(intentFromTool(next.name)),
+            intent,
+            status: dispatchStatus(intent),
           });
         }
       },
@@ -312,6 +340,16 @@ export function ProjectChat({
   function poolFrom(override?: Material[]) {
     const source = override ?? materials;
     return selectedIds.length > 0 ? source.filter((item) => selectedIds.includes(item.id)) : source;
+  }
+
+  async function materialsForTurn(attachments: ChatAttachment[], override?: Material[]): Promise<Material[]> {
+    const attachedIds = attachments.flatMap((item) => (item.materialId ? [item.materialId] : []));
+    let source = override ?? materials;
+    if (attachedIds.some((id) => !source.some((item) => item.id === id))) {
+      source = await listMaterials(project.id);
+    }
+    if (selectedIds.length === 0) return source;
+    return source.filter((item) => selectedIds.includes(item.id) || attachedIds.includes(item.id));
   }
 
   function applyInferredGoal(text: string) {
@@ -347,106 +385,10 @@ export function ProjectChat({
     };
   }
 
-  function practiceIds(active: ActiveArtifact): string[] {
-    if (active.ids?.length) return active.ids;
-    const match = [...messages]
-      .reverse()
-      .find((item) => item.artifact?.kind === "practice" && item.artifact.id === active.id);
-    return match?.artifact?.ids?.length ? match.artifact.ids : [active.id];
-  }
-
   async function rememberActive(artifact: ChatArtifact, status: ActiveArtifactStatus = "ready") {
     const active = chatArtifactToActive(artifact, status);
     onProjectPatch?.({ activeArtifact: active });
     await updateProjectActiveArtifact(project.id, userId, active).catch(() => undefined);
-  }
-
-  async function runArtifactMutation(input: {
-    intent: ComposerIntent;
-    prompt: string;
-    pool: Material[];
-    appendCount: number;
-    onStatus: (status: string) => void;
-  }): Promise<ChatArtifact> {
-    const active = resolveActive();
-    if (!active) throw new Error("Open a set or sheet first.");
-
-    if (input.intent === "rewrite_sheet" || (input.intent === "edit" && active.kind === "study_sheet")) {
-      const sheet = await getStudySheet(project.id, active.id);
-      if (!sheet) throw new Error("Those notes are gone.");
-      input.onStatus("Updating…");
-      await rewriteStudySheetFromPrompt({
-        projectId: project.id,
-        sheetId: sheet.id,
-        projectTitle: project.title,
-        materials: input.pool,
-        prompt: input.prompt,
-        currentBlocks: sheet.blocks,
-        currentTitle: sheet.title,
-        currentContent: sheet.prose || sheet.content,
-      });
-      const artifact = activeToChatArtifact({ ...active, status: "ready" });
-      await addChatMessage({
-        projectId: project.id,
-        role: "assistant",
-        mode: "normal",
-        intent: "rewrite_sheet",
-        content: "Updated notes.",
-        artifact,
-      });
-      return artifact;
-    }
-
-    const ids = practiceIds(active);
-    let nextIds = ids;
-    if (input.intent === "append") {
-      input.onStatus(`Generating practice · ${input.appendCount} items`);
-      const extra = await appendPracticeItems({
-        project,
-        userId,
-        materials: input.pool,
-        prompt: `Add ${input.appendCount} more items to the current practice set "${active.title}". Same topic. User request: ${input.prompt}`,
-        count: input.appendCount,
-        onStatus: input.onStatus,
-      });
-      nextIds = [...ids, ...extra];
-    } else if (input.intent === "regenerate_one") {
-      input.onStatus("Updating…");
-      const progress = loadPracticeProgress(project.id)[active.id] ?? 0;
-      const targetId = ids[Math.min(progress, ids.length - 1)] ?? ids[0];
-      await regenerateOneItem({
-        project,
-        exerciseId: targetId,
-        instruction: input.prompt,
-        materials: input.pool,
-      });
-    } else {
-      await rewritePracticeItems({
-        project,
-        userId,
-        ids,
-        instruction: input.prompt,
-        materials: input.pool,
-        onStatus: input.onStatus,
-      });
-    }
-
-    const artifact: ChatArtifact = {
-      kind: "practice",
-      id: active.id,
-      title: active.title || "Practice set",
-      count: nextIds.length,
-      ids: nextIds,
-    };
-    await addChatMessage({
-      projectId: project.id,
-      role: "assistant",
-      mode: "normal",
-      intent: input.intent,
-      content: `Updated practice set · ${nextIds.length} items`,
-      artifact,
-    });
-    return artifact;
   }
 
   async function sendPrompt(
@@ -466,7 +408,7 @@ export function ProjectChat({
       (attachments.length ? `Help me learn from ${attachments.map((item) => item.title).join(", ")}.` : "");
     if (!modelPrompt || sendingRef.current) return;
 
-    const pool = poolFrom(options?.materials);
+    const pool = await materialsForTurn(attachments, options?.materials);
 
     sendingRef.current = true;
     setSending(true);
@@ -501,6 +443,7 @@ export function ProjectChat({
 
       const materialExcerpts = pool.length > 0 ? await excerptsForChat(modelPrompt, pool) : [];
       const figures = pool.length > 0 ? await pickChatFigures(modelPrompt, pool) : [];
+      const pendingKind = resolvePendingKind(modelPrompt, pendingCreateFromMessages(messages));
       const { text, tool } = await streamChat({
         prompt: modelPrompt,
         history,
@@ -510,77 +453,58 @@ export function ProjectChat({
         acceptedTool: options?.acceptedTool,
       });
       const intent = intentFromTool(tool.name);
-      const generatePrompt = tool.args.topic || tool.args.instruction || modelPrompt;
+      applyInferredGoal(tool.args.topic || tool.args.instruction || modelPrompt);
 
-      applyInferredGoal(generatePrompt);
-
-      if (tool.name === "create_practice") {
-        setStream({ content: "", intent, status: workingLabel(intent) });
-        const set = await generatePracticeSet({
-          project,
-          userId,
-          materials: pool,
-          prompt: generatePrompt,
-          onStatus: (status) => setStream({ content: "", intent, status }),
-        });
-        const artifact: ChatArtifact = {
-          kind: "practice",
-          id: set.ids[0],
-          title: "Practice set",
-          count: set.count,
-          ids: set.ids,
-        };
-        await addChatMessage({
-          projectId: project.id,
-          role: "assistant",
-          mode: "normal",
-          intent,
-          content: "Practice set is ready.",
-          artifact,
-        });
-        if (options?.openWhenReady) onOpenArtifact(artifact);
-        await rememberActive(artifact, "ready");
-      } else if (tool.name === "create_sheet") {
-        setStream({ content: "", intent, status: "Writing" });
-        const sheet = await generateStudySheetFromPrompt({
-          projectId: project.id,
-          userId,
-          projectTitle: project.title,
-          materials: pool,
-          prompt: generatePrompt,
-        });
-        const artifact: ChatArtifact = { kind: "sheet", id: sheet.id, title: sheet.title };
-        await addChatMessage({
-          projectId: project.id,
-          role: "assistant",
-          mode: "normal",
-          intent,
-          content: "კონსპექტი",
-          artifact,
-        });
-        if (options?.openWhenReady) onOpenArtifact(artifact);
-        await rememberActive(artifact, "ready");
-      } else if (tool.name === "edit_practice" || tool.name === "append_practice" || tool.name === "edit_sheet") {
-        const artifact = await runArtifactMutation({
-          intent: tool.name === "append_practice" ? "append" : tool.name === "edit_sheet" ? "rewrite_sheet" : "edit",
-          prompt: tool.args.instruction || modelPrompt,
-          pool,
-          appendCount: tool.args.count ?? extractAppendCount(modelPrompt),
-          onStatus: (status) => setStream({ content: "", intent, status }),
-        });
-        await rememberActive(artifact, "ready");
-        if (options?.openWhenReady) onOpenArtifact(artifact);
-      } else {
-        const id = await addChatMessage({
-          projectId: project.id,
-          role: "assistant",
-          mode: "normal",
-          intent,
-          content: text,
-        });
-        if (tool.name === "suggest_practice") setSuggest({ messageId: id, kind: "practice" });
-        if (tool.name === "suggest_sheet") setSuggest({ messageId: id, kind: "sheet" });
+      if (!toolStreamsText(tool.name)) {
+        setStream({ content: "", intent, status: dispatchStatus(intent) });
       }
+
+      const dispatched = await dispatchChatTool({
+        tool,
+        text,
+        prompt: modelPrompt,
+        project,
+        userId,
+        materials: pool,
+        active: resolveActive(),
+        messages,
+        pendingKind,
+        onStatus: (status) => setStream({ content: toolStreamsText(tool.name) ? text : "", intent, status }),
+      });
+
+      let artifact = dispatched.artifact ?? null;
+      if (artifact && (artifact.kind === "sheet" || artifact.kind === "plan")) {
+        try {
+          const sheet = await getStudySheet(project.id, artifact.id);
+          if (sheet) {
+            artifact = {
+              ...artifact,
+              title: sheet.title || artifact.title,
+              count: sheet.blocks.length || artifact.count,
+            };
+          }
+        } catch {
+          /* keep dispatched artifact */
+        }
+      }
+
+      const id = await addChatMessage({
+        projectId: project.id,
+        role: "assistant",
+        mode: "normal",
+        intent: dispatched.intent,
+        content: dispatched.content,
+        artifact,
+        options: dispatched.options,
+        pendingKind: dispatched.pendingKind,
+        images: dispatched.images,
+      });
+      void incrementUsage(userId, "chatTurns");
+      if (artifact) {
+        if (options?.openWhenReady) onOpenArtifact(artifact);
+        await rememberActive(artifact, "ready");
+      }
+      if (dispatched.suggest)       setSuggest({ messageId: id, kind: dispatched.suggest });
       setStream(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send message.");
@@ -588,6 +512,7 @@ export function ProjectChat({
     } finally {
       sendingRef.current = false;
       setSending(false);
+      keepComposerFocus();
     }
   }
 
@@ -597,6 +522,7 @@ export function ProjectChat({
     const attachments = snapshotChatAttachments(chips, materials);
     if (!prompt && attachments.length === 0) return;
     setDraft("");
+    keepComposerFocus();
     await sendPrompt(prompt, { attachments });
   }
 
@@ -604,6 +530,7 @@ export function ProjectChat({
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
     const prompt = lastUser?.content ?? project.title;
     setSuggest(null);
+    keepComposerFocus();
     await sendPrompt(prompt, {
       skipUser: true,
       openWhenReady: true,
@@ -613,16 +540,29 @@ export function ProjectChat({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scrollerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-6 py-8">
-          {loading && <p className="text-sm text-muted">Loading chat…</p>}
-          {!loading && messages.length === 0 && !stream && !sending && (
-            <p className="pt-24 text-center text-sm text-muted">Ask anything. Attach a file if you want.</p>
-          )}
-          <div className="space-y-6">
-            {messages.map((message) => (
-              <article key={message.id} className={message.role === "user" ? "flex justify-end" : ""}>
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollerRef}
+        onScroll={onScroll}
+        className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
+      >
+        <div className="mx-auto grid min-h-full w-full max-w-3xl grid-rows-[minmax(0,1fr)_auto] px-6">
+          <div aria-hidden className="min-h-0" />
+          <div className="pt-8" style={{ paddingBottom: composerH }}>
+            {loading && <p className="text-sm text-muted">Loading chat…</p>}
+            {!loading && messages.length === 0 && !stream && !sending && (
+              <p className="pb-2 text-center text-sm text-muted">Ask anything. Attach a file if you want.</p>
+            )}
+            {messages.map((message, index) => {
+              const prev = messages[index - 1];
+              const gap =
+                index === 0
+                  ? ""
+                  : message.role === "assistant" && prev?.role === "user"
+                    ? "mt-10"
+                    : "mt-5";
+              return (
+              <article key={message.id} className={`${gap} ${message.role === "user" ? "flex justify-end" : ""}`}>
                 {message.role === "user" ? (
                   <div className="flex max-w-[80%] flex-col items-end gap-1.5">
                     <MessageAttachments items={message.attachments} />
@@ -633,12 +573,25 @@ export function ProjectChat({
                     ) : null}
                   </div>
                 ) : (
-                  <div>
+                  <div className="w-full">
                     {message.artifact ? (
                       <ArtifactCard artifact={message.artifact} onOpen={() => onOpenArtifact(message.artifact!)} />
                     ) : (
                       <RichContent text={message.content} />
                     )}
+                    {message.images?.length ? <ImageGallery images={message.images} /> : null}
+                    {message.options != null &&
+                      !sending &&
+                      !messages.slice(index + 1).some((item) => item.role === "user" || item.role === "assistant") && (
+                        <ClarifyChips
+                          options={message.options}
+                          onPick={(value) => {
+                            keepComposerFocus();
+                            void sendPrompt(value).finally(keepComposerFocus);
+                          }}
+                          onOther={keepComposerFocus}
+                        />
+                      )}
                     {suggest?.messageId === message.id && !sending && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {suggest.kind === "practice" ? (
@@ -663,48 +616,45 @@ export function ProjectChat({
                   </div>
                 )}
               </article>
-            ))}
+              );
+            })}
             {stream && (
-              <article>
+              <article className={!messages.length || messages[messages.length - 1]?.role === "user" ? "mt-10" : "mt-5"}>
                 {stream.status ? <p className="status-shimmer mb-3 text-sm">{stream.status}</p> : null}
                 {stream.content ? <RichContent text={stream.content} streaming /> : null}
               </article>
             )}
           </div>
-          <div ref={endRef} />
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-3xl">
-        <ChatComposer
-          draft={draft}
-          onDraft={setDraft}
-          sending={sending}
-          error={error}
-          chips={chips}
-          onRemoveChip={(id) => {
-            const chip = chips.find((item) => item.id === id);
-            setChips((current) => current.filter((item) => item.id !== id));
-            if (chip?.previewUrl) URL.revokeObjectURL(chip.previewUrl);
-            if (chip?.materialId) {
-              const match = materials.find((item) => item.id === chip.materialId);
-              if (match) void removeMaterial(match);
-            }
-          }}
-          onSend={() => void send()}
-          onFile={onFile}
-          onPasteText={onPasteText}
-          onUrl={onUrl}
-        />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
+        <div className="pointer-events-auto mx-auto w-full max-w-3xl bg-gradient-to-t from-surface from-[28px] via-surface/95 to-transparent pt-8">
+          <div ref={composerBoxRef}>
+            <ChatComposer
+              ref={composerRef}
+              draft={draft}
+              onDraft={setDraft}
+              sending={sending}
+              error={error}
+              chips={chips}
+              onRemoveChip={(id) => {
+                const chip = chips.find((item) => item.id === id);
+                setChips((current) => current.filter((item) => item.id !== id));
+                if (chip?.previewUrl) URL.revokeObjectURL(chip.previewUrl);
+                if (chip?.materialId) {
+                  const match = materials.find((item) => item.id === chip.materialId);
+                  if (match) void removeMaterial(match);
+                }
+              }}
+              onSend={() => void send()}
+              onFile={onFile}
+              onPasteText={onPasteText}
+              onUrl={onUrl}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
-}
-
-function workingLabel(intent: ComposerIntent): string {
-  if (intent === "study" || intent === "rewrite_sheet") return "Writing";
-  if (intent === "practice") return "Generating a practice set…";
-  if (intent === "plan") return "Writing";
-  if (isMutationIntent(intent)) return "Updating…";
-  return "Thinking";
 }

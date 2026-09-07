@@ -2,33 +2,74 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import "katex/dist/katex.min.css";
-import { renderFormula, visualFromId } from "@/lib/visuals/catalog";
-import { storageDownloadUrl } from "@/lib/materials/storage";
+import { renderFormula, catalogIconId, visualFromId } from "@/lib/visuals/catalog";
+import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
 import type { NoteBlock, TermCardFields, VisualBlock } from "@/types/visual";
 
-function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+function Card({
+  children,
+  className = "",
+  padded = true,
+}: {
+  children: ReactNode;
+  className?: string;
+  padded?: boolean;
+}) {
   return (
-    <section className={`rounded-2xl border border-border bg-surface px-4 py-3 ${className}`}>{children}</section>
+    <section className={`rounded-2xl border border-border bg-surface-2 ${padded ? "px-4 py-3" : ""} ${className}`}>
+      {children}
+    </section>
   );
 }
 
-function QuietIcon({ id }: { id?: string }) {
-  const node = id ? visualFromId("icon", id) : null;
-  if (!node) return null;
-  return <span className="mt-0.5 shrink-0 text-muted">{node}</span>;
+function QuietIcon({
+  id,
+  label,
+  fallback = "none",
+}: {
+  id?: string;
+  label?: string;
+  fallback?: "none" | "mark";
+}) {
+  const resolved = catalogIconId(id, label);
+  const node = resolved ? visualFromId("icon", resolved) : null;
+  if (node) return <span className="mt-0.5 shrink-0 text-muted">{node}</span>;
+  if (fallback === "mark" || (id && id.trim())) {
+    return (
+      <span
+        className="mt-0.5 inline-block h-5 w-5 shrink-0 rounded-md border border-border"
+        aria-hidden
+      />
+    );
+  }
+  return null;
 }
 
 function TermCard({ item }: { item: TermCardFields }) {
+  const iconId = item.icon ?? item.iconName;
   return (
     <Card>
       <div className="flex gap-3">
-        <QuietIcon id={item.icon} />
+        <QuietIcon id={iconId} label={`${item.title} ${item.text}`} />
         <div className="min-w-0">
           <p className="text-[15px] font-medium tracking-tight text-foreground">{item.title}</p>
           <p className="mt-1 text-[15px] leading-6 text-muted">{item.text}</p>
         </div>
       </div>
     </Card>
+  );
+}
+
+function CompareSide({ item }: { item: TermCardFields }) {
+  const iconId = item.icon ?? item.iconName;
+  return (
+    <div className="flex min-w-0 gap-3 px-4 py-3">
+      <QuietIcon id={iconId} label={`${item.title} ${item.text}`} fallback="mark" />
+      <div className="min-w-0">
+        <p className="text-[15px] font-medium tracking-tight text-foreground">{item.title}</p>
+        <p className="mt-1 text-[15px] leading-6 text-muted">{item.text}</p>
+      </div>
+    </div>
   );
 }
 
@@ -45,22 +86,24 @@ function ConceptRow({ block }: { block: Extract<VisualBlock, { type: "concept_ro
 
 function CompareVs({ block }: { block: Extract<VisualBlock, { type: "compare_vs" }> }) {
   return (
-    <div>
-      {block.title ? <p className="mb-2 text-[12px] text-muted">{block.title}</p> : null}
-      <div className="flex flex-col gap-2 min-[440px]:grid min-[440px]:grid-cols-[1fr_auto_1fr] min-[440px]:items-stretch">
-        <TermCard item={block.left} />
-        <div className="flex items-center justify-center">
-          <span className="rounded-full border border-border px-2.5 py-1 text-[11px] tracking-wide text-muted">VS</span>
+    <Card padded={false} className="overflow-hidden">
+      {block.title ? (
+        <p className="border-b border-border px-4 py-2.5 text-[12px] text-muted">{block.title}</p>
+      ) : null}
+      <div className="grid grid-cols-1 min-[480px]:grid-cols-[1fr_auto_1fr] min-[480px]:items-stretch">
+        <CompareSide item={block.left} />
+        <div className="flex items-center justify-center border-y border-border px-3 py-2 min-[480px]:border-x min-[480px]:border-y-0">
+          <span className="text-[13px] font-medium tracking-[0.12em] text-muted">VS</span>
         </div>
-        <TermCard item={block.right} />
+        <CompareSide item={block.right} />
       </div>
-    </div>
+    </Card>
   );
 }
 
 function FormulaCard({ block }: { block: Extract<VisualBlock, { type: "formula_card" }> }) {
   return (
-    <Card className="px-4 py-6 text-center">
+    <Card padded={false} className="px-4 py-6 text-center">
       {block.title ? <p className="mb-3 text-[12px] text-muted">{block.title}</p> : null}
       <div className="overflow-x-auto text-[1.15rem] text-foreground">{renderFormula(block.formula, true) ?? block.formula}</div>
     </Card>
@@ -69,7 +112,7 @@ function FormulaCard({ block }: { block: Extract<VisualBlock, { type: "formula_c
 
 function TableBlock({ block }: { block: Extract<VisualBlock, { type: "table" }> }) {
   return (
-    <Card className="overflow-hidden p-0">
+    <Card padded={false} className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-left text-[15px] leading-6">
           <thead>
@@ -115,7 +158,7 @@ function Steps({ block }: { block: Extract<VisualBlock, { type: "steps" }> }) {
 
 function Example({ block }: { block: Extract<VisualBlock, { type: "example" }> }) {
   return (
-    <Card className="bg-surface-2">
+    <Card>
       <p className="text-[11px] tracking-wide text-muted">Example</p>
       <p className="mt-1.5 text-[15px] leading-6 text-foreground">{block.text}</p>
     </Card>
@@ -170,7 +213,7 @@ function SourceImage({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!path.startsWith("users/") || !path.includes("/materials/")) return;
+    if (!path.startsWith("users/") || !path.includes("/materials/") || isMissingMaterialFile(path)) return;
     let cancelled = false;
     let objectUrl: string | null = null;
     storageDownloadUrl(path)
@@ -192,7 +235,7 @@ function SourceImage({
   }, [path]);
 
   return (
-    <Card className="overflow-hidden p-0">
+    <Card padded={false} className="overflow-hidden">
       {url ? (
         <img src={url} alt={caption || (slide ? `Slide ${slide}` : "Source slide")} className="max-h-72 w-full object-contain bg-surface-2" />
       ) : (

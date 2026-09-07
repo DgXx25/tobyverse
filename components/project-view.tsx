@@ -39,7 +39,7 @@ function focusFromPending(pending: {
 export function ProjectView({ projectId }: { projectId: string }) {
   const { user } = useAuth();
   const router = useRouter();
-  const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel } = useShell();
+  const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setMobileTopActions } = useShell();
   const [project, setProject] = useState<Project | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [mode, setMode] = useState<ChatMode>("normal");
@@ -137,7 +137,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     const next = focusFromPending(pendingPanel);
     setFocus(next);
     setPanelOpen(true);
-    if (next.kind !== "material") rememberActive(next, "open");
+    if (next.kind !== "material" && "title" in next) rememberActive(next, "open");
     setPendingPanel(null);
   }, [pendingPanel, projectId, setPendingPanel]);
 
@@ -147,7 +147,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     setDeleteError(null);
     try {
       await deleteProject(project.id, user.uid);
-      router.replace("/dashboard");
+      router.replace("/");
     } catch (err) {
       setDeleting(false);
       setDeleteError(err instanceof Error ? err.message : "Could not delete project.");
@@ -225,6 +225,32 @@ export function ProjectView({ projectId }: { projectId: string }) {
     setPanelOpen(false);
   }
 
+  useEffect(() => {
+    setMobileTopActions(
+      <>
+        <button
+          type="button"
+          onClick={() => void copyShare()}
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-foreground"
+          aria-label="Share"
+        >
+          <IconShare />
+        </button>
+        {!panelOpen ? (
+          <button
+            type="button"
+            onClick={togglePanel}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-foreground"
+            aria-label="Open panel"
+          >
+            <IconPanel />
+          </button>
+        ) : null}
+      </>,
+    );
+    return () => setMobileTopActions(null);
+  }, [panelOpen, setMobileTopActions]);
+
   function onResizeStart(event: ReactMouseEvent) {
     event.preventDefault();
     setResizing(true);
@@ -256,7 +282,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     return (
       <div className="mx-auto max-w-3xl px-8 py-10">
         <p className="text-sm text-muted">{error ?? "Project not found."}</p>
-        <Link href="/dashboard" className="mt-4 inline-block text-sm text-muted hover:text-foreground">
+        <Link href="/" className="mt-4 inline-block text-sm text-muted hover:text-foreground">
           Back
         </Link>
       </div>
@@ -264,9 +290,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-transparent">
+    <div className="relative flex h-full min-h-0 bg-transparent">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
-        <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-1">
+        <div className="pointer-events-none absolute right-3 top-3 z-20 hidden items-center gap-1 md:flex">
           <button
             type="button"
             onClick={() => void copyShare()}
@@ -297,13 +323,13 @@ export function ProjectView({ projectId }: { projectId: string }) {
         />
       </div>
       <div
-        className={`h-full shrink-0 overflow-hidden ${
+        className={`h-full shrink-0 overflow-hidden max-md:absolute max-md:inset-0 max-md:z-30 max-md:bg-surface ${
           resizing ? "" : "transition-[width,opacity] duration-[220ms] ease-[ease]"
-        } ${panelOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        } ${panelOpen ? "opacity-100 max-md:!w-full" : "pointer-events-none opacity-0 max-md:!w-0"}`}
         style={{ width: panelOpen ? artifactWidth : 0 }}
         aria-hidden={!panelOpen}
       >
-        <div className="h-full" style={{ width: artifactWidth }}>
+        <div className="h-full max-md:!w-full" style={{ width: artifactWidth }}>
           <ArtifactPanel
             projectId={project.id}
             userId={user.uid}

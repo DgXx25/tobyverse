@@ -26,7 +26,7 @@ export {
   newMaterialRef,
   writeMaterialDoc,
 } from "@/lib/materials/store";
-export { removeMaterial } from "@/lib/materials/save";
+export { removeMaterial, removeLibraryMaterial } from "@/lib/materials/save";
 export { ingestMaterial, ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl } from "@/lib/materials/ingest-client";
 export { pickRelevantMaterials, toChatExcerpt } from "@/lib/materials/relevance";
 export { excerptsForChat } from "@/lib/materials/chat-context";

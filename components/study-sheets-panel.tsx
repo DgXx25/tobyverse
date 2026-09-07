@@ -28,10 +28,18 @@ export function StudySheetsPanel({
 
   useEffect(() => {
     const unsubMaterials = subscribeMaterials(projectId, setMaterials);
-    const unsubSheets = subscribeStudySheets(projectId, (items) => {
-      setSheets(items);
-      setActiveId((current) => focusId ?? current ?? items[0]?.id ?? null);
-    });
+    const unsubSheets = subscribeStudySheets(
+      projectId,
+      (items) => {
+        setSheets(items);
+        setActiveId((current) => {
+          const focus = focusId ?? current;
+          if (focus && items.some((item) => item.id === focus)) return focus;
+          return items[0]?.id ?? null;
+        });
+      },
+      (err) => setError(err.message),
+    );
     return () => {
       unsubMaterials();
       unsubSheets();
@@ -39,8 +47,9 @@ export function StudySheetsPanel({
   }, [projectId, focusId]);
 
   useEffect(() => {
-    if (focusId) setActiveId(focusId);
-  }, [focusId]);
+    if (!focusId) return;
+    if (sheets.some((item) => item.id === focusId)) setActiveId(focusId);
+  }, [focusId, sheets]);
 
   const active = useMemo(
     () => sheets.find((item) => item.id === activeId) ?? null,

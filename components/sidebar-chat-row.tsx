@@ -6,43 +6,99 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deleteProject, updateProjectTitle } from "@/lib/projects";
 import { displayProjectTitle } from "@/lib/workspace/title";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import { IconDots, IconPencil, IconTrash } from "@/components/workspace/icons";
 import type { Project } from "@/types/project";
 
 const TITLE_MAX = 48;
+const MENU_MS = 180;
 
 export function SidebarChatRow({
   project,
   userId,
   active,
-  collapsed,
   menuOpen,
   onMenuOpen,
+  onHold,
+  onDeleted,
 }: {
   project: Project;
   userId: string;
   active: boolean;
-  collapsed: boolean;
   menuOpen: boolean;
   onMenuOpen: (id: string | null) => void;
+  onHold: (project: Project | null) => void;
+  onDeleted: (id: string) => void;
 }) {
   const router = useRouter();
   const title = displayProjectTitle(project.title);
   const rowRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pendingRef = useRef(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(title);
-  const [confirm, setConfirm] = useState(false);
+  const [portalOpen, setPortalOpen] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [gone, setGone] = useState(false);
+  const [bodyHeight, setBodyHeight] = useState<number | undefined>(undefined);
+  const [heightReady, setHeightReady] = useState(false);
   const skipSave = useRef(false);
+  pendingRef.current = pending;
+
+  useEffect(() => {
+    if (menuOpen) {
+      setPortalOpen(true);
+      setConfirming(false);
+      setError(null);
+      setPending(false);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
+    }
+    setVisible(false);
+    const t = window.setTimeout(() => {
+      setPortalOpen(false);
+      setConfirming(false);
+      setError(null);
+      setPending(false);
+      setBodyHeight(undefined);
+      setHeightReady(false);
+    }, MENU_MS);
+    return () => window.clearTimeout(t);
+  }, [menuOpen]);
 
   useLayoutEffect(() => {
-    if (!menuOpen) return;
+    if (!portalOpen) return;
+    const el = confirming ? confirmRef.current : actionsRef.current;
+    if (!el) return;
+    setBodyHeight((prev) => prev ?? el.offsetHeight);
+  }, [portalOpen, confirming, error, pending]);
+
+  useEffect(() => {
+    if (!portalOpen) return;
+    const el = confirming ? confirmRef.current : actionsRef.current;
+    if (!el) return;
+    const id = window.requestAnimationFrame(() => {
+      setHeightReady(true);
+      setBodyHeight(el.offsetHeight);
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [portalOpen, confirming, error, pending]);
+
+  useLayoutEffect(() => {
+    if (!portalOpen) return;
     function place() {
       const row = rowRef.current;
       const menu = menuRef.current;
@@ -64,17 +120,20 @@ export function SidebarChatRow({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [menuOpen]);
+  }, [portalOpen, confirming, bodyHeight]);
 
   useEffect(() => {
     if (!menuOpen) return;
     function onDoc(event: MouseEvent) {
+      if (pendingRef.current) return;
       const node = event.target as Node;
       if (menuRef.current?.contains(node) || btnRef.current?.contains(node)) return;
       onMenuOpen(null);
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onMenuOpen(null);
+      if (event.key !== "Escape") return;
+      if (pendingRef.current) return;
+      onMenuOpen(null);
     }
     document.addEventListener("mousedown", onDoc);
     window.addEventListener("keydown", onKey);
@@ -118,143 +177,158 @@ export function SidebarChatRow({
   async function onDelete() {
     setPending(true);
     setError(null);
+    onHold(project);
     try {
       await deleteProject(project.id, userId);
-      setConfirm(false);
-      if (active) router.replace("/dashboard");
+      setVisible(false);
+      setGone(true);
+      if (active) router.replace("/");
+      window.setTimeout(() => onDeleted(project.id), MENU_MS);
     } catch (err) {
+      onHold(null);
       setPending(false);
       setError(err instanceof Error ? err.message : "Could not delete this chat.");
     }
   }
 
-  if (collapsed) {
-    return (
-      <Link
-        href={`/project/${project.id}`}
-        title={title}
-        className={`block truncate rounded-md px-1 py-1.5 text-center text-[11px] transition-colors ${
-          active ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"
-        }`}
-      >
-        {title.slice(0, 2)}
-      </Link>
-    );
-  }
-
-  const showDots = active || menuOpen;
+  const open = menuOpen || portalOpen;
 
   return (
     <>
-      <div
-        ref={rowRef}
-        className={`group relative flex items-center rounded-md transition-colors ${
-          active || menuOpen ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"
-        }`}
-      >
-        {renaming ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            maxLength={TITLE_MAX}
-            aria-label="Rename chat"
-            onChange={(event) => setDraft(event.target.value)}
-            onBlur={() => void saveTitle()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                event.currentTarget.blur();
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                skipSave.current = true;
-                setDraft(title);
-                setRenaming(false);
-              }
-            }}
-            className="mx-1 min-w-0 flex-1 rounded-md border border-border bg-background px-1.5 py-1 text-[13px] text-foreground"
-          />
-        ) : (
-          <>
-            <Link
-              href={`/project/${project.id}`}
-              title={title}
-              className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-[13px]"
-            >
-              {title}
-            </Link>
-            <button
-              ref={btnRef}
-              type="button"
-              aria-label="Chat actions"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onMenuOpen(menuOpen ? null : project.id);
+      {gone ? null : (
+        <div
+          ref={rowRef}
+          className={`group/chat relative flex h-9 items-center gap-1.5 rounded-xl px-[13px] py-1.5 text-foreground transition-colors ${
+            open ? "sidebar-chat-open bg-surface-2" : active ? "bg-surface-2" : "hover:bg-surface-2"
+          }`}
+        >
+          {renaming ? (
+            <input
+              ref={inputRef}
+              value={draft}
+              maxLength={TITLE_MAX}
+              aria-label="Rename chat"
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={() => void saveTitle()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  skipSave.current = true;
+                  setDraft(title);
+                  setRenaming(false);
+                }
               }}
-              onMouseDown={(event) => event.stopPropagation()}
-              className={`mr-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted transition-opacity hover:bg-foreground/10 hover:text-foreground ${
-                showDots
-                  ? "opacity-100"
-                  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
-              } ${active || menuOpen ? "text-foreground" : ""}`}
-            >
-              <IconDots className="h-3.5 w-3.5" />
-            </button>
-          </>
-        )}
-      </div>
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[14px] font-normal text-foreground"
+            />
+          ) : (
+            <>
+              <Link
+                href={`/project/${project.id}`}
+                title={title}
+                className="sidebar-chat-title min-w-0 flex-1 truncate text-[14px] font-normal leading-snug text-foreground"
+              >
+                {title}
+              </Link>
+              <button
+                ref={btnRef}
+                type="button"
+                aria-label="Chat actions"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onMenuOpen(menuOpen ? null : project.id);
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                className={`absolute right-[6px] flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-foreground/70 transition-opacity hover:bg-foreground/10 hover:text-foreground ${
+                  open
+                    ? "opacity-100"
+                    : "pointer-events-none opacity-0 group-hover/chat:pointer-events-auto group-hover/chat:opacity-100"
+                }`}
+              >
+                <IconDots className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
-      {menuOpen && typeof document !== "undefined"
+      {portalOpen && typeof document !== "undefined"
         ? createPortal(
             <div
               ref={menuRef}
               role="menu"
               style={{ top: pos.top, left: pos.left }}
-              className="fixed z-40 w-[184px] rounded-xl border border-border bg-background p-1 shadow-[0_8px_28px_rgba(0,0,0,0.45)]"
+              className={`fixed z-40 w-[184px] overflow-hidden rounded-xl border border-border bg-background p-1 shadow-[0_8px_28px_rgba(0,0,0,0.45)] transition-[opacity,transform] duration-[180ms] ease-in-out ${
+                visible ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-1.5 opacity-0"
+              }`}
             >
-              <MenuItem
-                icon={<IconPencil className="h-4 w-4" />}
-                label="Rename"
-                onClick={() => {
-                  onMenuOpen(null);
-                  setDraft(title);
-                  setRenaming(true);
-                }}
-              />
-              <div className="mx-2.5 my-1 h-px bg-border" role="separator" />
-              <MenuItem
-                icon={<IconTrash className="h-4 w-4" />}
-                label="Delete"
-                danger
-                onClick={() => {
-                  onMenuOpen(null);
-                  setError(null);
-                  setConfirm(true);
-                }}
-              />
+              <div
+                className={`overflow-hidden ${heightReady ? "transition-[height] duration-[180ms] ease-in-out" : ""}`}
+                style={{ height: bodyHeight }}
+              >
+                <div className="relative">
+                  <div
+                    ref={actionsRef}
+                    className={`transition-opacity duration-[180ms] ease-in-out ${
+                      confirming ? "pointer-events-none absolute inset-x-0 top-0 opacity-0" : "opacity-100"
+                    }`}
+                  >
+                    <MenuItem
+                      icon={<IconPencil className="h-4 w-4" />}
+                      label="Rename"
+                      onClick={() => {
+                        onMenuOpen(null);
+                        setDraft(title);
+                        setRenaming(true);
+                      }}
+                    />
+                    <div className="mx-2.5 my-1 h-px bg-border" role="separator" />
+                    <MenuItem
+                      icon={<IconTrash className="h-4 w-4" />}
+                      label="Delete"
+                      danger
+                      onClick={() => {
+                        setError(null);
+                        setConfirming(true);
+                      }}
+                    />
+                  </div>
+                  <div
+                    ref={confirmRef}
+                    className={`transition-opacity duration-[180ms] ease-in-out ${
+                      confirming ? "opacity-100" : "pointer-events-none absolute inset-x-0 top-0 opacity-0"
+                    }`}
+                  >
+                    <p className="px-2.5 pb-1 pt-2 text-[14px] leading-none text-foreground">წავშალო?</p>
+                    {error ? <p className="px-2.5 pb-1.5 text-[12px] leading-snug text-red-400">{error}</p> : null}
+                    <MenuItem
+                      label={pending ? "Deleting…" : "Delete"}
+                      danger
+                      disabled={pending}
+                      onClick={() => void onDelete()}
+                    />
+                    <MenuItem
+                      label="Cancel"
+                      disabled={pending}
+                      onClick={() => {
+                        if (pending) return;
+                        setError(null);
+                        setConfirming(false);
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>,
             document.body,
           )
         : null}
-
-      {confirm ? (
-        <ConfirmDialog
-          title="Delete chat?"
-          description={`This will remove “${title}” and its materials, notes, and exercises.`}
-          confirmLabel="Delete"
-          pending={pending}
-          error={error}
-          onConfirm={() => void onDelete()}
-          onCancel={() => {
-            if (pending) return;
-            setConfirm(false);
-            setError(null);
-          }}
-        />
-      ) : null}
     </>
   );
 }
@@ -263,24 +337,27 @@ function MenuItem({
   icon,
   label,
   danger,
+  disabled,
   onClick,
 }: {
-  icon: ReactNode;
+  icon?: ReactNode;
   label: string;
   danger?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
+      disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-[9px] text-left text-[14px] leading-none hover:bg-foreground/[0.06] ${
+      className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-[9px] text-left text-[14px] leading-none hover:bg-surface-2 disabled:opacity-50 ${
         danger ? "text-red-400" : "text-foreground"
       }`}
     >
-      <span className={danger ? "text-red-400" : "text-foreground/80"}>{icon}</span>
+      {icon ? <span className={danger ? "text-red-400" : "text-foreground/80"}>{icon}</span> : null}
       {label}
     </button>
   );

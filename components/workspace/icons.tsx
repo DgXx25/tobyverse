@@ -1,3 +1,11 @@
+export function IconMenu({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconPlus({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -54,6 +62,16 @@ export function IconTrash({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+export function IconDownload({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v10" />
+      <path d="M8.2 11.2 12 15l3.8-3.8" />
+      <path d="M5 19h14" />
+    </svg>
+  );
+}
+
 export function IconLink({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -96,6 +114,24 @@ export function IconUpgrade({ className = "h-4 w-4" }: { className?: string }) {
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.6">
       <circle cx="12" cy="12" r="8.5" strokeDasharray="3 3" />
       <path d="M8 12h8M12 8v8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function IconUsage({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4.5 19.5V9.5M10.5 19.5V4.5M16.5 19.5v-7M21 19.5H3.5" />
+    </svg>
+  );
+}
+
+export function IconData({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.6">
+      <ellipse cx="12" cy="7" rx="6.5" ry="2.4" />
+      <path d="M5.5 7v10c0 1.3 2.9 2.4 6.5 2.4s6.5-1.1 6.5-2.4V7" />
+      <path d="M5.5 12c0 1.3 2.9 2.4 6.5 2.4s6.5-1.1 6.5-2.4" />
     </svg>
   );
 }
@@ -179,6 +215,15 @@ export function IconFile({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+export function IconDeck({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="5" y="6.5" width="14" height="10" rx="1.4" />
+      <path d="M8 18.2h8M10 20h4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconSheet({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -197,10 +242,29 @@ export function IconPractice({ className = "h-4 w-4" }: { className?: string }) 
   );
 }
 
+export function IconPlan({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.6">
+      <circle cx="8" cy="7" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="17" r="1.1" fill="currentColor" stroke="none" />
+      <path d="M12 7h6M12 12h6M12 17h4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconBack({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M14 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function IconForward({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M10 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

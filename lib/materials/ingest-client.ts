@@ -1,6 +1,7 @@
 import { requireSignedInUser } from "@/lib/auth";
 import { authHeaders } from "@/lib/api/client";
 import { trackEvent } from "@/lib/analytics/track";
+import { adjustStorageBytes } from "@/lib/account/store";
 import { previewText, MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@/lib/materials/limits";
 import { newMaterialRef, writeMaterialDoc } from "@/lib/materials/store";
 import {
@@ -229,6 +230,7 @@ export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promis
       type: "material_uploaded",
       value: type,
     });
+    void adjustStorageBytes(userId, prepared.sizeBytes);
 
     return materialId;
   } catch (error) {

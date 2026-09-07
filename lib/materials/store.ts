@@ -9,7 +9,7 @@ import {
   type DocumentReference,
   type Unsubscribe,
 } from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore";
+import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { extractedTextPath } from "@/lib/materials/storage";
 import { asString, toIsoDate } from "@/lib/timestamps";
@@ -114,7 +114,7 @@ export async function writeMaterialDoc(
     status: data.status ?? "ready",
   };
   if (data.status === "processing") payload.createdAt = serverTimestamp();
-  await setDoc(doc(materialsRef(projectId), materialId), payload, { merge: true });
+  await setDoc(doc(materialsRef(projectId), materialId), omitUndefined(payload), { merge: true });
 }
 
 export function subscribeMaterials(

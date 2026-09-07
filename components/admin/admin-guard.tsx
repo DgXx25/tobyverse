@@ -12,7 +12,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && user && !allowed) {
-      router.replace("/dashboard");
+      router.replace("/");
     }
   }, [allowed, loading, router, user]);
 

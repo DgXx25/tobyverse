@@ -1,5 +1,5 @@
-import { StartScreen } from "@/components/start-screen";
+import { redirect } from "next/navigation";
 
 export default function DashboardPage() {
-  return <StartScreen />;
+  redirect("/");
 }

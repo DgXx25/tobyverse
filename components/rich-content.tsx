@@ -49,49 +49,40 @@ function MarkdownBody({ text }: { text: string }) {
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        p: ({ children }) => <p className="mb-3 last:mb-0 leading-6">{children}</p>,
-        h1: ({ children }) => <h1 className="mb-3 text-lg font-medium tracking-tight">{children}</h1>,
-        h2: ({ children }) => (
-          <h2 className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">{children}</h2>
-        ),
-        h3: ({ children }) => <h3 className="mb-2 mt-4 text-sm font-medium">{children}</h3>,
-        ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
-        li: ({ children }) => <li className="leading-6">{children}</li>,
+        p: ({ children }) => <p>{children}</p>,
+        h1: ({ children }) => <h1>{children}</h1>,
+        h2: ({ children }) => <h2>{children}</h2>,
+        h3: ({ children }) => <h3>{children}</h3>,
+        ul: ({ children }) => <ul>{children}</ul>,
+        ol: ({ children }) => <ol>{children}</ol>,
+        li: ({ children }) => <li>{children}</li>,
         blockquote: ({ children }) => (
-          <blockquote className="mb-3 border-l border-border pl-3 text-muted last:mb-0">{children}</blockquote>
+          <blockquote className="my-2 border-l border-border pl-3 text-muted">{children}</blockquote>
         ),
         code: ({ className, children }) => {
           const inline = !className;
           if (inline) {
-            return (
-              <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[12px]">{children}</code>
-            );
+            return <code>{children}</code>;
           }
-          return (
-            <code className="block overflow-x-auto font-mono text-[12px] leading-6">{children}</code>
-          );
+          return <code className="block overflow-x-auto font-mono text-[12px] leading-5">{children}</code>;
         },
         pre: ({ children }) => (
-          <pre className="mb-3 overflow-x-auto rounded-md border border-border bg-surface-2 p-3 last:mb-0">
-            {children}
-          </pre>
+          <pre className="my-2 overflow-x-auto rounded-md border border-border bg-surface-2 p-2.5">{children}</pre>
         ),
         table: ({ children }) => (
-          <div className="mb-3 overflow-x-auto last:mb-0">
-            <table className="w-full border-collapse text-left text-[13px]">{children}</table>
+          <div className="overflow-x-auto">
+            <table>{children}</table>
           </div>
         ),
         thead: ({ children }) => <thead className="text-muted">{children}</thead>,
-        th: ({ children }) => (
-          <th className="border-b border-border px-2 py-1.5 font-medium">{children}</th>
-        ),
-        td: ({ children }) => <td className="border-b border-border/70 px-2 py-1.5 align-top">{children}</td>,
+        th: ({ children }) => <th className="border-b border-border font-medium">{children}</th>,
+        td: ({ children }) => <td className="border-b border-border/70">{children}</td>,
         a: ({ href, children }) => (
           <a href={href} className="underline decoration-border underline-offset-2 hover:text-foreground">
             {children}
           </a>
         ),
+        strong: ({ children }) => <strong>{children}</strong>,
       }}
     >
       {text}
@@ -109,12 +100,12 @@ export function RichContent({
   const segments = splitRichContent(text);
 
   return (
-    <div className="chat-body text-foreground/90">
+    <div className="chat-body text-foreground">
       {segments.map((segment, index) =>
         segment.kind === "md" ? (
           <MarkdownBody key={index} text={segment.text} />
         ) : (
-          <div key={index} className="my-3">
+          <div key={index} className="my-3 first:mt-0">
             <VisualBlockView block={segment.block} />
           </div>
         ),

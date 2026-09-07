@@ -10,7 +10,7 @@ import {
   updateDoc,
   type Unsubscribe,
 } from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore";
+import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { isProblemType, isTheoryType } from "@/lib/exercises/templates";
@@ -89,17 +89,20 @@ export async function createExercise(
     type: ExerciseType;
   },
 ): Promise<string> {
-  const ref = await addDoc(exercisesRef(input.projectId), {
-    projectId: input.projectId,
-    userId: input.userId,
-    type: input.type,
-    category: input.category,
-    schemaVersion: EXERCISE_SCHEMA_VERSION,
-    data: input.data,
-    sourceMaterialIds: input.sourceMaterialIds,
-    knowledgeItemId: input.knowledgeItemId,
-    createdAt: serverTimestamp(),
-  });
+  const ref = await addDoc(
+    exercisesRef(input.projectId),
+    omitUndefined({
+      projectId: input.projectId,
+      userId: input.userId,
+      type: input.type,
+      category: input.category,
+      schemaVersion: EXERCISE_SCHEMA_VERSION,
+      data: input.data,
+      sourceMaterialIds: input.sourceMaterialIds,
+      knowledgeItemId: input.knowledgeItemId,
+      createdAt: serverTimestamp(),
+    }),
+  );
   return ref.id;
 }
 

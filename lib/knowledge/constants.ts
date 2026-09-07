@@ -34,14 +34,14 @@ export const KNOWLEDGE_TYPE_LABELS: Record<string, string> = {
 
 /** Suggested exercise shapes later, per knowledge type. Not used for generation yet. */
 export const KNOWLEDGE_TYPE_EXERCISE_HINTS: Record<string, ExerciseType[]> = {
-  capital: ["mcq", "fill_blank", "true_false"],
-  definition: ["open_short", "mcq", "connect"],
-  formula: ["fill_blank", "problem_steps", "mcq"],
-  date: ["mcq", "fill_blank", "true_false"],
-  vocab: ["mcq", "connect", "fill_blank", "open_short"],
-  fact: ["mcq", "true_false", "open_short"],
+  capital: ["mcq", "connect"],
+  definition: ["mcq", "connect"],
+  formula: ["mcq", "problem_steps"],
+  date: ["mcq", "connect"],
+  vocab: ["mcq", "connect"],
+  fact: ["mcq", "connect"],
 };
 
 export function exerciseHintsForKnowledgeType(type: KnowledgeItemType): ExerciseType[] {
-  return KNOWLEDGE_TYPE_EXERCISE_HINTS[type] ?? ["mcq", "open_short"];
+  return KNOWLEDGE_TYPE_EXERCISE_HINTS[type] ?? ["mcq", "connect"];
 }

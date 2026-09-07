@@ -1,15 +1,19 @@
 import { authHeaders } from "@/lib/api/client";
+import { incrementUsage } from "@/lib/account/store";
 import {
   choosePracticeSetSize,
   createExercise,
   exerciseStem,
-  planExerciseSet,
+  planPracticeSet,
+  practiceFamilyForTopic,
+  practiceFamilyFromTypes,
+  CLICK_FIRST_TYPES,
   listExercises,
+  type PracticeFamily,
   type ProjectExercise,
 } from "@/lib/exercises";
 import { selectEligibleKnowledgeItems } from "@/lib/knowledge/selection";
 import { listKnowledgeForProject } from "@/lib/knowledge/store";
-import { recipeForGoal } from "@/lib/core/recipes";
 import { goalOrDefault } from "@/lib/composer/goal";
 import { collectProjectSources } from "@/lib/composer/sources";
 import type { Material } from "@/types/material";
@@ -21,8 +25,8 @@ export async function generatePracticeSet(input: {
   userId: string;
   materials: Material[];
   prompt?: string;
-  isPaid?: boolean;
   count?: number;
+  family?: PracticeFamily;
   onStatus?: (status: string) => void;
 }): Promise<{ ids: string[]; count: number }> {
   const sources = await collectProjectSources({
@@ -43,10 +47,19 @@ export async function generatePracticeSet(input: {
   const existing = await listExercises(input.project.id);
   const avoid = existing.map(exerciseStem);
   const goal = goalOrDefault(input.prompt ?? "", input.project.goal);
-  const recipe = goal === input.project.goal ? input.project.recipe : recipeForGoal(goal);
-  const count = input.count ?? choosePracticeSetSize({ goal, isPaid: input.isPaid });
+  const count = input.count ?? choosePracticeSetSize({ goal });
+  const topic = input.prompt?.trim() || input.project.title;
+  const family =
+    input.family ??
+    (existing.length > 0 && !input.prompt?.trim()
+      ? practiceFamilyFromTypes(existing.map((item) => item.type))
+      : practiceFamilyForTopic(topic));
   input.onStatus?.(`Generating practice · ${count} items`);
-  const plan = planExerciseSet(recipe, count);
+  const plan = planPracticeSet(family, count).filter((item) => {
+    if (item.type === "true_false") return false;
+    if (family === "recall" && !CLICK_FIRST_TYPES.includes(item.type)) return false;
+    return true;
+  });
   const created: string[] = [];
   const ids: string[] = [];
   const failures: string[] = [];
@@ -77,6 +90,14 @@ export async function generatePracticeSet(input: {
       failures.push(`${planned.type}: ${data.error ?? "invalid JSON"}`);
       continue;
     }
+    if (data.type === "true_false") {
+      failures.push("true_false: skipped");
+      continue;
+    }
+    if (family === "recall" && !CLICK_FIRST_TYPES.includes(data.type)) {
+      failures.push(`${data.type}: skipped for recall`);
+      continue;
+    }
     const id = await createExercise({
       projectId: input.project.id,
       userId: input.userId,
@@ -93,5 +114,6 @@ export async function generatePracticeSet(input: {
   if (ids.length === 0) {
     throw new Error(failures[0] ?? "Could not create a practice set.");
   }
+  await incrementUsage(input.userId, "practiceGenerated");
   return { ids, count: ids.length };
 }
