@@ -1,0 +1,23 @@
+{
+  "hosting": {
+    "site": "tobyverse",
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "ssrugstuffc351a",
+          "region": "us-central1"
+        }
+      }
+    ]
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

@@ -1,0 +1,27 @@
+:root {
+  --font-ui: "Google Sans";
+}
+
+@font-face {
+  font-family: "Google Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local("Google Sans"), local("GoogleSans-Regular");
+}
+
+@font-face {
+  font-family: "Google Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: local("Google Sans Medium"), local("GoogleSans-Medium");
+}
+
+@font-face {
+  font-family: "Google Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local("Google Sans Bold"), local("GoogleSans-Bold");
+}

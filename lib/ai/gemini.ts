@@ -1,0 +1,172 @@
+import {
+  FunctionCallingMode,
+  GoogleGenerativeAI,
+  SchemaType,
+  type Content,
+  type FunctionDeclaration,
+  type Part,
+} from "@google/generative-ai";
+import type { ChatTurn } from "@/types/chat";
+import type { AIProvider, GenerateOptions } from "@/lib/ai/types";
+import {
+  CHAT_TOOL_DEFINITIONS,
+  parseToolCall,
+  type ChatStreamPart,
+} from "@/lib/ai/tools";
+
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+
+function toContents(prompt: string, history: ChatTurn[] = [], images: GenerateOptions["images"] = []): Content[] {
+  const contents: Content[] = history
+    .filter((turn) => turn.content.trim().length > 0)
+    .map((turn) => ({
+      role: turn.role === "assistant" ? "model" : "user",
+      parts: [{ text: turn.content }],
+    }));
+
+  const parts: Part[] = [{ text: prompt }];
+  for (const image of images ?? []) {
+    if (!image.data || !image.mimeType.startsWith("image/")) continue;
+    parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+  }
+  contents.push({ role: "user", parts });
+
+  return contents;
+}
+
+function toGeminiDeclarations(): FunctionDeclaration[] {
+  return CHAT_TOOL_DEFINITIONS.map((def) => {
+    const properties: Record<string, { type: typeof SchemaType.STRING; description: string } | { type: typeof SchemaType.INTEGER; description: string }> =
+      {};
+    for (const [key, spec] of Object.entries(def.parameters.properties)) {
+      properties[key] =
+        spec.type === "integer"
+          ? { type: SchemaType.INTEGER, description: spec.description }
+          : { type: SchemaType.STRING, description: spec.description };
+    }
+    const declaration: FunctionDeclaration = {
+      name: def.name,
+      description: def.description,
+    };
+    if (Object.keys(properties).length > 0) {
+      declaration.parameters = {
+        type: SchemaType.OBJECT,
+        properties,
+        required: def.parameters.required,
+      };
+    }
+    return declaration;
+  });
+}
+
+function partsFromChunk(chunk: {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string; functionCall?: { name: string; args: object } }> } }>;
+}): ChatStreamPart {
+  const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+  let text = "";
+  let tool: ChatStreamPart["tool"];
+  for (const part of parts) {
+    if (part.text) text += part.text;
+    if (part.functionCall && !tool) {
+      tool = parseToolCall(part.functionCall.name, part.functionCall.args) ?? undefined;
+    }
+  }
+  return { text: text || undefined, tool };
+}
+
+export class GeminiProvider implements AIProvider {
+  readonly id = "gemini";
+  readonly name = "Google Gemini";
+
+  private getModel(options: GenerateOptions = {}) {
+    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+
+    if (!apiKey) {
+      throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is not set.");
+    }
+
+    return new GoogleGenerativeAI(apiKey).getGenerativeModel({
+      model: options.model ?? DEFAULT_GEMINI_MODEL,
+      systemInstruction: options.systemInstruction,
+      tools: options.tools ? [{ functionDeclarations: toGeminiDeclarations() }] : undefined,
+      toolConfig: options.tools
+        ? { functionCallingConfig: { mode: FunctionCallingMode.AUTO } }
+        : undefined,
+      generationConfig: options.json ? { responseMimeType: "application/json" } : undefined,
+    });
+  }
+
+  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
+    const result = await this.getModel(options).generateContent({
+      contents: toContents(prompt, options.history, options.images),
+    });
+    const text = result.response.text();
+
+    if (!text) {
+      throw new Error("Gemini returned an empty response.");
+    }
+
+    return text;
+  }
+
+  async *generateTextStream(prompt: string, options: GenerateOptions = {}): AsyncIterable<string> {
+    const result = await this.getModel(options).generateContentStream({
+      contents: toContents(prompt, options.history, options.images),
+    });
+
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      if (text) {
+        yield text;
+      }
+    }
+  }
+
+  async *generateToolStream(prompt: string, options: GenerateOptions = {}): AsyncIterable<ChatStreamPart> {
+    const result = await this.getModel({ ...options, tools: true }).generateContentStream({
+      contents: toContents(prompt, options.history, options.images),
+    });
+
+    let used: ChatStreamPart["tool"];
+    for await (const chunk of result.stream) {
+      const part = partsFromChunk(chunk);
+      if (part.text) yield { text: part.text };
+      if (part.tool && !used) {
+        used = part.tool;
+        yield { tool: used };
+      }
+    }
+  }
+}
+
+let currentProvider: AIProvider = new GeminiProvider();
+
+export function getAIProvider(): AIProvider {
+  return currentProvider;
+}
+
+export function setAIProvider(provider: AIProvider): void {
+  currentProvider = provider;
+}
+
+export async function generateText(prompt: string, options?: GenerateOptions): Promise<string> {
+  return getAIProvider().generateText(prompt, options);
+}
+
+export async function* generateTextStream(
+  prompt: string,
+  options?: GenerateOptions,
+): AsyncIterable<string> {
+  yield* getAIProvider().generateTextStream(prompt, options);
+}
+
+export async function* generateToolStream(
+  prompt: string,
+  options?: GenerateOptions,
+): AsyncIterable<ChatStreamPart> {
+  const provider = getAIProvider();
+  if (!provider.generateToolStream) {
+    throw new Error("This provider has no tools.");
+  }
+  yield* provider.generateToolStream(prompt, options);
+}

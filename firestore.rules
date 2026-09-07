@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.email == "davit.gvakharia@gmail.com";
+    }
+
+    function ownsProject(projectId) {
+      return signedIn() &&
+        get(/databases/$(database)/documents/projects/$(projectId)).data.userId == request.auth.uid;
+    }
+
+    match /projects/{projectId} {
+      allow read, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+
+      match /{document=**} {
+        allow read, write: if ownsProject(projectId);
+      }
+    }
+
+    match /analyticsEvents/{eventId} {
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(["userId", "projectId", "type", "value", "createdAt"]);
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /trainingSignals/{signalId} {
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(["userId", "projectId", "contextType", "signal", "shortHash", "itemId", "createdAt"]);
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /playgroundSnapshots/{snapshotId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /evalSnapshots/{snapshotId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}
