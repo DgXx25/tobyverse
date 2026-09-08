@@ -31,6 +31,65 @@ html.dark {
   --app-wallpaper-opacity: 0;
 }
 
+html.coffee {
+  --bg: #f3e6d4;
+  --surface: #f7eee4;
+  --surface-2: #ffffff;
+  --border: #e2d0bc;
+  --text: #2c1810;
+  --text-muted: #6e5346;
+  --accent: #a85a28;
+  --scrollbar: #c9a27a;
+  --overlay: rgba(44, 24, 16, 0.42);
+  --app-wallpaper: none;
+  --app-wallpaper-opacity: 0;
+}
+
+html.razer {
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --surface-2: #1a1a1a;
+  --border: #00aa00;
+  --text: #ececec;
+  --text-muted: #8a8a8a;
+  --accent: #00ff00;
+  --scrollbar: #2e2e2e;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --app-wallpaper: none;
+  --app-wallpaper-opacity: 0;
+}
+
+html.crimson {
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --surface-2: #1a1a1a;
+  --border: #cc0000;
+  --text: #ececec;
+  --text-muted: #8a8a8a;
+  --accent: #ff0000;
+  --scrollbar: #2e2e2e;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --app-wallpaper: none;
+  --app-wallpaper-opacity: 0;
+}
+
+html.marketing,
+html.marketing.light,
+html.marketing.dark,
+html.marketing.coffee,
+html.marketing.razer,
+html.marketing.crimson {
+  --bg: #0a0a0a;
+  --surface: #1c1b1a;
+  --surface-2: #262524;
+  --border: #33312f;
+  --text: #ececec;
+  --text-muted: #8a8682;
+  --accent: #7eb6ff;
+  --scrollbar: #3a3837;
+  --overlay: rgba(0, 0, 0, 0.64);
+}
+
 html.theme-switching,
 html.theme-switching *,
 html.theme-switching *::before,
@@ -49,6 +108,70 @@ body {
   color: var(--text);
   font-family: "Google Sans Flex", "Noto Sans Georgian", "Google Sans", system-ui, sans-serif;
   font-optical-sizing: auto;
+}
+
+.galaxy-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #0a0a0a;
+}
+
+.galaxy-stage.gx-surface-host {
+  position: fixed;
+}
+
+.galaxy-stage .gx-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.galaxy-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 10, 0.2);
+  pointer-events: none;
+}
+
+.legal-body {
+  font-size: 16px;
+  line-height: 1.7;
+  color: #ececec;
+}
+
+.legal-body h2 {
+  margin: 2.25rem 0 0.7rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.legal-body p,
+.legal-body ul {
+  margin: 0 0 1rem;
+}
+
+.legal-body ul {
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+
+.legal-body li {
+  margin: 0.35em 0;
+}
+
+.legal-body a {
+  color: #ececec;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 html.nav-lock,

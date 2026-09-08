@@ -47,7 +47,7 @@ function AppleIcon() {
   );
 }
 
-export function AuthForm() {
+export function AuthForm({ variant = "default" }: { variant?: "default" | "marketing" }) {
   const { user, loading } = useAuth();
   const sent = useRef(false);
   const [pending, setPending] = useState<Provider | null>(null);
@@ -101,6 +101,11 @@ export function AuthForm() {
     }
   }
 
+  const marketing = variant === "marketing";
+  const buttonClass = marketing
+    ? "flex h-12 w-full items-center justify-center gap-3 rounded-[10px] border-[1px] border-white/[0.08] bg-[#1c1b1a] px-4 text-[15px] text-[#ececec] transition-colors hover:bg-[#262524] disabled:opacity-50"
+    : "flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50";
+
   if (!configured) {
     return (
       <div className="rounded-lg border border-border bg-surface p-6 text-sm text-muted">
@@ -122,10 +127,10 @@ export function AuthForm() {
           type="button"
           disabled={pending !== null}
           onClick={() => signIn("google")}
-          className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
+          className={buttonClass}
         >
           <GoogleIcon />
-          {pending === "google" ? "Connecting…" : "Login with Google"}
+          {pending === "google" ? "Connecting…" : "Continue with Google"}
         </button>
 
         {appleConfigured ? (
@@ -133,10 +138,10 @@ export function AuthForm() {
             type="button"
             disabled={pending !== null}
             onClick={() => signIn("apple")}
-            className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
+            className={buttonClass}
           >
             <AppleIcon />
-            {pending === "apple" ? "Connecting…" : "Login with Apple"}
+            {pending === "apple" ? "Connecting…" : "Continue with Apple"}
           </button>
         ) : null}
       </div>

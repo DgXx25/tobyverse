@@ -2,8 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useAuth } from "@/components/auth-provider";
-import { StartScreen } from "@/components/start-screen";
-import { LandingHeader } from "@/components/landing-header";
+import { LandingScreen } from "@/components/landing-screen";
 import { enterAppAfterSignIn, isAccountUser, peekCurrentUser, persistSignedInSession } from "@/lib/auth";
 import { hasSignedInCookie } from "@/lib/signed-in-cookie";
 
@@ -22,15 +21,8 @@ export function PublicHome() {
   }, [user]);
 
   if (account || restoring) {
-    return <div className="min-h-dvh bg-background" />;
+    return <div className="min-h-dvh bg-[#0a0a0a]" />;
   }
 
-  return (
-    <div className="flex min-h-dvh flex-col bg-background">
-      <LandingHeader auth />
-      <div className="flex min-h-0 flex-1 flex-col">
-        <StartScreen publicHome />
-      </div>
-    </div>
-  );
+  return <LandingScreen />;
 }

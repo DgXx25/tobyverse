@@ -7,13 +7,14 @@
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "eslint",
-    "deploy": "firebase experiments:enable webframeworks && npm run build && firebase deploy --only hosting --force"
+    "deploy": "npm run build && firebase deploy --only hosting --force"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@untitledui/icons": "^0.0.22",
     "firebase": "^11.10.0",
     "firebase-admin": "^14.3.0",
+    "galaxyjs": "github:Edwson/GalaxyJS",
     "jszip": "^3.10.1",
     "katex": "^0.18.7",
     "lucide-react": "^1.41.0",

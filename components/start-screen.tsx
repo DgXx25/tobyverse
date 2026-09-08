@@ -23,10 +23,10 @@ const MODES: {
   intent: ComposerIntent;
   icon: ReactNode;
 }[] = [
-  { id: "practice", label: "პრაქტიკა", hint: "სავარჯიშოები და კითხვები", placeholder: "რაზე ვივარჯიშო?", intent: "practice", icon: <IconDumbbell className="h-4 w-4" /> },
-  { id: "sheet", label: "კონსპექტი", hint: "მოკლე, მკაფიო ჩანაწერი", placeholder: "რაზე გავაკეთო კონსპექტი?", intent: "study", icon: <IconSheet className="h-4 w-4" /> },
-  { id: "materials", label: "მასალიდან სწავლა", hint: "ატვირთე ფაილი და ისწავლე", placeholder: "რას ვისწავლოთ ამ მასალიდან?", intent: "ask", icon: <IconFile className="h-4 w-4" /> },
-  { id: "explain", label: "ახსენი თემა", hint: "ნაბიჯ-ნაბიჯ ახსნა", placeholder: "რა თემა აგიხსნა?", intent: "ask", icon: <IconSpark className="h-4 w-4" /> },
+  { id: "practice", label: "პრაქტიკა", hint: "სავარჯიშოები და კითხვები", placeholder: "What should I practice?", intent: "practice", icon: <IconDumbbell className="h-4 w-4" /> },
+  { id: "sheet", label: "კონსპექტი", hint: "მოკლე, მკაფიო ჩანაწერი", placeholder: "What should I take notes on?", intent: "study", icon: <IconSheet className="h-4 w-4" /> },
+  { id: "materials", label: "მასალიდან სწავლა", hint: "ატვირთე ფაილი და ისწავლე", placeholder: "What should we learn from this?", intent: "ask", icon: <IconFile className="h-4 w-4" /> },
+  { id: "explain", label: "ახსენი თემა", hint: "ნაბიჯ-ნაბიჯ ახსნა", placeholder: "What should I explain?", intent: "ask", icon: <IconSpark className="h-4 w-4" /> },
 ];
 
 const CARDS: Record<StartMode, { title: string; upload?: boolean }[]> = {
@@ -255,7 +255,7 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   if (publicHome || guest) {
     return (
       <div className="relative flex h-full min-h-0 flex-col items-center justify-center px-6 pb-16">
-        <h1 className="mb-8 text-center text-[32px] font-medium tracking-tight text-foreground">რას ვისწავლოთ?</h1>
+        <h1 className="mb-8 text-center text-[32px] font-medium tracking-tight text-foreground">What should we learn?</h1>
         <div className="w-full max-w-[850px] mx-auto composer-pad">{composer}</div>
       </div>
     );
@@ -289,7 +289,7 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
 
       <div className="flex min-h-0 flex-1 flex-col md:items-center md:justify-center">
         <div className="flex min-h-0 flex-1 items-center justify-center px-6 md:flex-none md:pb-8">
-          <h1 className="text-center text-[32px] font-medium tracking-tight text-foreground">რას ვისწავლოთ?</h1>
+          <h1 className="text-center text-[32px] font-medium tracking-tight text-foreground">What should we learn?</h1>
         </div>
 
         <div className="mx-auto w-[min(850px,calc(100%-32px))] composer-pad max-md:mt-auto md:pb-8">

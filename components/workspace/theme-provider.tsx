@@ -2,7 +2,9 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  applyMarketingDark,
   applyThemeClass,
+  isMarketingPath,
   persistTheme,
   readStoredTheme,
   THEME_KEY,
@@ -29,6 +31,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     })();
     const next = readStoredTheme();
     setThemeState(next);
+    if (isMarketingPath(window.location.pathname)) {
+      applyMarketingDark();
+      return;
+    }
     if (stored && stored !== next) persistTheme(next);
     else applyThemeClass(next);
   }, []);

@@ -1,36 +1,55 @@
 "use client";
 
-import { THEME_OPTIONS, type ThemeId } from "@/lib/workspace/theme";
+import { THEME_OPTIONS, type ThemePreview } from "@/lib/workspace/theme";
 import { useTheme } from "@/components/workspace/theme-provider";
-import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
-
-const THEME_ICON: Record<ThemeId, UiIconName> = {
-  light: "sun",
-  dark: "moon",
-};
 
 export function ThemePicker() {
   const { theme, setTheme } = useTheme();
 
   return (
-    <div className="flex items-center gap-0.5">
-      {THEME_OPTIONS.map((option) => {
-        const selected = theme === option.id;
-        return (
-          <button
-            key={option.id}
-            type="button"
-            aria-label={option.label}
-            aria-pressed={selected}
-            onClick={() => setTheme(option.id)}
-            className={`flex h-9 w-9 items-center justify-center rounded-[10px] transition-colors ${
-              selected ? "bg-foreground/10 text-foreground" : "text-muted hover:text-foreground"
-            }`}
-          >
-            <UiIcon name={THEME_ICON[option.id]} size={18} />
-          </button>
-        );
-      })}
+    <div className="flex flex-wrap gap-4">
+      {THEME_OPTIONS.map((option) => (
+        <ThemeCard
+          key={option.id}
+          label={option.label}
+          preview={option.preview}
+          selected={theme === option.id}
+          onSelect={() => setTheme(option.id)}
+        />
+      ))}
     </div>
+  );
+}
+
+function ThemeCard({
+  label,
+  preview,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  preview: ThemePreview;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button type="button" onClick={onSelect} aria-pressed={selected} className="w-[128px] text-center">
+      <div
+        className={`overflow-hidden rounded-xl border p-1 ${
+          selected ? "border-foreground" : "border-transparent hover:border-border"
+        }`}
+      >
+        <div className="flex h-[78px] overflow-hidden rounded-lg border border-black/10" style={{ background: preview.bg }}>
+          <div className="w-[30%] shrink-0" style={{ background: preview.sidebar }} />
+          <div className="flex flex-1 flex-col gap-1.5 p-2.5">
+            <div className="h-1.5 w-9 rounded-full" style={{ background: preview.text, opacity: 0.9 }} />
+            <div className="h-1 w-full rounded-full" style={{ background: preview.muted }} />
+            <div className="h-1 w-[72%] rounded-full" style={{ background: preview.muted }} />
+            <div className="mt-auto h-4 w-full rounded" style={{ background: preview.sidebar }} />
+          </div>
+        </div>
+      </div>
+      <span className={`mt-2.5 block text-[13px] ${selected ? "text-foreground" : "text-muted"}`}>{label}</span>
+    </button>
   );
 }
