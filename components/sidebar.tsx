@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase";
+import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 import { subscribeProjectsForUser } from "@/lib/projects";
 import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
@@ -158,6 +159,7 @@ function SidebarFrame({
 
   async function handleSignOut() {
     await signOut(getFirebaseAuth());
+    writeSignedInCookie(false);
     router.replace("/login");
   }
 

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "eslint",
-    "deploy": "npm run build && firebase deploy --only hosting --force"
+    "deploy": "firebase experiments:enable webframeworks && npm run build && firebase deploy --only hosting --force"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

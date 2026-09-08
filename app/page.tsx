@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { LandingAuthGate } from "@/components/landing-auth-gate";
 
+export const dynamic = "force-dynamic";
+
 export default function HomePage() {
   return (
     <LandingAuthGate>

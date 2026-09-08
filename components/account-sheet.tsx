@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase";
+import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 import { useAuth } from "@/components/auth-provider";
 import { useShell, type AccountSheetPage } from "@/components/workspace/shell-context";
 import { useTheme } from "@/components/workspace/theme-provider";
@@ -46,6 +47,7 @@ export function AccountSheet() {
   async function handleSignOut() {
     closeAccountSheet();
     await signOut(getFirebaseAuth());
+    writeSignedInCookie(false);
     router.replace("/login");
   }
 

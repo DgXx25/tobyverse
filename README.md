@@ -31,13 +31,24 @@ Production build, then `next start` on port 3000.
 
 ## Hosting
 
+Classic Firebase Hosting is a CDN. It cannot execute this Next.js app (API routes, App Router, no `output: "export"`). The working path is the Firebase web-frameworks adapter: `hosting.source` is this repo, and `firebase deploy --only hosting` builds Next and updates Cloud Run `ssrugstuffc351a` (us-central1) plus the `tobyverse` Hosting site on project `ugstuff-c351a`.
+
+One-time (if `webframeworks` is off):
+
 ```bash
-npm run deploy
+firebase experiments:enable webframeworks
 ```
 
-Runs `npm run build`, then `firebase deploy --only hosting` to [https://tobyverse.web.app](https://tobyverse.web.app). Requires the Firebase CLI (`npm i -g firebase-tools`) and `firebase login`. Does not deploy Cloud Functions.
+Publish this repo’s current UI:
 
-You can also deploy on [Vercel](https://vercel.com). Copy the same env vars from `.env.local` into the host.
+```bash
+npm run build
+firebase deploy --only hosting
+```
+
+Or `npm run deploy` (enables the experiment, builds, then deploys hosting). Live URL: [https://tobyverse.web.app](https://tobyverse.web.app). Requires the Firebase CLI and `firebase login`. Does not deploy Cloud Functions as a separate product; the Next server is the frameworks Cloud Run service.
+
+Do not set `hosting.public` to `public/`. That only uploads favicons and static files from `public/`; `/account` and the app shell keep coming from the last Cloud Run revision.
 
 Env vars the host must have:
 

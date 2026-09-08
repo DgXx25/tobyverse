@@ -4,21 +4,15 @@
   },
   "hosting": {
     "site": "tobyverse",
-    "public": "public",
+    "source": ".",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
     ],
-    "rewrites": [
-      {
-        "source": "**",
-        "run": {
-          "serviceId": "ssrugstuffc351a",
-          "region": "us-central1"
-        }
-      }
-    ]
+    "frameworksBackend": {
+      "region": "us-central1"
+    }
   },
   "storage": {
     "rules": "storage.rules"

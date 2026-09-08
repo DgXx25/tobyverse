@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Sidebar } from "@/components/sidebar";
@@ -9,17 +9,16 @@ import { AccountSheet } from "@/components/account-sheet";
 import { AnalyticsSession } from "@/components/analytics-session";
 import { ShellProvider, useShell } from "@/components/workspace/shell-context";
 import { SettingsModal } from "@/components/workspace/settings-modal";
-import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, configured } = useAuth();
   const router = useRouter();
+  const sent = useRef(false);
 
   useEffect(() => {
-    if (!loading && !user) {
-      writeSignedInCookie(false);
-      router.replace("/login");
-    }
+    if (loading || user || sent.current) return;
+    sent.current = true;
+    router.replace("/login");
   }, [loading, user, router]);
 
   if (loading) {

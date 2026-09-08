@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import { authErrorMessage, signInWithApple, signInWithGoogle } from "@/lib/auth";
 import { useAuth } from "@/components/auth-provider";
@@ -41,16 +42,17 @@ function AppleIcon() {
 
 export function AuthForm() {
   const { user, loading } = useAuth();
+  const router = useRouter();
+  const sent = useRef(false);
   const [pending, setPending] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
   const configured = isFirebaseConfigured();
 
   useEffect(() => {
-    if (!loading && user) {
-      writeSignedInCookie(true);
-      window.location.replace("/");
-    }
-  }, [loading, user]);
+    if (loading || !user || sent.current) return;
+    sent.current = true;
+    router.replace("/new");
+  }, [loading, user, router]);
 
   async function signIn(provider: Provider) {
     setError(null);
@@ -64,7 +66,8 @@ export function AuthForm() {
       }
 
       writeSignedInCookie(true);
-      window.location.replace("/");
+      sent.current = true;
+      router.replace("/new");
     } catch (err) {
       const message = authErrorMessage(err);
       if (message) setError(message);
@@ -81,6 +84,10 @@ export function AuthForm() {
         <span className="font-mono text-foreground">.env.local</span> and add your keys.
       </div>
     );
+  }
+
+  if (loading || user) {
+    return <div className="h-28" />;
   }
 
   return (

@@ -1,19 +1,25 @@
 "use client";
 
-import { useLayoutEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
-import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 
 export function LandingAuthGate({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
+  const router = useRouter();
+  const sent = useRef(false);
 
-  useLayoutEffect(() => {
-    if (!user) return;
-    writeSignedInCookie(true);
-    window.location.replace("/");
-  }, [user]);
+  useEffect(() => {
+    if (loading || !user || sent.current) return;
+    sent.current = true;
+    router.replace("/new");
+  }, [loading, user, router]);
 
-  if (loading || user) {
+  if (loading) {
+    return <div className="min-h-screen bg-background" />;
+  }
+
+  if (user) {
     return <div className="min-h-screen bg-background" />;
   }
 
