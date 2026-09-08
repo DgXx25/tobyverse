@@ -16,3 +16,20 @@ export function parseMaterialStoragePath(path: string): {
     name: match[4],
   };
 }
+
+/** Last path segment only. Never invents slide-N-N names. */
+export function storedObjectName(path: string | undefined | null): string | null {
+  if (!path) return null;
+  const trimmed = path.trim();
+  if (!trimmed) return null;
+  const parsed = parseMaterialStoragePath(trimmed);
+  const raw = parsed?.name ?? trimmed.split("/").filter(Boolean).pop()?.split("?")[0] ?? "";
+  let name = raw;
+  try {
+    name = decodeURIComponent(raw);
+  } catch {
+    name = raw;
+  }
+  if (!name || name.includes("..") || name.includes("/") || name.includes("\\")) return null;
+  return name;
+}

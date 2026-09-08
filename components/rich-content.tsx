@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parseVisualBlock } from "@/lib/visuals/validate";
@@ -44,7 +45,12 @@ function tryJson(raw: string): unknown {
   }
 }
 
-function MarkdownBody({ text }: { text: string }) {
+function mdChunks(text: string): string[] {
+  const parts = text.split(/\n\n/);
+  return parts.length ? parts : [text];
+}
+
+const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -88,7 +94,7 @@ function MarkdownBody({ text }: { text: string }) {
       {text}
     </ReactMarkdown>
   );
-}
+});
 
 export function RichContent({
   text,
@@ -103,7 +109,12 @@ export function RichContent({
     <div className="chat-body text-foreground">
       {segments.map((segment, index) =>
         segment.kind === "md" ? (
-          <MarkdownBody key={index} text={segment.text} />
+          mdChunks(segment.text).map((chunk, chunkIndex, chunks) => (
+            <MarkdownBody
+              key={`${index}-${chunkIndex}`}
+              text={chunkIndex < chunks.length - 1 ? `${chunk}\n\n` : chunk}
+            />
+          ))
         ) : (
           <div key={index} className="my-3 first:mt-0">
             <VisualBlockView block={segment.block} />

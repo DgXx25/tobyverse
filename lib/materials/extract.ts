@@ -73,6 +73,7 @@ export async function extractPlainText(input: {
   mime: string;
   buffer: Buffer;
   type?: MaterialType;
+  includeImages?: boolean;
 }): Promise<ExtractResult> {
   const type = input.type ?? inferMaterialType(input.filename, input.mime);
   if (!type || type === "paste" || type === "url") {
@@ -97,12 +98,13 @@ export async function extractPlainText(input: {
     }
 
     if (type === "pptx") {
-      const pptx = await extractPptx(input.buffer);
+      const includeImages = input.includeImages !== false;
+      const pptx = await extractPptx(input.buffer, { includeImages });
       return {
         text: clipText(pptx.text, EXTRACT_MAX_CHARS),
         type,
         pageCount: pptx.pageCount,
-        images: toPayload(pptx.images),
+        images: includeImages ? toPayload(pptx.images) : [],
       };
     }
 

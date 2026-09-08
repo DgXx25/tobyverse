@@ -3,10 +3,13 @@ import { incrementUsage } from "@/lib/account/store";
 import {
   choosePracticeSetSize,
   createExercise,
+  deleteExercise,
   exerciseStem,
+  isGenerableExerciseType,
   planPracticeSet,
   practiceFamilyForTopic,
   practiceFamilyFromTypes,
+  practiceSetBounds,
   CLICK_FIRST_TYPES,
   listExercises,
   type PracticeFamily,
@@ -47,73 +50,73 @@ export async function generatePracticeSet(input: {
   const existing = await listExercises(input.project.id);
   const avoid = existing.map(exerciseStem);
   const goal = goalOrDefault(input.prompt ?? "", input.project.goal);
-  const count = input.count ?? choosePracticeSetSize({ goal });
+  const { requested, minAccept } = practiceSetBounds(input.count ?? choosePracticeSetSize({ goal }));
   const topic = input.prompt?.trim() || input.project.title;
   const family =
     input.family ??
     (existing.length > 0 && !input.prompt?.trim()
       ? practiceFamilyFromTypes(existing.map((item) => item.type))
       : practiceFamilyForTopic(topic));
-  input.onStatus?.(`Generating practice · ${count} items`);
-  const plan = planPracticeSet(family, count).filter((item) => {
-    if (item.type === "true_false") return false;
+  input.onStatus?.(`Generating practice · ${requested} items`);
+  const plan = planPracticeSet(family, requested).filter((item) => {
+    if (!isGenerableExerciseType(item.type)) return false;
     if (family === "recall" && !CLICK_FIRST_TYPES.includes(item.type)) return false;
     return true;
   });
-  const created: string[] = [];
+  if (plan.length < minAccept) {
+    throw new Error("Could not create a practice set.");
+  }
+
+  const response = await fetch("/api/exercises/generate", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({
+      types: plan.map((item) => item.type),
+      projectTitle: input.project.title,
+      sources,
+      knowledge: knowledgeItems.map((item) => ({
+        id: item.id,
+        prompt: item.prompt,
+        answer: item.answer,
+      })),
+      avoid,
+    }),
+  });
+  const data = (await response.json()) as {
+    items?: Array<{ type?: ExerciseType; category?: ExerciseCategory; data?: ProjectExercise["data"] }>;
+    error?: string;
+    geminiCalls?: number;
+  };
+  const geminiCalls = typeof data.geminiCalls === "number" ? data.geminiCalls : 0;
+  console.info(`[practice-generate] geminiCalls before=${plan.length} after=${geminiCalls}`);
+
+  const items = (data.items ?? []).flatMap((item) => {
+    if (!item.type || !item.data || !isGenerableExerciseType(item.type)) return [];
+    return [{ type: item.type, category: item.category ?? "theory", data: item.data }];
+  });
+  if (!response.ok || items.length < minAccept) {
+    throw new Error(data.error ?? "Could not create a practice set.");
+  }
+
   const ids: string[] = [];
-  const failures: string[] = [];
-
-  for (const planned of plan) {
-    const response = await fetch("/api/exercises/generate", {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({
-        type: planned.type,
-        projectTitle: input.project.title,
-        sources,
-        knowledge: knowledgeItems.map((item) => ({
-          id: item.id,
-          prompt: item.prompt,
-          answer: item.answer,
-        })),
-        avoid: [...avoid, ...created],
-      }),
-    });
-    const data = (await response.json()) as {
-      type?: ExerciseType;
-      category?: ExerciseCategory;
-      data?: ProjectExercise["data"];
-      error?: string;
-    };
-    if (!response.ok || !data.type || !data.data) {
-      failures.push(`${planned.type}: ${data.error ?? "invalid JSON"}`);
-      continue;
+  try {
+    for (const item of items.slice(0, requested)) {
+      const id = await createExercise({
+        projectId: input.project.id,
+        userId: input.userId,
+        type: item.type,
+        category: item.category,
+        data: item.data,
+        sourceMaterialIds: input.materials.map((row) => row.id),
+        knowledgeItemId: knowledgeItems[0]?.id ?? null,
+      });
+      ids.push(id);
     }
-    if (data.type === "true_false") {
-      failures.push("true_false: skipped");
-      continue;
-    }
-    if (family === "recall" && !CLICK_FIRST_TYPES.includes(data.type)) {
-      failures.push(`${data.type}: skipped for recall`);
-      continue;
-    }
-    const id = await createExercise({
-      projectId: input.project.id,
-      userId: input.userId,
-      type: data.type,
-      category: data.category ?? planned.category,
-      data: data.data,
-      sourceMaterialIds: input.materials.map((item) => item.id),
-      knowledgeItemId: knowledgeItems[0]?.id ?? null,
-    });
-    ids.push(id);
-    created.push(typeof data.data === "object" ? JSON.stringify(data.data).slice(0, 80) : data.type);
+  } catch (error) {
+    await Promise.all(ids.map((id) => deleteExercise(input.project.id, id).catch(() => undefined)));
+    throw error;
   }
 
-  if (ids.length === 0) {
-    throw new Error(failures[0] ?? "Could not create a practice set.");
-  }
   await incrementUsage(input.userId, "practiceGenerated");
   return { ids, count: ids.length };
 }

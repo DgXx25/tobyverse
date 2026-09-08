@@ -2,6 +2,7 @@ import {
   type ChatToolCall,
   type ChatToolName,
 } from "@/lib/ai/tools";
+import type { PendingKind } from "@/types/chat";
 
 export const COMPOSER_INTENTS = [
   "ask",
@@ -72,9 +73,15 @@ const FILLERS = new Set([
   "let",
   "lets",
   "add",
+  "show",
+  "find",
+  "see",
+  "looking",
+  "interested",
   "მინდა",
   "გთხოვ",
   "რომ",
+  "მაინტერესებს",
 ]);
 
 const TOPIC_STRIP = [
@@ -196,8 +203,9 @@ const PRACTICE_HINT =
   /დამავარჯიშე|გამომცადე|ვივარჯიშო|ვარჯიში|quiz me|test me|\bpractice\b|\bquiz\b/i;
 /** One stem covers კონსპექტი / დავაკონსპექტო / დამიკონსპექტე. */
 const SHEET_HINT = /კონსპექტ|შემომაჯამე|შემაჯამე|study sheet|\bnotes\b|summarize/i;
-/** One stem covers ფოტოები / photo / image. Not a keyword brain. */
-const IMAGE_HINT = /ფოტო|\bphotos?\b|\bimages?\b/i;
+/** Safety-net only. The model owns image intent in any language. */
+const IMAGE_HINT =
+  /მომიძებნე|გრაფიკ|ფოტო|სურათ|\bphotos?\b|\bimages?\b|\bpictures?\b|\bcharts?\b|\bgraphs?\b|\bdiagrams?\b/i;
 const EDIT_HINT = /გაამარტივე|შეამოკლე|simplify|shorten|rewrite|easier/i;
 const APPEND_HINT = /დაამატე|add more|more questions|more items/i;
 
@@ -213,12 +221,72 @@ export function wantsImages(prompt: string): boolean {
   return IMAGE_HINT.test(prompt);
 }
 
+export function promptIsKa(text: string): boolean {
+  return /[\u10A0-\u10FF]/.test(text);
+}
+
+const IMAGE_STRIP = [
+  "ფოტოები მაინტერესებს",
+  "ფოტოები",
+  "ფოტო",
+  "სურათები",
+  "სურათი",
+  "სურათ",
+  "გრაფიკები",
+  "გრაფიკი",
+  "გრაფიკ",
+  "მომიძებნე",
+  "look up images",
+  "look up photos",
+  "show me photos of",
+  "show me photos",
+  "show me images of",
+  "show me images",
+  "photos of",
+  "images of",
+  "pictures of",
+  "pictures",
+  "picture",
+  "photos",
+  "photo",
+  "images",
+  "image",
+  "charts",
+  "chart",
+  "graphs",
+  "graph",
+  "diagrams",
+  "diagram",
+  "find me",
+  "look up",
+  "pics",
+];
+
+function stripImagePhrases(prompt: string): string {
+  let text = prompt;
+  for (const key of [...IMAGE_STRIP].sort((a, b) => b.length - a.length)) {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = /[A-Za-z]/.test(key) ? new RegExp(`\\b${escaped}\\b`, "gi") : new RegExp(escaped, "gi");
+    text = text.replace(pattern, " ");
+  }
+  return text;
+}
+
+export function extractImageQuery(prompt: string): string | null {
+  return extractTopic(stripImagePhrases(prompt));
+}
+
+export function imageClarifyQuestion(prompt: string): string {
+  return promptIsKa(prompt) ? "რა თემის ფოტოები გინდა?" : "What should I search photos of?";
+}
+
 export function resolvePendingKind(
   prompt: string,
-  pending?: { pendingKind?: "practice" | "sheet" | null },
-): "practice" | "sheet" | null {
+  pending?: { pendingKind?: PendingKind | null },
+): PendingKind | null {
   if (wantsSheet(prompt)) return "sheet";
   if (wantsPractice(prompt)) return "practice";
+  if (wantsImages(prompt)) return "images";
   return pending?.pendingKind ?? null;
 }
 
@@ -228,25 +296,42 @@ export function pendingCreateFromMessages(
     content: string;
     artifact?: { kind?: string } | null;
     options?: string[] | null;
-    pendingKind?: "practice" | "sheet" | null;
+    pendingKind?: PendingKind | null;
   }>,
-): { priorClarify: boolean; pendingTopic: string | null; pendingKind: "practice" | "sheet" | null } {
+): { priorClarify: boolean; pendingTopic: string | null; pendingKind: PendingKind | null } {
   const lastAssistant = [...messages].reverse().find((item) => item.role === "assistant");
   const priorClarify = Boolean(lastAssistant && !lastAssistant.artifact && lastAssistant.options != null);
   const storedKind =
-    lastAssistant?.pendingKind === "sheet" || lastAssistant?.pendingKind === "practice"
+    lastAssistant?.pendingKind === "sheet" ||
+    lastAssistant?.pendingKind === "practice" ||
+    lastAssistant?.pendingKind === "images"
       ? lastAssistant.pendingKind
       : null;
   const lastHint = [...messages].reverse().find(
-    (item) => item.role === "user" && (PRACTICE_HINT.test(item.content) || SHEET_HINT.test(item.content)),
+    (item) =>
+      item.role === "user" &&
+      (PRACTICE_HINT.test(item.content) || SHEET_HINT.test(item.content) || IMAGE_HINT.test(item.content)),
   );
-  const pendingKind: "practice" | "sheet" | null =
-    storedKind ?? (!lastHint ? null : SHEET_HINT.test(lastHint.content) ? "sheet" : "practice");
-  const pendingTopic = lastHint ? extractTopic(lastHint.content) : null;
+  const pendingKind: PendingKind | null =
+    storedKind ??
+    (!lastHint
+      ? null
+      : SHEET_HINT.test(lastHint.content)
+        ? "sheet"
+        : PRACTICE_HINT.test(lastHint.content)
+          ? "practice"
+          : IMAGE_HINT.test(lastHint.content)
+            ? "images"
+            : null);
+  const pendingTopic = lastHint
+    ? pendingKind === "images"
+      ? extractImageQuery(lastHint.content)
+      : extractTopic(lastHint.content)
+    : null;
   return { priorClarify, pendingTopic, pendingKind };
 }
 
-function createToolForPending(pendingKind?: "practice" | "sheet" | null, askedSheet?: boolean): "create_practice" | "create_sheet" {
+function createToolForPending(pendingKind?: PendingKind | null, askedSheet?: boolean): "create_practice" | "create_sheet" {
   return askedSheet || pendingKind === "sheet" ? "create_sheet" : "create_practice";
 }
 
@@ -257,7 +342,7 @@ export function fallbackChatTool(input: {
   accepted?: "create_practice" | "create_sheet";
   priorClarify?: boolean;
   pendingTopic?: string | null;
-  pendingKind?: "practice" | "sheet" | null;
+  pendingKind?: PendingKind | null;
 }): ChatToolCall {
   if (input.accepted) {
     return { name: input.accepted, args: { topic: extractTopic(input.prompt) ?? input.pendingTopic ?? undefined } };
@@ -295,11 +380,23 @@ export function fallbackChatTool(input: {
   }
   const askedPractice = PRACTICE_HINT.test(prompt);
   const askedSheet = SHEET_HINT.test(prompt);
-  if (wantsImages(prompt) && !askedPractice && !askedSheet) {
-    return { name: "search_images", args: { query: extractTopic(prompt) || prompt.trim() } };
+  if (input.priorClarify && input.pendingKind === "images") {
+    return {
+      name: "search_images",
+      args: { query: prompt.trim() },
+    };
   }
-  const createFlow = Boolean(input.priorClarify || input.pendingKind || askedPractice || askedSheet);
-  if (input.priorClarify && !looksLikeQuestion(prompt)) {
+  if (wantsImages(prompt) && !askedPractice && !askedSheet) {
+    const query = extractImageQuery(prompt);
+    if (!query && !input.priorClarify) {
+      return { name: "clarify", args: { question: imageClarifyQuestion(prompt) } };
+    }
+    return { name: "search_images", args: { query: prompt.trim() } };
+  }
+  const createFlow = Boolean(
+    input.pendingKind !== "images" && (input.priorClarify || input.pendingKind || askedPractice || askedSheet),
+  );
+  if (input.priorClarify && !looksLikeQuestion(prompt) && input.pendingKind !== "images") {
     return {
       name: createToolForPending(input.pendingKind, askedSheet),
       args: { topic: mergePracticeTopic(extractTopic(prompt), input.pendingTopic) },
@@ -310,12 +407,6 @@ export function fallbackChatTool(input: {
       name: createToolForPending(input.pendingKind, askedSheet),
       args: { topic: mergePracticeTopic(extractTopic(prompt), input.pendingTopic) },
     };
-  }
-  if (askedPractice) {
-    return { name: "create_practice", args: { topic: extractTopic(prompt) ?? undefined } };
-  }
-  if (askedSheet) {
-    return { name: "create_sheet", args: { topic: extractTopic(prompt) ?? undefined } };
   }
   return { name: "answer", args: {} };
 }
@@ -332,8 +423,10 @@ export function gateChatTool(input: {
   confirmed?: boolean;
   priorClarify?: boolean;
   pendingTopic?: string | null;
-  pendingKind?: "practice" | "sheet" | null;
+  pendingKind?: PendingKind | null;
   active?: { kind: string; id: string } | null;
+  /** Keywords may create only when the provider returned plain text (no tool). */
+  keywordFallback?: boolean;
 }): ChatToolCall {
   const prompt = input.prompt;
   const active = input.active ?? null;
@@ -350,38 +443,64 @@ export function gateChatTool(input: {
   const askedPractice = PRACTICE_HINT.test(prompt);
   const askedSheet = SHEET_HINT.test(prompt);
   const askedImages = wantsImages(prompt) && !askedPractice && !askedSheet;
-  const factQuestion = looksLikeQuestion(prompt) && !askedPractice && !askedSheet && !input.confirmed;
+  const factQuestion = looksLikeQuestion(prompt) && !askedPractice && !askedSheet && !askedImages && !input.confirmed;
+
+  if (input.priorClarify && pendingKind === "images") {
+    return {
+      name: "search_images",
+      args: {
+        query: tool.args.query?.trim() || prompt.trim(),
+      },
+    };
+  }
 
   if (askedImages) {
+    const query = tool.args.query?.trim() || extractImageQuery(prompt);
+    if (!query && !input.priorClarify) {
+      return {
+        name: "clarify",
+        args: { question: tool.args.question || imageClarifyQuestion(prompt), options: tool.args.options },
+      };
+    }
     return {
       name: "search_images",
-      args: { query: tool.args.query?.trim() || extractTopic(prompt) || prompt.trim() },
+      args: { query: tool.args.query?.trim() || prompt.trim() },
     };
   }
 
-  if (factQuestion && (isCreateTool(tool.name) || tool.name === "clarify" || tool.name === "search_images")) {
+  if (tool.name === "search_images") {
+    const query = tool.args.query?.trim() || prompt.trim();
+    if (!extractImageQuery(prompt) && !tool.args.query?.trim() && !input.priorClarify && wantsImages(prompt)) {
+      return {
+        name: "clarify",
+        args: { question: tool.args.question || imageClarifyQuestion(prompt), options: tool.args.options },
+      };
+    }
+    return { name: "search_images", args: { query } };
+  }
+
+  if (factQuestion && (isCreateTool(tool.name) || tool.name === "clarify")) {
     return { name: "answer", args: {} };
-  }
-
-  if (tool.name === "search_images" && !(input.priorClarify && pendingKind)) {
-    return {
-      name: "search_images",
-      args: { query: tool.args.query?.trim() || extractTopic(prompt) || prompt.trim() },
-    };
   }
 
   const generateNow = wantsImmediateCreate(prompt, input.confirmed);
   const createFlow =
-    askedPractice || askedSheet || pendingKind === "practice" || pendingKind === "sheet" || Boolean(input.priorClarify);
+    pendingKind !== "images" &&
+    (askedPractice || askedSheet || pendingKind === "practice" || pendingKind === "sheet" || Boolean(input.priorClarify));
   const mutating = EDIT_HINT.test(prompt) || APPEND_HINT.test(prompt);
 
-  if ((generateNow || input.priorClarify) && createFlow && !factQuestion && !mutating) {
+  if (
+    input.keywordFallback &&
+    (generateNow || input.priorClarify) &&
+    createFlow &&
+    !factQuestion &&
+    !mutating
+  ) {
     if (
       tool.name === "clarify" ||
       tool.name === "answer" ||
       tool.name === "suggest_practice" ||
-      tool.name === "suggest_sheet" ||
-      tool.name === "search_images"
+      tool.name === "suggest_sheet"
     ) {
       const name = createToolForPending(pendingKind, askedSheet);
       const topic = mergePracticeTopic(tool.args.topic ?? extractTopic(prompt), input.pendingTopic);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { subscribeExercises, type ProjectExercise } from "@/lib/exercises";
 import { savePracticeIndex } from "@/lib/workspace/practice-progress";
 import { ExercisePlayer, type ExercisePlayerHandle } from "@/components/exercises/exercise-player";
-import { IconX } from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 
 export function PracticeSession({
   projectId,
@@ -98,7 +98,7 @@ export function PracticeSession({
           className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
           aria-label="Stop practice"
         >
-          <IconX className="h-5 w-5" />
+          <UiIcon name="close" size={20} />
         </button>
         <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2">
           <div className="h-full rounded-full bg-foreground transition-[width] duration-200" style={{ width: `${progress}%` }} />

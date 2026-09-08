@@ -7,6 +7,10 @@ export type ChatMode = (typeof CHAT_MODES)[number];
 
 export type ChatRole = "user" | "assistant" | "system";
 
+export const PENDING_KINDS = ["practice", "sheet", "images"] as const;
+
+export type PendingKind = (typeof PENDING_KINDS)[number];
+
 export const CHAT_ARTIFACT_KINDS = ["plan", "sheet", "practice"] as const;
 
 export type KnownChatArtifactKind = (typeof CHAT_ARTIFACT_KINDS)[number];
@@ -48,17 +52,22 @@ export type ChatMessage = {
   artifact: ChatArtifact | null;
   /** Present on a clarify turn, including []. */
   options?: string[];
-  pendingKind?: "practice" | "sheet";
+  pendingKind?: PendingKind;
   images?: ChatImageHit[];
   createdAt: IsoDateString | null;
 };
 
 export type ChatImageHit = {
   url: string;
+  thumb: string;
   title: string;
   source: string;
+  license: string;
+  credit: string;
   pageUrl?: string;
-  thumb?: string;
+  kind?: "web" | "upload";
+  materialId?: string;
+  storagePath?: string;
 };
 
 export type ChatAttachment = {
@@ -111,7 +120,7 @@ export type ChatGenerationContext = {
   acceptedTool?: "create_practice" | "create_sheet";
   priorClarify?: boolean;
   pendingTopic?: string;
-  pendingKind?: "practice" | "sheet";
+  pendingKind?: PendingKind;
   materials: ChatMaterialContext[];
   figures?: ChatFigureContext[];
   knowledgeItems: ChatKnowledgeContext[];

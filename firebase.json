@@ -2,6 +2,30 @@
   "firestore": {
     "rules": "firestore.rules"
   },
+  "auth": {
+    "authorizedDomains": [
+      "localhost",
+      "tobyverse.web.app",
+      "tobyverse.firebaseapp.com",
+      "ugstuff-c351a.web.app",
+      "ugstuff-c351a.firebaseapp.com",
+      "tobyverse.ge"
+    ],
+    "providers": {
+      "googleSignIn": {
+        "authorizedRedirectUris": [
+          "http://localhost",
+          "http://localhost:3000",
+          "https://tobyverse.web.app",
+          "https://tobyverse.web.app/__/auth/handler",
+          "https://tobyverse.ge",
+          "https://tobyverse.ge/__/auth/handler",
+          "https://ugstuff-c351a.firebaseapp.com/__/auth/handler",
+          "https://ugstuff-c351a.web.app/__/auth/handler"
+        ]
+      }
+    }
+  },
   "hosting": {
     "site": "tobyverse",
     "source": ".",

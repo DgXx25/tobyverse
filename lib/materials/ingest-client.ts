@@ -30,6 +30,8 @@ export type IngestSource =
   | { kind: "paste"; text: string; title?: string }
   | { kind: "url"; url: string; title?: string };
 
+export type IngestPhase = "uploading" | "reading";
+
 export type PreparedMaterial = {
   projectId: string;
   userId: string;
@@ -41,6 +43,7 @@ export type PreparedMaterial = {
   storagePath: string;
   textPath: string;
   data: ExtractResponse;
+  sourceFile?: File;
 };
 
 function bytesFromBase64(data: string): Uint8Array {
@@ -50,10 +53,14 @@ function bytesFromBase64(data: string): Uint8Array {
   return bytes;
 }
 
-async function deriveFromApi(source: IngestSource): Promise<ExtractResponse> {
+async function deriveFromApi(
+  source: IngestSource,
+  phase: "text" | "images" | "all" = "text",
+): Promise<ExtractResponse> {
   if (source.kind === "file") {
     const form = new FormData();
     form.set("file", source.file);
+    form.set("phase", phase);
     const response = await fetch("/api/materials/extract", {
       method: "POST",
       headers: await authHeaders(false),
@@ -125,11 +132,13 @@ function sourcePayload(source: IngestSource): {
   };
 }
 
-/** Upload original + extract. Does not write Firestore (parent project may not exist yet). */
+/** Upload original + extract TEXT. Does not pack slide images unless includeImages. Does not write Firestore. */
 export async function prepareMaterialIngest(input: {
   projectId: string;
   userId: string;
   source: IngestSource;
+  onPhase?: (phase: IngestPhase) => void;
+  includeImages?: boolean;
 }): Promise<PreparedMaterial> {
   const signedIn = await requireSignedInUser();
   const userId = signedIn.uid;
@@ -139,10 +148,12 @@ export async function prepareMaterialIngest(input: {
   const storagePath = originalStoragePath(userId, projectId, ref.id, payload.originalName);
   const textPath = extractedTextPath(userId, projectId, ref.id);
 
+  input.onPhase?.("uploading");
   await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime);
 
   try {
-    const data = await deriveFromApi(source);
+    input.onPhase?.("reading");
+    const data = await deriveFromApi(source, input.includeImages ? "all" : "text");
     if (!data.text || !data.type) {
       throw new Error(data.error ?? "Extraction failed.");
     }
@@ -157,6 +168,7 @@ export async function prepareMaterialIngest(input: {
       storagePath,
       textPath,
       data,
+      sourceFile: source.kind === "file" ? source.file : undefined,
     };
   } catch (error) {
     await deleteStoragePath(storagePath);
@@ -168,11 +180,37 @@ export async function discardPreparedMaterials(prepared: PreparedMaterial[]): Pr
   await Promise.all(prepared.map((item) => deleteStoragePath(item.storagePath)));
 }
 
-/** Write material docs and extracted sidecars. Parent project must exist (Firestore rules). */
-export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promise<string> {
+async function slideImagesFromExtract(
+  prepared: PreparedMaterial,
+  images: ExtractResponse["images"],
+): Promise<MaterialImage[]> {
+  const { projectId, userId, materialId } = prepared;
+  const counts = new Map<number, number>();
+  const uploaded: MaterialImage[] = [];
+  for (const item of images ?? []) {
+    if (typeof item.data !== "string" || !item.data) continue;
+    const page = typeof item.page === "number" && item.page > 0 ? Math.floor(item.page) : 1;
+    const mime = typeof item.mime === "string" && item.mime.startsWith("image/") ? item.mime : "image/jpeg";
+    const index = counts.get(page) ?? 0;
+    counts.set(page, index + 1);
+    const path = slideImagePath(userId, projectId, materialId, page, mime, index);
+    await uploadMaterialBytes(path, bytesFromBase64(item.data), mime);
+    uploaded.push({ page, path, mime });
+  }
+  return uploaded;
+}
+
+function previewFromPrepared(prepared: PreparedMaterial): string {
+  const text = prepared.data.text ?? "";
+  return prepared.data.preview || previewText(text);
+}
+
+/** Text + preview on the material doc. PPTX stays processing until slide images finish. */
+export async function commitMaterialText(prepared: PreparedMaterial): Promise<string> {
   const { projectId, userId, materialId, storagePath, textPath, data } = prepared;
   const type = data.type ?? prepared.type;
   const title = data.title?.trim() || prepared.title;
+  const needsSlideImages = type === "pptx";
 
   await writeMaterialDoc(projectId, materialId, {
     userId,
@@ -192,22 +230,10 @@ export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promis
 
     await uploadExtractedText(textPath, data.text);
 
-    const images: MaterialImage[] = [];
-    if (data.type === "image") {
-      images.push({ page: 1, path: storagePath, mime: prepared.originalMime || "image/jpeg" });
-    } else {
-      const counts = new Map<number, number>();
-      for (const item of data.images ?? []) {
-        if (typeof item.data !== "string" || !item.data) continue;
-        const page = typeof item.page === "number" && item.page > 0 ? Math.floor(item.page) : 1;
-        const mime = typeof item.mime === "string" && item.mime.startsWith("image/") ? item.mime : "image/jpeg";
-        const index = counts.get(page) ?? 0;
-        counts.set(page, index + 1);
-        const path = slideImagePath(userId, projectId, materialId, page, mime, index);
-        await uploadMaterialBytes(path, bytesFromBase64(item.data), mime);
-        images.push({ page, path, mime });
-      }
-    }
+    const images: MaterialImage[] =
+      type === "image"
+        ? [{ page: 1, path: storagePath, mime: prepared.originalMime || "image/jpeg" }]
+        : [];
 
     await writeMaterialDoc(projectId, materialId, {
       userId,
@@ -215,22 +241,24 @@ export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promis
       type,
       storagePath,
       textPath,
-      extractedTextPreview: data.preview || previewText(data.text),
+      extractedTextPreview: previewFromPrepared(prepared),
       sizeBytes: prepared.sizeBytes,
       pageCount: data.pageCount ?? 1,
       hasImages: images.length > 0,
       textChars: data.text.length,
       images,
-      status: "ready",
+      status: needsSlideImages ? "processing" : "ready",
     });
 
-    trackEvent({
-      userId,
-      projectId,
-      type: "material_uploaded",
-      value: type,
-    });
-    void adjustStorageBytes(userId, prepared.sizeBytes);
+    if (!needsSlideImages) {
+      trackEvent({
+        userId,
+        projectId,
+        type: "material_uploaded",
+        value: type,
+      });
+      void adjustStorageBytes(userId, prepared.sizeBytes);
+    }
 
     return materialId;
   } catch (error) {
@@ -248,13 +276,82 @@ export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promis
   }
 }
 
+/** Background: extract and upload slide images. Does not block chat. */
+export async function finalizeMaterialImages(prepared: PreparedMaterial): Promise<void> {
+  const type = prepared.data.type ?? prepared.type;
+  if (type !== "pptx") return;
+
+  const { projectId, userId, materialId, storagePath, textPath, data } = prepared;
+  const title = data.title?.trim() || prepared.title;
+  const preview = previewFromPrepared(prepared);
+  const text = data.text ?? "";
+
+  try {
+    let images: MaterialImage[] = [];
+    const cached = (prepared.data.images ?? []).filter((item) => typeof item.data === "string" && item.data);
+    if (cached.length > 0) {
+      images = await slideImagesFromExtract(prepared, cached);
+    } else if (prepared.sourceFile) {
+      const extracted = await deriveFromApi({ kind: "file", file: prepared.sourceFile }, "images");
+      images = await slideImagesFromExtract(prepared, extracted.images);
+    }
+
+    await writeMaterialDoc(projectId, materialId, {
+      userId,
+      title,
+      type,
+      storagePath,
+      textPath,
+      extractedTextPreview: preview,
+      sizeBytes: prepared.sizeBytes,
+      pageCount: data.pageCount ?? 1,
+      hasImages: images.length > 0,
+      textChars: text.length,
+      images,
+      status: "ready",
+    });
+
+    trackEvent({
+      userId,
+      projectId,
+      type: "material_uploaded",
+      value: type,
+    });
+    void adjustStorageBytes(userId, prepared.sizeBytes);
+  } catch (error) {
+    console.error("Slide image ingest failed; keeping text preview.", error);
+    await writeMaterialDoc(projectId, materialId, {
+      userId,
+      title,
+      type,
+      storagePath,
+      textPath,
+      extractedTextPreview: preview,
+      sizeBytes: prepared.sizeBytes,
+      pageCount: data.pageCount ?? 1,
+      hasImages: false,
+      textChars: text.length,
+      images: [],
+      status: "ready",
+    });
+    void adjustStorageBytes(userId, prepared.sizeBytes);
+  }
+}
+
+/** Write material docs and extracted sidecars. Parent project must exist (Firestore rules). */
+export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promise<string> {
+  const materialId = await commitMaterialText(prepared);
+  await finalizeMaterialImages(prepared);
+  return materialId;
+}
+
 /** Original file goes to Storage first. Then derive text/images. Never keep a File for chat. */
 export async function ingestMaterial(input: {
   projectId: string;
   userId: string;
   source: IngestSource;
 }): Promise<string> {
-  const prepared = await prepareMaterialIngest(input);
+  const prepared = await prepareMaterialIngest({ ...input, includeImages: true });
   return finalizeMaterialIngest(prepared);
 }
 

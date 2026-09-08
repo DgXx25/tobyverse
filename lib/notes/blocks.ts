@@ -58,6 +58,13 @@ function looksLikeFormula(value: string): boolean {
   return /[=≈≤≥]|\\frac|\\sum|\$\$|AD\s*=|AS\s*=|Y\s*=|P\s*=/.test(text);
 }
 
+function formulaIsGeorgianProse(value: string): boolean {
+  const text = value.trim();
+  if (!text) return true;
+  if (/[\u10A0-\u10FF]/.test(text) && !/[=≈≤≥≠±\\]|\\frac|\\sum|\d/.test(text)) return true;
+  return false;
+}
+
 function hay(value: string): string {
   return value.toLowerCase();
 }
@@ -161,6 +168,11 @@ function flattenIncoming(raw: unknown): VisualBlock[] {
     }
 
     if (type === "formula_card" && typeof row.formula === "string") {
+      if (formulaIsGeorgianProse(row.formula)) {
+        const term = asTerm({ title: typeof row.title === "string" ? row.title : "", text: row.formula });
+        if (term) out.push({ type: "term_card", ...term });
+        continue;
+      }
       out.push({
         type: "formula_card",
         title: typeof row.title === "string" ? row.title : undefined,

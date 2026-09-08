@@ -28,6 +28,7 @@ export type Project = {
   recipe: LessonRecipe;
   preferredChatMode: ChatMode;
   activeArtifact: ActiveArtifact | null;
+  hidden?: boolean;
   createdAt: IsoDateString | null;
   updatedAt: IsoDateString | null;
 };

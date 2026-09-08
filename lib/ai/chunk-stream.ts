@@ -1,3 +1,16 @@
+/** Incremental or cumulative provider chunks → a single growing string. */
+export function mergeStreamDelta(full: string, delta: string): string {
+  if (!delta) return full;
+  if (!full) return delta;
+  if (delta.startsWith(full)) return delta;
+  if (full.endsWith(delta)) return full;
+  const max = Math.min(full.length, delta.length, 256);
+  for (let n = max; n > 0; n -= 1) {
+    if (full.endsWith(delta.slice(0, n))) return full + delta.slice(n);
+  }
+  return full + delta;
+}
+
 export function createChunkBuffer(
   onUpdate: (text: string) => void,
   opts?: { minChars?: number; ms?: number },
@@ -19,8 +32,9 @@ export function createChunkBuffer(
 
   return {
     push(delta: string) {
-      full += delta;
-      sinceFlush += delta.length;
+      const next = mergeStreamDelta(full, delta);
+      sinceFlush += Math.max(0, next.length - full.length);
+      full = next;
       if (sinceFlush >= minChars || /\n/.test(delta)) {
         flush();
         return;

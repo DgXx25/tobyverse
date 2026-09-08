@@ -22,6 +22,7 @@ export {
 export {
   subscribeMaterials,
   listMaterials,
+  waitForMaterialPreviews,
   deleteMaterialDoc,
   newMaterialRef,
   writeMaterialDoc,

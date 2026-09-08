@@ -1,13 +1,13 @@
 import { extractPlainText, MaterialExtractError } from "@/lib/materials/extract";
 import { extractUrlText } from "@/lib/materials/url";
 import { EXTRACT_MAX_CHARS, MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_BYTES, clipText, previewText, uploadTooLargeMessage } from "@/lib/materials/limits";
-import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
+import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    await assertSignedInRequest(request);
+    await assertAccountRequest(request);
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -71,10 +71,12 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const phase = String(form.get("phase") ?? "all").trim().toLowerCase();
     const extracted = await extractPlainText({
       filename: file.name,
       mime: file.type,
       buffer,
+      includeImages: phase !== "text",
     });
 
     return Response.json({

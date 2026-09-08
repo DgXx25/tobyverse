@@ -10,7 +10,7 @@ Allowed block types ONLY:
 term_card {title,text,icon?} — title + ONE short fact line. Under 12 words in text. Never a paragraph. Never title-only.
 concept_row {items: 2-4 term_cards} — short labels with a fact each
 compare_vs {title?, left:{title,text,icon?}, right:{title,text,icon?}} — TWO sides in ONE block. One fact line each side. Optional icon/iconName from the catalog.
-formula_card {title?, formula}
+formula_card {title?, formula} — real math/equations only. Never Georgian prose, sentences, or study tips.
 table {headers, rows}
 steps {items: exactly 3-6 short FACT strings about the topic itself}
 example {text}

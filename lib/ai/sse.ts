@@ -1,5 +1,6 @@
 import type { ChatToolCall } from "@/lib/ai/tools";
 import { parseToolCall } from "@/lib/ai/tools";
+import { GUEST_CAP_CODE, GuestCapError } from "@/lib/guest";
 
 export async function readSseStream(
   response: Response,
@@ -21,7 +22,8 @@ export async function readChatSse(
   }
 
   if (!response.ok) {
-    const data = (await response.json().catch(() => null)) as { error?: string } | null;
+    const data = (await response.json().catch(() => null)) as { error?: string; code?: string } | null;
+    if (data?.code === GUEST_CAP_CODE) throw new GuestCapError();
     throw new Error(data?.error ?? "Request failed.");
   }
 

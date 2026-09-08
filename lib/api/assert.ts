@@ -1,6 +1,7 @@
 export type AuthSession = {
   uid: string;
   email: string | null;
+  anonymous: boolean;
 };
 
 export class AuthError extends Error {
@@ -48,14 +49,49 @@ export async function assertSignedInRequest(request: Request): Promise<AuthSessi
   }
 
   const data = (await response.json()) as {
-    users?: { email?: string; localId?: string }[];
+    users?: {
+      email?: string;
+      localId?: string;
+      providerUserInfo?: { providerId?: string }[];
+    }[];
   };
-  const uid = data.users?.[0]?.localId;
+  const row = data.users?.[0];
+  const uid = row?.localId;
   if (!uid) {
     throw new AuthError("Invalid session.");
   }
 
-  return { uid, email: data.users?.[0]?.email ?? null };
+  return {
+    uid,
+    email: row?.email ?? null,
+    anonymous: sessionIsAnonymous(token, row),
+  };
+}
+
+function sessionIsAnonymous(
+  token: string,
+  row?: { email?: string; providerUserInfo?: { providerId?: string }[] },
+): boolean {
+  try {
+    const part = token.split(".")[1] ?? "";
+    const json = Buffer.from(part.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    const payload = JSON.parse(json) as { firebase?: { sign_in_provider?: string } };
+    if (payload.firebase?.sign_in_provider === "anonymous") return true;
+    if (payload.firebase?.sign_in_provider && payload.firebase.sign_in_provider !== "anonymous") return false;
+  } catch {
+    /* fall through to lookup fields */
+  }
+  const providers = row?.providerUserInfo ?? [];
+  if (providers.some((item) => item.providerId && item.providerId !== "anonymous")) return false;
+  return !row?.email;
+}
+
+export async function assertAccountRequest(request: Request): Promise<AuthSession> {
+  const session = await assertSignedInRequest(request);
+  if (session.anonymous) {
+    throw new AuthError("Sign in with Google to continue.", 403);
+  }
+  return session;
 }
 
 export function authErrorResponse(error: unknown): Response {

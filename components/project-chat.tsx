@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useAuth } from "@/components/auth-provider";
+import { GuestGoogleCta } from "@/components/guest-google-cta";
 import { createChunkBuffer } from "@/lib/ai/chunk-stream";
 import { readChatSse } from "@/lib/ai/sse";
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
-import { dispatchChatTool, dispatchStatus } from "@/lib/chat/dispatch";
+import { dispatchChatTool, dispatchStatus, imageFailLine, imageFoundLine } from "@/lib/chat/dispatch";
 import { trackEvent } from "@/lib/analytics/track";
-import { addChatMessage, ensureChatThread, subscribeChatMessages } from "@/lib/chats";
+import { addChatMessage, allocateChatMessageId, ensureChatThread, patchChatMessage, subscribeChatMessages } from "@/lib/chats";
 import { incrementUsage } from "@/lib/account/store";
 import { excerptsForChat } from "@/lib/materials/chat-context";
-import { pickChatFigures } from "@/lib/materials/figures";
-import { listMaterials, removeMaterial } from "@/lib/materials";
+import { pickChatFigures, shouldAttachChatFigures } from "@/lib/materials/figures";
+import { listMaterials, removeMaterial, waitForMaterialPreviews } from "@/lib/materials";
 import { ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl } from "@/lib/materials/ingest-client";
 import { newChipId, attachmentsFromMaterials, snapshotChatAttachments } from "@/lib/composer/attach";
 import {
@@ -18,9 +20,11 @@ import {
   type PendingStart,
 } from "@/lib/workspace/pending-start";
 import { authHeaders } from "@/lib/api/client";
+import { searchImagesClient } from "@/lib/images/client";
 import {
   intentFromTool,
   pendingCreateFromMessages,
+  promptIsKa,
   resolvePendingKind,
   type ComposerIntent,
 } from "@/lib/composer/intent";
@@ -30,6 +34,7 @@ import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { autoNameProject } from "@/lib/workspace/auto-title";
 import { isRealUserPrompt, needsAutoTitle } from "@/lib/workspace/title";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
+import { gateGuestChatTool, guestCapReached, GuestCapError, isGuestUser, recordGuestAssistantTurn, syncGuestAssistantCount } from "@/lib/guest";
 import { recipeForGoal } from "@/lib/core/recipes";
 import { updateProjectActiveArtifact, updateProjectGoal } from "@/lib/projects";
 import { RichContent } from "@/components/rich-content";
@@ -38,17 +43,22 @@ import { ClarifyChips } from "@/components/workspace/clarify-chips";
 import { MessageAttachments } from "@/components/workspace/message-attachments";
 import { ArtifactCard } from "@/components/workspace/artifact-card";
 import { ImageGallery } from "@/components/workspace/image-gallery";
+import { SourcesChip, sourcesForTurn, turnLocale } from "@/components/workspace/sources-chip";
 import { getStudySheet } from "@/lib/study-sheets/store";
 import type { AiProviderId } from "@/lib/ai/catalog";
-import type { ActiveArtifact, ActiveArtifactStatus, ChatArtifact, ChatAttachment, ChatMessage, ChatTurn, Project } from "@/types";
+import type { ActiveArtifact, ActiveArtifactStatus, ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatTurn, PendingKind, Project } from "@/types";
 import type { Material } from "@/types/material";
 import type { ProjectGoal } from "@/types/goals";
 import type { LessonRecipe } from "@/types/lesson";
 
 type StreamState = {
+  id: string;
   content: string;
   intent: ComposerIntent;
   status?: string;
+  artifact?: ChatArtifact | null;
+  images?: ChatImageHit[];
+  options?: string[];
 };
 
 export function ProjectChat({
@@ -58,6 +68,7 @@ export function ProjectChat({
   materials,
   selectedIds,
   onOpenArtifact,
+  onOpenMaterial,
   onProjectPatch,
 }: {
   project: Project;
@@ -66,6 +77,7 @@ export function ProjectChat({
   materials: Material[];
   selectedIds: string[];
   onOpenArtifact: (artifact: ChatArtifact) => void;
+  onOpenMaterial?: (id: string) => void;
   onProjectPatch?: (patch: {
     title?: string;
     goal?: ProjectGoal;
@@ -73,6 +85,8 @@ export function ProjectChat({
     activeArtifact?: ActiveArtifact | null;
   }) => void;
 }) {
+  const { user } = useAuth();
+  const guest = isGuestUser(user);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -81,6 +95,7 @@ export function ProjectChat({
   const [stream, setStream] = useState<StreamState | null>(null);
   const [chips, setChips] = useState<ComposerChip[]>([]);
   const [suggest, setSuggest] = useState<{ messageId: string; kind: "practice" | "sheet" } | null>(null);
+  const [needGoogle, setNeedGoogle] = useState(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const composerBoxRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<ChatComposerHandle>(null);
@@ -104,7 +119,13 @@ export function ProjectChat({
       project.id,
       (items) => {
         if (cancelled) return;
-        setMessages(items.filter((item) => item.role !== "system"));
+        const next = items.filter((item) => item.role !== "system");
+        setMessages(next);
+        if (guest) {
+          const assistantTurns = next.filter((item) => item.role === "assistant").length;
+          syncGuestAssistantCount(assistantTurns);
+          if (guestCapReached(assistantTurns)) setNeedGoogle(true);
+        }
         setLoading(false);
       },
       (err) => {
@@ -124,6 +145,10 @@ export function ProjectChat({
   useEffect(() => {
     namedRef.current = false;
   }, [project.id]);
+
+  useEffect(() => {
+    if (!guest) setNeedGoogle(false);
+  }, [guest]);
 
   useEffect(() => {
     const node = composerBoxRef.current;
@@ -211,6 +236,7 @@ export function ProjectChat({
   }
 
   function onFile(file: File) {
+    if (guest) return;
     const id = newChipId();
     const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
     void addChip(
@@ -227,6 +253,7 @@ export function ProjectChat({
   }
 
   function onPasteText(text: string) {
+    if (guest) return;
     const id = newChipId();
     void addChip(
       { id, title: "Pasted notes", type: "txt", size: text.length, status: "uploading" },
@@ -235,6 +262,7 @@ export function ProjectChat({
   }
 
   function onUrl(url: string) {
+    if (guest) return;
     const id = newChipId();
     void addChip(
       { id, title: url, type: "url", status: "uploading" },
@@ -247,7 +275,14 @@ export function ProjectChat({
     const pool = latest.length > 0 ? latest : materials;
     const attachments = attachmentsFromMaterials(pending.materialIds, pool);
     if (pending.prompt.trim()) {
-      await sendPrompt(pending.prompt, { materials: pool, attachments });
+      const pendingKind =
+        pending.intent === "practice" ? "practice" : pending.intent === "study" ? "sheet" : undefined;
+      await sendPrompt(pending.prompt, {
+        materials: pool,
+        attachments,
+        pendingKind,
+        waitForPreview: pending.materialIds,
+      });
       return;
     }
     if (attachments.length === 0) return;
@@ -269,12 +304,14 @@ export function ProjectChat({
     figures?: { name: string; page: number; path: string; mime: string; data: string }[];
     confirmed?: boolean;
     acceptedTool?: "create_practice" | "create_sheet";
+    pendingKind?: PendingKind;
+    onFirstToken?: () => void;
   }): Promise<{ text: string; tool: ChatToolCall }> {
     const facts = artifactFacts(messages);
     const latest = latestArtifact(messages);
     const active = resolveActive();
     const pending = pendingCreateFromMessages(messages);
-    const pendingKind = resolvePendingKind(input.prompt, pending);
+    const pendingKind = input.pendingKind ?? resolvePendingKind(input.prompt, pending);
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: await authHeaders(),
@@ -304,27 +341,30 @@ export function ProjectChat({
       }),
     });
 
-    setStream({ content: "", intent: "ask", status: "Thinking" });
     let tool: ChatToolCall = { name: "answer", args: {} };
     const chunks = createChunkBuffer((text) => {
       if (!toolStreamsText(tool.name)) return;
-      setStream({
-        content: text,
-        intent: intentFromTool(tool.name),
-        status: "Writing",
-      });
+      setStream((current) =>
+        current
+          ? { ...current, content: text, intent: intentFromTool(tool.name), status: undefined }
+          : current,
+      );
     });
     const result = await readChatSse(response, {
-      onDelta: (delta) => chunks.push(delta),
+      onDelta: (delta) => {
+        input.onFirstToken?.();
+        chunks.push(delta);
+      },
       onTool: (next) => {
+        input.onFirstToken?.();
         tool = next;
         if (!toolStreamsText(next.name)) {
           const intent = intentFromTool(next.name);
-          setStream({
-            content: "",
-            intent,
-            status: dispatchStatus(intent),
-          });
+          setStream((current) =>
+            current
+              ? { ...current, content: "", intent, status: dispatchStatus(intent) }
+              : current,
+          );
         }
       },
     });
@@ -400,21 +440,36 @@ export function ProjectChat({
       confirmed?: boolean;
       acceptedTool?: "create_practice" | "create_sheet";
       attachments?: ChatAttachment[];
+      pendingKind?: PendingKind;
+      waitForPreview?: string[];
     },
   ) {
-    const attachments = options?.attachments ?? [];
+    let attachments = guest ? [] : (options?.attachments ?? []);
     const modelPrompt =
       prompt.trim() ||
       (attachments.length ? `Help me learn from ${attachments.map((item) => item.title).join(", ")}.` : "");
     if (!modelPrompt || sendingRef.current) return;
+    if (guest && guestCapReached(messages.filter((item) => item.role === "assistant").length)) {
+      setNeedGoogle(true);
+      return;
+    }
 
-    const pool = await materialsForTurn(attachments, options?.materials);
+    let pool = await materialsForTurn(attachments, options?.materials);
+    const previewIds = guest ? [] : (options?.waitForPreview ?? []).filter(Boolean);
+    const previewMissing = previewIds.some((id) => !pool.find((item) => item.id === id)?.extractedTextPreview.trim());
+    const firstFileTurn = previewIds.length > 0;
+    const assistantId = allocateChatMessageId(project.id);
 
     sendingRef.current = true;
     setSending(true);
     setError(null);
     setSuggest(null);
-    setStream({ content: "", intent: "ask", status: "Thinking" });
+    setStream({
+      id: assistantId,
+      content: "",
+      intent: "ask",
+      status: firstFileTurn ? "მასალის გააზრება…" : "Thinking",
+    });
     pinRef.current = true;
 
     const history = historyTurnsFromMessages(messages);
@@ -439,24 +494,63 @@ export function ProjectChat({
         });
       }
 
+      if (previewMissing) {
+        pool = await waitForMaterialPreviews(project.id, previewIds);
+        attachments = attachmentsFromMaterials(previewIds, pool);
+        pool = await materialsForTurn(attachments, pool);
+      }
+
+      setStream((current) =>
+        current
+          ? {
+              ...current,
+              status: firstFileTurn ? "მასალის გააზრება…" : "Thinking",
+            }
+          : current,
+      );
       applyInferredGoal(modelPrompt);
 
-      const materialExcerpts = pool.length > 0 ? await excerptsForChat(modelPrompt, pool) : [];
-      const figures = pool.length > 0 ? await pickChatFigures(modelPrompt, pool) : [];
-      const pendingKind = resolvePendingKind(modelPrompt, pendingCreateFromMessages(messages));
-      const { text, tool } = await streamChat({
+      const startedAt = performance.now();
+      const materialExcerpts = pool.length > 0 ? excerptsForChat(modelPrompt, pool) : [];
+      const excerptChars = materialExcerpts.reduce((sum, item) => sum + item.excerpt.length, 0);
+      const attachFigures = shouldAttachChatFigures(modelPrompt, pool, attachments);
+      const picked = attachFigures
+        ? await pickChatFigures(modelPrompt, pool, attachments)
+        : { figures: [], fileGets: 0 };
+      const figures = picked.figures;
+      const fileGets = picked.fileGets;
+      let sendLogged = false;
+      const logSend = (msUntilFirstToken: number) => {
+        if (sendLogged) return;
+        sendLogged = true;
+        console.info("[chat-send]", {
+          excerptChars,
+          imageAttaches: figures.length,
+          fileGets,
+          msUntilFirstToken,
+        });
+      };
+      const pendingKind = options?.pendingKind ?? resolvePendingKind(modelPrompt, pendingCreateFromMessages(messages));
+      const streamed = await streamChat({
         prompt: modelPrompt,
         history,
         materialExcerpts,
         figures,
         confirmed: options?.confirmed,
-        acceptedTool: options?.acceptedTool,
+        acceptedTool: guest ? undefined : options?.acceptedTool,
+        pendingKind: pendingKind ?? undefined,
+        onFirstToken: () => logSend(Math.round(performance.now() - startedAt)),
       });
+      logSend(Math.round(performance.now() - startedAt));
+      const text = streamed.text;
+      const tool = guest ? gateGuestChatTool(streamed.tool) : streamed.tool;
       const intent = intentFromTool(tool.name);
       applyInferredGoal(tool.args.topic || tool.args.instruction || modelPrompt);
 
       if (!toolStreamsText(tool.name)) {
-        setStream({ content: "", intent, status: dispatchStatus(intent) });
+        setStream((current) =>
+          current ? { ...current, content: "", intent, status: dispatchStatus(intent) } : current,
+        );
       }
 
       const dispatched = await dispatchChatTool({
@@ -469,7 +563,13 @@ export function ProjectChat({
         active: resolveActive(),
         messages,
         pendingKind,
-        onStatus: (status) => setStream({ content: toolStreamsText(tool.name) ? text : "", intent, status }),
+        attachments,
+        onStatus: (status) =>
+          setStream((current) =>
+            current
+              ? { ...current, content: toolStreamsText(tool.name) ? text : "", intent, status }
+              : current,
+          ),
       });
 
       let artifact = dispatched.artifact ?? null;
@@ -488,27 +588,74 @@ export function ProjectChat({
         }
       }
 
+      const content = dispatched.content;
+      setStream((current) =>
+        current
+          ? {
+              ...current,
+              content,
+              intent: dispatched.intent,
+              artifact: artifact,
+              images: dispatched.images,
+              options: dispatched.options,
+              status: undefined,
+            }
+          : current,
+      );
+
       const id = await addChatMessage({
+        id: assistantId,
         projectId: project.id,
         role: "assistant",
         mode: "normal",
         intent: dispatched.intent,
-        content: dispatched.content,
+        content,
         artifact,
         options: dispatched.options,
         pendingKind: dispatched.pendingKind,
         images: dispatched.images,
       });
       void incrementUsage(userId, "chatTurns");
+      if (guest) {
+        recordGuestAssistantTurn();
+        if (guestCapReached()) setNeedGoogle(true);
+      }
       if (artifact) {
-        if (options?.openWhenReady) onOpenArtifact(artifact);
+        if (options?.openWhenReady && !guest) onOpenArtifact(artifact);
         await rememberActive(artifact, "ready");
       }
-      if (dispatched.suggest)       setSuggest({ messageId: id, kind: dispatched.suggest });
+      if (dispatched.suggest && !guest) setSuggest({ messageId: id, kind: dispatched.suggest });
       setStream(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send message.");
+      if (err instanceof GuestCapError) {
+        setNeedGoogle(true);
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not send message.");
+      }
       setStream(null);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+      keepComposerFocus();
+    }
+  }
+
+  async function retryImageSearch(messageId: string, userPrompt: string) {
+    const prompt = userPrompt.trim();
+    if (!prompt || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    setError(null);
+    keepComposerFocus();
+    try {
+      const images = await searchImagesClient(prompt);
+      await patchChatMessage(project.id, messageId, {
+        images,
+        content: images.length > 0 ? imageFoundLine(prompt) : imageFailLine(prompt),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Image search failed.");
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -527,6 +674,7 @@ export function ProjectChat({
   }
 
   async function confirmSuggestion(kind: "practice" | "sheet") {
+    if (guest) return;
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
     const prompt = lastUser?.content ?? project.title;
     setSuggest(null);
@@ -538,6 +686,88 @@ export function ProjectChat({
       acceptedTool: kind === "practice" ? "create_practice" : "create_sheet",
     });
   }
+
+  function assistantInner(message: ChatMessage, prev: ChatMessage | undefined, index: number, live: StreamState | null) {
+    const content = live ? live.content : message.content;
+    const artifact = live?.artifact ?? message.artifact;
+    const images = live?.images ?? message.images;
+    const options = live?.options ?? message.options;
+    const streaming = Boolean(live && !artifact && content && !messages.some((item) => item.id === live.id));
+    const view: ChatMessage = { ...message, content, artifact, images, options };
+    const sources = sourcesForTurn(view);
+
+    return (
+      <div className="w-full max-w-[min(100%,42rem)]">
+        {live?.status ? <p className="status-shimmer mb-3 text-sm">{live.status}</p> : null}
+        {artifact ? (
+          <>
+            {content.trim() ? <p className="mb-3 text-sm text-foreground">{content.trim()}</p> : null}
+            <ArtifactCard artifact={artifact} onOpen={() => onOpenArtifact(artifact)} />
+          </>
+        ) : content ? (
+          <RichContent text={content} streaming={streaming} />
+        ) : null}
+        {images?.length ? (
+          <ImageGallery
+            images={images}
+            onOpenUpload={(image) => {
+              if (image.materialId) onOpenMaterial?.(image.materialId);
+            }}
+          />
+        ) : null}
+        {sources.length ? <SourcesChip items={sources} locale={turnLocale(view, prev)} /> : null}
+        {images && images.length === 0 && !sending && (
+          <button
+            type="button"
+            onClick={() => {
+              const promptText = prev?.role === "user" ? prev.content : "";
+              if (!promptText) return;
+              keepComposerFocus();
+              void retryImageSearch(message.id, promptText).finally(keepComposerFocus);
+            }}
+            className="mt-3 rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
+          >
+            {promptIsKa(content) || (prev && promptIsKa(prev.content)) ? "სცადე თავიდან" : "Retry"}
+          </button>
+        )}
+        {options != null &&
+          !sending &&
+          !messages.slice(index + 1).some((item) => item.role === "user" || item.role === "assistant") && (
+            <ClarifyChips
+              options={options}
+              onPick={(value) => {
+                keepComposerFocus();
+                void sendPrompt(value).finally(keepComposerFocus);
+              }}
+              onOther={keepComposerFocus}
+            />
+          )}
+        {suggest?.messageId === message.id && !guest && !sending && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {suggest.kind === "practice" ? (
+              <button
+                type="button"
+                onClick={() => void confirmSuggestion("practice")}
+                className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
+              >
+                Practice this
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void confirmSuggestion("sheet")}
+                className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
+              >
+                Make notes
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const streamPending = stream && !messages.some((item) => item.id === stream.id);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -551,20 +781,23 @@ export function ProjectChat({
           <div className="pt-8" style={{ paddingBottom: composerH }}>
             {loading && <p className="text-sm text-muted">Loading chat…</p>}
             {!loading && messages.length === 0 && !stream && !sending && (
-              <p className="pb-2 text-center text-sm text-muted">Ask anything. Attach a file if you want.</p>
+              <p className="pb-2 text-center text-sm text-muted">
+                {guest ? "Ask anything." : "Ask anything. Attach a file if you want."}
+              </p>
             )}
             {messages.map((message, index) => {
               const prev = messages[index - 1];
+              const live = stream && message.id === stream.id ? stream : null;
               const gap =
                 index === 0
                   ? ""
                   : message.role === "assistant" && prev?.role === "user"
-                    ? "mt-10"
-                    : "mt-5";
+                    ? "mt-6"
+                    : "mt-4";
               return (
               <article key={message.id} className={`${gap} ${message.role === "user" ? "flex justify-end" : ""}`}>
                 {message.role === "user" ? (
-                  <div className="flex max-w-[80%] flex-col items-end gap-1.5">
+                  <div className="flex w-fit max-w-[min(100%,36rem)] flex-col items-end gap-1.5">
                     <MessageAttachments items={message.attachments} />
                     {message.content.trim() ? (
                       <div className="chat-body rounded-2xl bg-surface-2 px-4 py-2.5 text-foreground">
@@ -573,57 +806,40 @@ export function ProjectChat({
                     ) : null}
                   </div>
                 ) : (
-                  <div className="w-full">
-                    {message.artifact ? (
-                      <ArtifactCard artifact={message.artifact} onOpen={() => onOpenArtifact(message.artifact!)} />
-                    ) : (
-                      <RichContent text={message.content} />
-                    )}
-                    {message.images?.length ? <ImageGallery images={message.images} /> : null}
-                    {message.options != null &&
-                      !sending &&
-                      !messages.slice(index + 1).some((item) => item.role === "user" || item.role === "assistant") && (
-                        <ClarifyChips
-                          options={message.options}
-                          onPick={(value) => {
-                            keepComposerFocus();
-                            void sendPrompt(value).finally(keepComposerFocus);
-                          }}
-                          onOther={keepComposerFocus}
-                        />
-                      )}
-                    {suggest?.messageId === message.id && !sending && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {suggest.kind === "practice" ? (
-                          <button
-                            type="button"
-                            onClick={() => void confirmSuggestion("practice")}
-                            className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
-                          >
-                            Practice this
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void confirmSuggestion("sheet")}
-                            className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
-                          >
-                            Make notes
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  assistantInner(message, prev, index, live)
                 )}
               </article>
               );
             })}
-            {stream && (
-              <article className={!messages.length || messages[messages.length - 1]?.role === "user" ? "mt-10" : "mt-5"}>
-                {stream.status ? <p className="status-shimmer mb-3 text-sm">{stream.status}</p> : null}
-                {stream.content ? <RichContent text={stream.content} streaming /> : null}
+            {streamPending ? (
+              <article
+                key={stream.id}
+                className={`max-w-[min(100%,42rem)] ${!messages.length || messages[messages.length - 1]?.role === "user" ? "mt-6" : "mt-4"}`}
+              >
+                {assistantInner(
+                  {
+                    id: stream.id,
+                    projectId: project.id,
+                    threadId: "",
+                    lessonId: null,
+                    exerciseId: null,
+                    role: "assistant",
+                    mode: "normal",
+                    content: stream.content,
+                    attachments: [],
+                    relatedExerciseType: null,
+                    intent: null,
+                    artifact: stream.artifact ?? null,
+                    options: stream.options,
+                    images: stream.images,
+                    createdAt: null,
+                  },
+                  messages[messages.length - 1],
+                  messages.length,
+                  stream,
+                )}
               </article>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -636,8 +852,9 @@ export function ProjectChat({
               draft={draft}
               onDraft={setDraft}
               sending={sending}
-              error={error}
-              chips={chips}
+              error={needGoogle ? null : error}
+              chips={guest ? [] : chips}
+              allowAttach={!guest}
               onRemoveChip={(id) => {
                 const chip = chips.find((item) => item.id === id);
                 setChips((current) => current.filter((item) => item.id !== id));
@@ -652,6 +869,11 @@ export function ProjectChat({
               onPasteText={onPasteText}
               onUrl={onUrl}
             />
+            {needGoogle ? (
+              <div className="px-4 pb-3">
+                <GuestGoogleCta />
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

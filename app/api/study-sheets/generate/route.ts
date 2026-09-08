@@ -1,5 +1,5 @@
 import { generateJson } from "@/lib/ai/json";
-import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
+import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
 import { clipText, SHEET_TOTAL_CHARS } from "@/lib/materials/limits";
 import { collectNoteProse } from "@/lib/notes/compat";
 import { splitNotePayload } from "@/lib/notes/blocks";
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    await assertSignedInRequest(request);
+    await assertAccountRequest(request);
   } catch (error) {
     return authErrorResponse(error);
   }

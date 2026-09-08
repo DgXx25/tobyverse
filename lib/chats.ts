@@ -1,5 +1,4 @@
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -17,7 +16,7 @@ import { parseChatArtifact, compactChatArtifact } from "@/lib/artifacts/active";
 import { getFirebaseDb } from "@/lib/firebase";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { isComposerIntent } from "@/lib/composer/intent";
-import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole } from "@/types/chat";
+import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole, PendingKind } from "@/types/chat";
 import type { ExerciseType } from "@/types/exercise";
 
 function chatRef(projectId: string, threadId = DEFAULT_CHAT_THREAD_ID) {
@@ -76,7 +75,10 @@ function mapMessage(
     intent: isComposerIntent(data.intent) ? data.intent : null,
     artifact: asArtifact(data.artifact),
     options: asOptions(data.options, data.clarify),
-    pendingKind: data.pendingKind === "sheet" || data.pendingKind === "practice" ? data.pendingKind : undefined,
+    pendingKind:
+      data.pendingKind === "sheet" || data.pendingKind === "practice" || data.pendingKind === "images"
+        ? data.pendingKind
+        : undefined,
     images: asImages(data.images),
     createdAt: toIsoDate(data.createdAt) ?? toIsoDate(data.createdAtClient),
   };
@@ -111,18 +113,27 @@ function asImages(value: unknown): ChatImageHit[] | undefined {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
     const url = typeof row.url === "string" ? row.url.trim() : "";
-    if (!url) return [];
+    const thumb = typeof row.thumb === "string" ? row.thumb.trim() : "";
+    const storagePath = typeof row.storagePath === "string" ? row.storagePath.trim() : "";
+    if (!url && !thumb && !storagePath) return [];
+    const kind: ChatImageHit["kind"] =
+      row.kind === "upload" ? "upload" : row.kind === "web" ? "web" : storagePath ? "upload" : "web";
     return [
       {
-        url,
-        title: typeof row.title === "string" && row.title.trim() ? row.title.trim() : url,
-        source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : "web",
+        url: url || storagePath || thumb,
+        thumb: thumb || storagePath || url,
+        title: typeof row.title === "string" && row.title.trim() ? row.title.trim() : url || "Image",
+        source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : kind === "upload" ? "upload" : "web",
+        license: typeof row.license === "string" ? row.license.trim() : "",
+        credit: typeof row.credit === "string" ? row.credit.trim() : "",
         pageUrl: typeof row.pageUrl === "string" ? row.pageUrl.trim() || undefined : undefined,
-        thumb: typeof row.thumb === "string" ? row.thumb.trim() || undefined : undefined,
+        kind,
+        materialId: typeof row.materialId === "string" ? row.materialId.trim() || undefined : undefined,
+        storagePath: storagePath || undefined,
       },
     ];
   });
-  return hits.length ? hits : undefined;
+  return hits;
 }
 
 function asArtifact(value: unknown): ChatArtifact | null {
@@ -162,6 +173,13 @@ export async function setChatThreadMode(
   );
 }
 
+export function allocateChatMessageId(
+  projectId: string,
+  threadId = DEFAULT_CHAT_THREAD_ID,
+): string {
+  return doc(messagesCollection(projectId, threadId)).id;
+}
+
 export async function addChatMessage(input: {
   projectId: string;
   userId?: string;
@@ -169,11 +187,12 @@ export async function addChatMessage(input: {
   mode: ChatMode;
   content: string;
   threadId?: string;
+  id?: string;
   intent?: ChatMessage["intent"];
   artifact?: ChatArtifact | null;
   attachments?: ChatAttachment[];
   options?: string[];
-  pendingKind?: "practice" | "sheet";
+  pendingKind?: PendingKind;
   images?: ChatImageHit[];
 }): Promise<string> {
   const threadId = input.threadId ?? DEFAULT_CHAT_THREAD_ID;
@@ -182,8 +201,12 @@ export async function addChatMessage(input: {
     const next = compactChatAttachment(item);
     return next ? [next] : [];
   });
-  const ref = await addDoc(
-    messagesCollection(input.projectId, threadId),
+  const images = input.images?.map((item) => omitUndefined(item));
+  const ref = input.id
+    ? doc(messagesCollection(input.projectId, threadId), input.id)
+    : doc(messagesCollection(input.projectId, threadId));
+  await setDoc(
+    ref,
     omitUndefined({
       projectId: input.projectId,
       threadId,
@@ -200,7 +223,7 @@ export async function addChatMessage(input: {
       createdAtClient,
       ...(input.options !== undefined ? { options: input.options, clarify: true } : {}),
       ...(input.pendingKind ? { pendingKind: input.pendingKind } : {}),
-      ...(input.images?.length ? { images: input.images } : {}),
+      ...(images !== undefined ? { images } : {}),
     }),
   );
 
@@ -209,6 +232,19 @@ export async function addChatMessage(input: {
   }).catch(() => undefined);
 
   return ref.id;
+}
+
+export async function patchChatMessage(
+  projectId: string,
+  messageId: string,
+  patch: { content?: string; images?: ChatImageHit[] },
+  threadId = DEFAULT_CHAT_THREAD_ID,
+): Promise<void> {
+  const payload: Record<string, unknown> = {};
+  if (patch.content !== undefined) payload.content = patch.content;
+  if (patch.images !== undefined) payload.images = patch.images.map((item) => omitUndefined(item));
+  if (Object.keys(payload).length === 0) return;
+  await updateDoc(doc(messagesCollection(projectId, threadId), messageId), omitUndefined(payload));
 }
 
 export async function listChatMessages(

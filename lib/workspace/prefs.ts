@@ -55,7 +55,7 @@ export function loadWorkspacePrefs(projectId: string, mode: ChatMode): Workspace
         ? parsed.selectedMaterialIds.filter((item): item is string => typeof item === "string")
         : [],
       contextOpen: false,
-      artifactWidth: Math.min(900, Math.max(360, width)),
+      artifactWidth: Math.min(900, Math.max(400, width)),
     };
   } catch {
     return fallback;

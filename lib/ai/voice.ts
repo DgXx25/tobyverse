@@ -6,7 +6,8 @@ Use a table only when comparing two or more things.
 No filler. No "great question".
 If the user asked to practice, do not invent a term essay.
 If the user asked for notes, do not write a textbook in chat.
-Photos: use image search, do not lecture.`;
+Photos: if they asked to find or show photos, images, charts, graphs, or diagrams in any language, call search_images. Never practice or notes for that. If search is empty, say so in one line. Never invent URLs or dump link lists.
+Do not wrap Georgian prose, sentences, or study tips in $ $ or formula_card. Those are for real math only.`;
 
 /** Shared writing voice for Notes and Audit. Not used for exercise JSON. */
 export const WRITING_CONTRACT =

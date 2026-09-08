@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { authErrorMessage, signInWithApple, signInWithGoogle } from "@/lib/auth";
+import {
+  authErrorMessage,
+  consumeRedirectResult,
+  enterAppAfterSignIn,
+  isAccountUser,
+  isAppleSignInConfigured,
+  persistSignedInSession,
+  signInWithApple,
+  signInWithGoogle,
+} from "@/lib/auth";
 import { useAuth } from "@/components/auth-provider";
-import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 
 type Provider = "google" | "apple";
 
@@ -42,32 +49,50 @@ function AppleIcon() {
 
 export function AuthForm() {
   const { user, loading } = useAuth();
-  const router = useRouter();
   const sent = useRef(false);
   const [pending, setPending] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [redirectReady, setRedirectReady] = useState(false);
   const configured = isFirebaseConfigured();
+  const appleConfigured = isAppleSignInConfigured();
 
   useEffect(() => {
-    if (loading || !user || sent.current) return;
+    let live = true;
+    void consumeRedirectResult()
+      .then((result) => {
+        if (!live) return;
+        if (isAccountUser(result.credential?.user) && result.credential) {
+          persistSignedInSession(result.credential.user);
+          sent.current = true;
+          enterAppAfterSignIn(true);
+        }
+      })
+      .finally(() => {
+        if (live) setRedirectReady(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!redirectReady || loading || !isAccountUser(user) || sent.current) return;
     sent.current = true;
-    router.replace("/new");
-  }, [loading, user, router]);
+    persistSignedInSession(user);
+    enterAppAfterSignIn(true);
+  }, [redirectReady, loading, user]);
 
   async function signIn(provider: Provider) {
     setError(null);
     setPending(provider);
 
     try {
-      if (provider === "google") {
-        await signInWithGoogle();
-      } else {
-        await signInWithApple();
-      }
+      const credential = provider === "google" ? await signInWithGoogle() : await signInWithApple();
+      if (!credential) return;
 
-      writeSignedInCookie(true);
+      persistSignedInSession(credential.user);
       sent.current = true;
-      router.replace("/new");
+      enterAppAfterSignIn(true);
     } catch (err) {
       const message = authErrorMessage(err);
       if (message) setError(message);
@@ -86,7 +111,7 @@ export function AuthForm() {
     );
   }
 
-  if (loading || user) {
+  if (loading || !redirectReady || isAccountUser(user)) {
     return <div className="h-28" />;
   }
 
@@ -103,15 +128,17 @@ export function AuthForm() {
           {pending === "google" ? "Connecting…" : "Login with Google"}
         </button>
 
-        <button
-          type="button"
-          disabled={pending !== null}
-          onClick={() => signIn("apple")}
-          className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
-        >
-          <AppleIcon />
-          {pending === "apple" ? "Connecting…" : "Login with Apple"}
-        </button>
+        {appleConfigured ? (
+          <button
+            type="button"
+            disabled={pending !== null}
+            onClick={() => signIn("apple")}
+            className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50"
+          >
+            <AppleIcon />
+            {pending === "apple" ? "Connecting…" : "Login with Apple"}
+          </button>
+        ) : null}
       </div>
 
       {error && <p className="mt-4 text-center text-xs text-red-400">{error}</p>}

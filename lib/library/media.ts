@@ -1,4 +1,5 @@
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
+import { slidesFromImages } from "@/lib/materials/viewer-files";
 import type { LibraryItem } from "@/lib/library/items";
 
 export function isLibraryImage(item: LibraryItem): boolean {
@@ -10,10 +11,9 @@ export function isLibraryPptx(item: LibraryItem): boolean {
 }
 
 function sortedImagePaths(item: LibraryItem): string[] {
-  return [...(item.images ?? [])]
-    .filter((image) => Boolean(image.path))
-    .sort((a, b) => a.page - b.page || a.path.localeCompare(b.path))
-    .map((image) => image.path);
+  return slidesFromImages(item.images ?? [], item.pageCount)
+    .map((slide) => slide.storagePath)
+    .filter((path): path is string => Boolean(path));
 }
 
 function usablePaths(paths: string[]): string[] {

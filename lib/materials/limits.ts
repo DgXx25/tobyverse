@@ -16,6 +16,8 @@ export function uploadTooLargeMessage(): string {
 export const MAX_SLIDE_IMAGES = 16;
 export const CHAT_IMAGE_LIMIT = 2;
 export const CHAT_IMAGE_MAX_BYTES = 1_500_000;
+export const PREVIEW_HTML_MAX = 80_000;
+export const PREVIEW_IMAGE_MAX_BYTES = 250_000;
 
 export function previewText(text: string, max = PREVIEW_MAX_CHARS): string {
   const compact = text.replace(/\s+/g, " ").trim();

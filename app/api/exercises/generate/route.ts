@@ -1,7 +1,9 @@
 import { generateJson } from "@/lib/ai/json";
-import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
-import { payloadSchemaFor } from "@/lib/exercises/schemas";
-import { exerciseSystemPrompt, knowledgeSystemNote } from "@/lib/exercises/prompt";
+import { getGenerateTextCallCount } from "@/lib/ai/gemini";
+import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
+import { payloadSchemaFor, practiceSetEnvelopeSchema } from "@/lib/exercises/schemas";
+import { exerciseSetSystemPrompt, exerciseSystemPrompt, knowledgeSystemNote } from "@/lib/exercises/prompt";
+import { isGenerableExerciseType, practiceSetBounds } from "@/lib/exercises/plan";
 import { clipText, SHEET_TOTAL_CHARS } from "@/lib/materials/limits";
 import { EXERCISE_CATEGORIES, PROBLEM_EXERCISE_TYPES, THEORY_EXERCISE_TYPES, type ExerciseType } from "@/types/exercise";
 import { isProblemType } from "@/lib/exercises/templates";
@@ -19,36 +21,9 @@ function asType(value: unknown): ExerciseType | null {
   return null;
 }
 
-export async function POST(request: Request) {
-  try {
-    await assertSignedInRequest(request);
-  } catch (error) {
-    return authErrorResponse(error);
-  }
-
-  let body: {
-    type?: unknown;
-    projectTitle?: unknown;
-    sources?: unknown;
-    knowledge?: unknown;
-    avoid?: unknown;
-    instruction?: unknown;
-    current?: unknown;
-  };
-
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const type = asType(body.type);
-  if (!type) {
-    return Response.json({ error: "Unknown exercise type." }, { status: 400 });
-  }
-
-  const sources = Array.isArray(body.sources) ? body.sources : [];
-  const compiled = sources
+function compileSources(sources: unknown): string {
+  if (!Array.isArray(sources)) return "";
+  return sources
     .flatMap((item) => {
       if (!item || typeof item !== "object") return [];
       const row = item as { title?: unknown; excerpt?: unknown; images?: unknown };
@@ -68,20 +43,74 @@ export async function POST(request: Request) {
       ];
     })
     .join("\n\n");
+}
 
-  const knowledge = Array.isArray(body.knowledge)
-    ? body.knowledge.flatMap((item) => {
-        if (!item || typeof item !== "object") return [];
-        const row = item as { prompt?: unknown; answer?: unknown };
-        if (typeof row.prompt !== "string") return [];
-        return [`- ${row.prompt}${typeof row.answer === "string" ? ` → ${row.answer.slice(0, 200)}` : ""}`];
-      })
-    : [];
+function compileKnowledge(knowledge: unknown): string[] {
+  if (!Array.isArray(knowledge)) return [];
+  return knowledge.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as { prompt?: unknown; answer?: unknown };
+    if (typeof row.prompt !== "string") return [];
+    return [`- ${row.prompt}${typeof row.answer === "string" ? ` → ${row.answer.slice(0, 200)}` : ""}`];
+  });
+}
 
-  const avoid = Array.isArray(body.avoid)
-    ? body.avoid.filter((item): item is string => typeof item === "string").slice(0, 12)
-    : [];
+function compileAvoid(avoid: unknown): string[] {
+  if (!Array.isArray(avoid)) return [];
+  return avoid.filter((item): item is string => typeof item === "string").slice(0, 12);
+}
 
+function sourcePrompt(input: {
+  projectTitle: string;
+  knowledge: string[];
+  avoid: string[];
+  instruction: string;
+  currentJson: string;
+  compiled: string;
+}): string {
+  return [
+    `Project: ${input.projectTitle}`,
+    input.knowledge.length ? `Unseen facts:\n${input.knowledge.slice(0, 8).join("\n")}` : null,
+    input.avoid.length ? `Do not repeat:\n${input.avoid.map((item) => `- ${item}`).join("\n")}` : null,
+    input.instruction ? `Rewrite instruction: ${input.instruction}` : null,
+    input.currentJson ? `Current item JSON (replace this, same type, keep the same skill):\n${input.currentJson}` : null,
+    input.compiled.trim() ? `Sources:\n${clipText(input.compiled, SHEET_TOTAL_CHARS)}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function categoryFor(type: ExerciseType) {
+  return isProblemType(type) ? EXERCISE_CATEGORIES[1] : EXERCISE_CATEGORIES[0];
+}
+
+export async function POST(request: Request) {
+  try {
+    await assertAccountRequest(request);
+  } catch (error) {
+    return authErrorResponse(error);
+  }
+
+  let body: {
+    type?: unknown;
+    types?: unknown;
+    projectTitle?: unknown;
+    sources?: unknown;
+    knowledge?: unknown;
+    avoid?: unknown;
+    instruction?: unknown;
+    current?: unknown;
+  };
+
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const compiled = compileSources(body.sources);
+  const knowledge = compileKnowledge(body.knowledge);
+  const avoid = compileAvoid(body.avoid);
   const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
   const currentJson =
     body.current && typeof body.current === "object" ? JSON.stringify(body.current).slice(0, 4000) : "";
@@ -91,20 +120,68 @@ export async function POST(request: Request) {
   }
 
   const projectTitle = typeof body.projectTitle === "string" ? body.projectTitle : "Project";
-  const prompt = [
-    `Project: ${projectTitle}`,
-    `Type: ${type}`,
-    knowledge.length ? `Unseen facts:\n${knowledge.slice(0, 8).join("\n")}` : null,
-    avoid.length ? `Do not repeat:\n${avoid.map((item) => `- ${item}`).join("\n")}` : null,
-    instruction ? `Rewrite instruction: ${instruction}` : null,
-    currentJson ? `Current item JSON (replace this, same type, keep the same skill):\n${currentJson}` : null,
-    compiled.trim() ? `Sources:\n${clipText(compiled, SHEET_TOTAL_CHARS)}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const shared = sourcePrompt({
+    projectTitle,
+    knowledge,
+    avoid,
+    instruction,
+    currentJson,
+    compiled,
+  });
+  const knowledgeNote = knowledge.length ? `\n${knowledgeSystemNote()}` : "";
 
-  const result = await generateJson(prompt, payloadSchemaFor(type), {
-    systemInstruction: `${exerciseSystemPrompt(type)}${knowledge.length ? `\n${knowledgeSystemNote()}` : ""}`,
+  const requestedTypes = Array.isArray(body.types)
+    ? body.types.flatMap((item) => {
+        const type = asType(item);
+        return type && isGenerableExerciseType(type) ? [type] : [];
+      })
+    : [];
+
+  if (requestedTypes.length > 0) {
+    const { requested, minAccept } = practiceSetBounds(requestedTypes.length);
+    const types = requestedTypes.slice(0, requested);
+    const before = getGenerateTextCallCount();
+    const result = await generateJson(shared, practiceSetEnvelopeSchema(minAccept, requested), {
+      systemInstruction: `${exerciseSetSystemPrompt(types)}${knowledgeNote}`,
+    });
+    const geminiCalls = getGenerateTextCallCount() - before;
+
+    if (!result.ok) {
+      console.info(`[practice-generate] geminiCalls before=${types.length} after=${geminiCalls} items=0`);
+      return Response.json({ error: result.error, geminiCalls }, { status: 422 });
+    }
+
+    const envelope = result.data as { items: { type: ExerciseType; data: unknown }[] };
+    const items = envelope.items.flatMap((item) => {
+      if (!isGenerableExerciseType(item.type)) return [];
+      const parsed = payloadSchemaFor(item.type).safeParse(item.data);
+      if (!parsed.success) return [];
+      return [
+        {
+          type: item.type,
+          category: categoryFor(item.type),
+          data: parsed.data,
+        },
+      ];
+    });
+
+    if (items.length < minAccept) {
+      console.info(`[practice-generate] geminiCalls before=${types.length} after=${geminiCalls} items=${items.length}`);
+      return Response.json({ error: "Practice set was too small.", geminiCalls }, { status: 422 });
+    }
+
+    const capped = items.slice(0, requested);
+    console.info(`[practice-generate] geminiCalls before=${types.length} after=${geminiCalls} items=${capped.length}`);
+    return Response.json({ items: capped, geminiCalls });
+  }
+
+  const type = asType(body.type);
+  if (!type) {
+    return Response.json({ error: "Unknown exercise type." }, { status: 400 });
+  }
+
+  const result = await generateJson(`${shared}\n\nType: ${type}`, payloadSchemaFor(type), {
+    systemInstruction: `${exerciseSystemPrompt(type)}${knowledgeNote}`,
   });
 
   if (!result.ok) {
@@ -113,7 +190,7 @@ export async function POST(request: Request) {
 
   return Response.json({
     type,
-    category: isProblemType(type) ? EXERCISE_CATEGORIES[1] : EXERCISE_CATEGORIES[0],
+    category: categoryFor(type),
     data: result.data,
   });
 }

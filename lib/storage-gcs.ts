@@ -194,6 +194,38 @@ export async function uploadGcsObject(objectPath: string, buffer: Buffer, conten
   }
 }
 
+export async function listGcsPrefix(prefix: string): Promise<string[]> {
+  const bucket = bucketName();
+  if (!bucket) throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set.");
+  const token = await googleAccessToken();
+  const names: string[] = [];
+  let pageToken = "";
+  do {
+    const params = new URLSearchParams({
+      prefix,
+      maxResults: "1000",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o?${params.toString()}`;
+    let response: Response;
+    try {
+      response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      throw new Error("Could not list files from Storage.");
+    }
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(text.slice(0, 240) || `Storage list failed (${response.status}).`);
+    }
+    const data = (await response.json()) as { items?: { name?: string }[]; nextPageToken?: string };
+    for (const item of data.items ?? []) {
+      if (typeof item.name === "string" && item.name) names.push(item.name);
+    }
+    pageToken = typeof data.nextPageToken === "string" ? data.nextPageToken : "";
+  } while (pageToken);
+  return names;
+}
+
 export async function downloadGcsObject(
   objectPath: string,
 ): Promise<{ buffer: Buffer; contentType: string }> {

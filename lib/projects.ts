@@ -91,6 +91,7 @@ function mapProject(id: string, data: Record<string, unknown>): Project {
     recipe: asRecipe(data.recipe, goal),
     preferredChatMode: asChatMode(data.preferredChatMode, goal),
     activeArtifact: asActiveArtifact(data.activeArtifact),
+    hidden: data.hidden === true,
     createdAt: toIsoDate(data.createdAt),
     updatedAt: toIsoDate(data.updatedAt),
   };
@@ -103,22 +104,17 @@ function uniqueProjects(projects: Project[]): Project[] {
     seen.set(project.id, project);
   }
 
-  return [...seen.values()].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  return [...seen.values()]
+    .filter((project) => !project.hidden)
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
 
 export async function listProjectsForUser(userId: string): Promise<Project[]> {
-  const db = getFirebaseDb();
-  const projects = collection(db, COLLECTIONS.projects);
+  const snapshot = await getDocs(
+    query(collection(getFirebaseDb(), COLLECTIONS.projects), where("userId", "==", userId)),
+  );
 
-  const [byUserId, byOwnerId] = await Promise.all([
-    getDocs(query(projects, where("userId", "==", userId))),
-    getDocs(query(projects, where("ownerId", "==", userId))),
-  ]);
-
-  return uniqueProjects([
-    ...byUserId.docs.map((item) => mapProject(item.id, item.data())),
-    ...byOwnerId.docs.map((item) => mapProject(item.id, item.data())),
-  ]);
+  return uniqueProjects(snapshot.docs.map((item) => mapProject(item.id, item.data())));
 }
 
 export async function getProjectById(id: string): Promise<Project | null> {
@@ -242,35 +238,13 @@ export function subscribeProjectsForUser(
   onChange: (projects: Project[]) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  const db = getFirebaseDb();
-  const projects = collection(db, COLLECTIONS.projects);
-  let byUserId: Project[] = [];
-  let byOwnerId: Project[] = [];
-
-  const emit = () => onChange(uniqueProjects([...byUserId, ...byOwnerId]));
-
-  const unsubUser = onSnapshot(
-    query(projects, where("userId", "==", userId)),
+  return onSnapshot(
+    query(collection(getFirebaseDb(), COLLECTIONS.projects), where("userId", "==", userId)),
     (snapshot) => {
-      byUserId = snapshot.docs.map((item) => mapProject(item.id, item.data()));
-      emit();
+      onChange(uniqueProjects(snapshot.docs.map((item) => mapProject(item.id, item.data()))));
     },
     (error) => onError?.(error),
   );
-
-  const unsubOwner = onSnapshot(
-    query(projects, where("ownerId", "==", userId)),
-    (snapshot) => {
-      byOwnerId = snapshot.docs.map((item) => mapProject(item.id, item.data()));
-      emit();
-    },
-    (error) => onError?.(error),
-  );
-
-  return () => {
-    unsubUser();
-    unsubOwner();
-  };
 }
 
 export async function deleteProject(projectId: string, userId: string): Promise<void> {
@@ -287,4 +261,40 @@ export async function deleteProject(projectId: string, userId: string): Promise<
     ...exercises.map((item) => deleteExercise(projectId, item.id)),
   ]);
   await deleteDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId));
+}
+
+export async function markProjectHidden(projectId: string, userId: string): Promise<void> {
+  await getOwnedProject(projectId, userId);
+  await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), {
+    hidden: true,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+const DISCARDED_PROJECTS_KEY = "tv.discarded-projects";
+export const PROJECT_DISCARDED_EVENT = "tv:project-discarded";
+
+export function rememberDiscardedProject(projectId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const current = listDiscardedProjectIds();
+    current.add(projectId);
+    window.sessionStorage.setItem(DISCARDED_PROJECTS_KEY, JSON.stringify([...current]));
+    window.dispatchEvent(new CustomEvent(PROJECT_DISCARDED_EVENT, { detail: projectId }));
+  } catch {
+    /* private mode */
+  }
+}
+
+export function listDiscardedProjectIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.sessionStorage.getItem(DISCARDED_PROJECTS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0));
+  } catch {
+    return new Set();
+  }
 }

@@ -16,12 +16,17 @@ export {
   practiceFamilyForTopic,
   practiceFamilyFromTypes,
   choosePracticeSetSize,
+  practiceSetBounds,
+  isGenerableExerciseType,
   EXERCISE_SET_CAP,
   FREE_PRACTICE_SET_CAP,
+  PRACTICE_SET_CAP,
+  PRACTICE_SET_MIN,
   PRACTICE_SET_SIZES,
   GENERABLE_EXERCISE_TYPES,
   CLICK_FIRST_TYPES,
   type PracticeFamily,
+  type GenerableExerciseType,
 } from "@/lib/exercises/plan";
 export { gradeObjective, isObjectiveType, isProblemTypeForHints } from "@/lib/exercises/grade";
 export {

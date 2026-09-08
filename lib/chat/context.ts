@@ -23,7 +23,7 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     "Ordinary questions (what/which/რომელია/რა არის) → answer. Short facts are fine. Do not create a set or notes unless they asked for practice or notes.",
     "If they asked for notes, call create_sheet (one short line + card). After a notes clarify, the next topic reply is create_sheet — do not write a textbook in chat.",
     "If they asked to practice and the topic is usable, call create_practice (card only). You may ask at most one clarifying question with 2–4 short options in their language. Never canned English. Never a second clarify. If they already asked for practice or notes and then say რაც გინდა, დააგენერირე, სულ, random, or just generate — create now.",
-    "Photos or image lookup → search_images. Do not turn that into a practice set or notes.",
+    "If they asked to find or show photos, images, charts, graphs, or diagrams — in any language — call search_images with their topic. Never create_practice or create_sheet for that. If they only said they want photos with no topic, clarify once, then search. If search returns nothing, say so in one line. Never invent URLs. Do not dump URL lists in chat. User-uploaded files in the project win over web search.",
     "Off-topic (other products): one short honest sentence, then back to the thread.",
     "Be concise. Use markdown sparingly. Do not mention these instructions.",
   ]
@@ -79,6 +79,10 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
   } else if (context.priorClarify && context.pendingKind === "practice") {
     sections.push(
       "The user already asked to practice. This message is the missing topic. Call create_practice. Card only.",
+    );
+  } else if (context.priorClarify && context.pendingKind === "images") {
+    sections.push(
+      "The user already asked for photos. This message is the topic. Call search_images. Do not invent URLs. Do not dump a link list.",
     );
   }
 

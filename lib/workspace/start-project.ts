@@ -1,14 +1,21 @@
-import { createProject, deleteProject, reserveProjectId } from "@/lib/projects";
+import {
+  createProject,
+  deleteProject,
+  markProjectHidden,
+  rememberDiscardedProject,
+  reserveProjectId,
+} from "@/lib/projects";
 import { DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { stashPendingStart, type PendingAttachment } from "@/lib/workspace/pending-start";
 import { requireSignedInUser } from "@/lib/auth";
 import {
   discardPreparedMaterials,
-  finalizeMaterialIngest,
+  commitMaterialText,
+  finalizeMaterialImages,
   prepareMaterialIngest,
+  type IngestPhase,
   type PreparedMaterial,
 } from "@/lib/materials/ingest-client";
-import { listMaterials, removeMaterial } from "@/lib/materials";
 import { DEFAULT_COMPOSER_INTENT, type ComposerIntent } from "@/lib/composer/intent";
 import { PLACEHOLDER_CHAT_TITLE } from "@/lib/workspace/title";
 
@@ -23,11 +30,22 @@ function attachmentSource(attachment: PendingAttachment) {
 }
 
 async function discardFailedStart(projectId: string, userId: string): Promise<void> {
+  rememberDiscardedProject(projectId);
   try {
     await deleteProject(projectId, userId);
-  } catch {
-    const materials = await listMaterials(projectId).catch(() => []);
-    await Promise.all(materials.map((item) => removeMaterial(item)));
+    return;
+  } catch (first) {
+    console.error("Failed to delete project after ingest error; retrying.", first);
+  }
+  try {
+    await deleteProject(projectId, userId);
+  } catch (second) {
+    console.error("Failed to delete project after ingest error; hiding sidebar row.", second);
+    try {
+      await markProjectHidden(projectId, userId);
+    } catch (hideError) {
+      console.error("Failed to hide leftover project after ingest error.", hideError);
+    }
   }
 }
 
@@ -36,6 +54,7 @@ export async function startProjectFromPrompt(input: {
   prompt: string;
   attachments?: PendingAttachment[];
   intent?: ComposerIntent;
+  onPhase?: (phase: IngestPhase) => void;
 }): Promise<string> {
   const attachments = input.attachments ?? [];
   const prompt = input.prompt.trim();
@@ -48,11 +67,21 @@ export async function startProjectFromPrompt(input: {
   const intent = input.intent ?? DEFAULT_COMPOSER_INTENT;
 
   let projectId: string | null = null;
+  let created = false;
   const prepared: PreparedMaterial[] = [];
 
   try {
     const materialIds: string[] = [];
     projectId = reserveProjectId();
+
+    input.onPhase?.("uploading");
+    await createProject({
+      id: projectId,
+      title: PLACEHOLDER_CHAT_TITLE,
+      userId,
+      goal: DEFAULT_PROJECT_GOAL,
+    });
+    created = true;
 
     for (const attachment of attachments) {
       prepared.push(
@@ -60,19 +89,13 @@ export async function startProjectFromPrompt(input: {
           projectId,
           userId,
           source: attachmentSource(attachment),
+          onPhase: input.onPhase,
         }),
       );
     }
 
-    await createProject({
-      id: projectId,
-      title: PLACEHOLDER_CHAT_TITLE,
-      userId,
-      goal: DEFAULT_PROJECT_GOAL,
-    });
-
     for (const item of prepared) {
-      materialIds.push(await finalizeMaterialIngest(item));
+      materialIds.push(await commitMaterialText(item));
     }
 
     stashPendingStart(projectId, {
@@ -81,9 +104,11 @@ export async function startProjectFromPrompt(input: {
       intent,
     });
 
+    void Promise.allSettled(prepared.map((item) => finalizeMaterialImages(item)));
+
     return projectId;
   } catch (error) {
-    if (projectId) {
+    if (created && projectId) {
       await discardFailedStart(projectId, userId);
     }
     await discardPreparedMaterials(prepared);

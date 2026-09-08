@@ -62,7 +62,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "clarify",
     description:
-      "Only when the user asked to practice or for notes and one detail is missing. Ask ONE concrete question in their language. Include 2-4 short tap options. Never a second clarify. Never canned English. Do not use for ordinary questions.",
+      "Only when the user asked to practice, for notes, or for photos and one detail is missing. Ask ONE concrete question in their language. Include 2-4 short tap options when you have them. Never a second clarify. Never canned English. Do not use for ordinary questions.",
     parameters: {
       type: "object",
       properties: {
@@ -133,7 +133,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "create_sheet",
     description:
-      "User asked for notes (კონსპექტი / დამიკონსპექტე), or answered a notes clarify. Create visual blocks (compare_vs, formula_card, steps, term_card). One short chat line plus the card. Never a textbook in chat.",
+      "User asked for notes (კონსპექტი / დამიკონსპექტე), or answered a notes clarify. Create visual blocks (compare_vs, formula_card, steps, term_card). formula_card only for real math, never Georgian prose. One short chat line plus the card. Never a textbook in chat.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Specific sheet topic." } },
@@ -158,7 +158,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "search_images",
     description:
-      "User asked for photos or to look up images. Search the web and return image links. Do not create a practice set or notes. Do not upload files.",
+      "User asked to find or show photos, images, charts, graphs, or diagrams — in any language. Pass their topic as query in the original language. Never create a practice set or notes. If they only said they want photos with no topic, use clarify once instead. If search returns nothing, say so in one short line. Never invent image URLs. Do not dump URL lists in chat.",
     parameters: {
       type: "object",
       properties: { query: { type: "string", description: "Image search query." } },

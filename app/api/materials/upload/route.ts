@@ -1,4 +1,4 @@
-import { assertSignedInRequest, authErrorResponse, readIdToken } from "@/lib/api/assert";
+import { assertAccountRequest, authErrorResponse, readIdToken } from "@/lib/api/assert";
 import { hasGcsWriteCredentials, uploadGcsObject } from "@/lib/storage-gcs";
 import { MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@/lib/materials/limits";
 
@@ -77,7 +77,7 @@ async function writeViaUserToken(
 
 export async function POST(request: Request) {
   try {
-    const session = await assertSignedInRequest(request);
+    const session = await assertAccountRequest(request);
 
     const contentLength = Number(request.headers.get("content-length") ?? "0");
     if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BODY_BYTES) {

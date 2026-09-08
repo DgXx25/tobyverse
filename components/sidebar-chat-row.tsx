@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deleteProject, updateProjectTitle } from "@/lib/projects";
 import { displayProjectTitle } from "@/lib/workspace/title";
-import { IconDots, IconPencil, IconTrash } from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 import type { Project } from "@/types/project";
 
 const TITLE_MAX = 48;
@@ -251,7 +251,7 @@ export function SidebarChatRow({
                     : "pointer-events-none opacity-0 group-hover/chat:pointer-events-auto group-hover/chat:opacity-100"
                 }`}
               >
-                <IconDots className="h-3.5 w-3.5" />
+                <UiIcon name="more" size={16} />
               </button>
             </>
           )}
@@ -280,7 +280,7 @@ export function SidebarChatRow({
                     }`}
                   >
                     <MenuItem
-                      icon={<IconPencil className="h-4 w-4" />}
+                      icon={<UiIcon name="edit" size={18} />}
                       label="Rename"
                       onClick={() => {
                         onMenuOpen(null);
@@ -290,7 +290,7 @@ export function SidebarChatRow({
                     />
                     <div className="mx-2.5 my-1 h-px bg-border" role="separator" />
                     <MenuItem
-                      icon={<IconTrash className="h-4 w-4" />}
+                      icon={<UiIcon name="trash" size={18} />}
                       label="Delete"
                       danger
                       onClick={() => {

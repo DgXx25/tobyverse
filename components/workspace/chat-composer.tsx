@@ -1,19 +1,20 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import { attachFileKey, fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
 import { formatBytes } from "@/lib/format";
 import { LARGE_PASTE_CHARS, looksLikeUrl } from "@/lib/materials/ingest-client";
 import { COMPOSER_FILE_ACCEPT } from "@/lib/materials/types";
-import { IconPlus, IconSend } from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
+import { ComposerParameters } from "@/components/workspace/composer-parameters";
 
 export type ComposerChip = {
   id: string;
   title: string;
   type: string;
   size?: number;
-  status: "uploading" | "ready" | "error";
+  status: "uploading" | "reading" | "ready" | "error";
   error?: string;
   materialId?: string;
   previewUrl?: string;
@@ -22,6 +23,7 @@ export type ComposerChip = {
 
 export type ChatComposerHandle = {
   focus: () => void;
+  openFile: () => void;
 };
 
 export const ChatComposer = forwardRef<
@@ -38,9 +40,37 @@ export const ChatComposer = forwardRef<
     onPasteText: (text: string) => void;
     onUrl: (url: string) => void;
     placeholder?: string;
+    fieldStart?: ReactNode;
+    pad?: boolean;
+    className?: string;
+    allowAttach?: boolean;
+    showParameters?: boolean;
+    onBackspaceEmpty?: () => void;
+    onEscape?: () => void;
+    onArrowDown?: () => void;
   }
 >(function ChatComposer(
-  { draft, onDraft, sending, error, chips, onRemoveChip, onSend, onFile, onPasteText, onUrl, placeholder = "Ask anything" },
+  {
+    draft,
+    onDraft,
+    sending,
+    error,
+    chips,
+    onRemoveChip,
+    onSend,
+    onFile,
+    onPasteText,
+    onUrl,
+    placeholder = "Ask anything",
+    fieldStart,
+    pad = true,
+    className = "",
+    allowAttach = true,
+    showParameters = false,
+    onBackspaceEmpty,
+    onEscape,
+    onArrowDown,
+  },
   ref,
 ) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -52,6 +82,10 @@ export const ChatComposer = forwardRef<
     focus() {
       areaRef.current?.focus();
     },
+    openFile() {
+      if (!allowAttach) return;
+      fileRef.current?.click();
+    },
   }));
 
   useEffect(() => {
@@ -61,8 +95,8 @@ export const ChatComposer = forwardRef<
     node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
   }, [draft]);
 
-  const uploading = chips.some((chip) => chip.status === "uploading");
-  const canSend = !sending && !uploading && Boolean(draft.trim() || chips.some((chip) => chip.status === "ready"));
+  const busyChip = chips.some((chip) => chip.status === "uploading");
+  const canSend = !sending && !busyChip && Boolean(draft.trim() || chips.some((chip) => chip.status === "ready"));
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
@@ -72,14 +106,43 @@ export const ChatComposer = forwardRef<
   }
 
   function onKey(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
+      return;
+    }
+    if (event.key === "Escape") {
+      if (!onEscape) return;
+      event.preventDefault();
+      onEscape();
+      return;
+    }
+    if (event.key === "Backspace" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const node = event.currentTarget;
+      if (node.selectionStart !== 0 || node.selectionEnd !== 0) return;
+      if (onBackspaceEmpty) {
+        event.preventDefault();
+        onBackspaceEmpty();
+        return;
+      }
+      if (chips.length > 0) {
+        event.preventDefault();
+        onRemoveChip(chips[chips.length - 1].id);
+      }
+      return;
+    }
+    if (event.key === "ArrowDown" && onArrowDown && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const node = event.currentTarget;
+      const after = node.value.slice(node.selectionStart);
+      if (after.includes("\n")) return;
+      event.preventDefault();
+      onArrowDown();
     }
   }
 
   function takeFiles(list: FileList | File[] | null, source: "drop" | "picker" | "paste") {
-    if (!list) return;
+    if (!allowAttach || !list) return;
     const seen = new Set<string>();
     const unique: File[] = [];
     for (const file of Array.from(list)) {
@@ -109,6 +172,7 @@ export const ChatComposer = forwardRef<
   }
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!allowAttach) return;
     const image = Array.from(event.clipboardData.items).find((item) => item.type.startsWith("image/"));
     if (image) {
       const file = image.getAsFile();
@@ -141,6 +205,7 @@ export const ChatComposer = forwardRef<
     event.preventDefault();
     event.stopPropagation();
     setDropOver(false);
+    if (!allowAttach) return;
     takeFiles(event.dataTransfer.files, "drop");
   }
 
@@ -148,13 +213,14 @@ export const ChatComposer = forwardRef<
     <form
       onSubmit={submit}
       onDragOver={(event) => {
+        if (!allowAttach) return;
         event.preventDefault();
         event.stopPropagation();
         setDropOver(true);
       }}
       onDragLeave={() => setDropOver(false)}
       onDrop={onDrop}
-      className="composer-pad px-4 pt-2"
+      className={`${pad ? "composer-pad px-4 pt-2" : "pt-2"} ${className}`.trim()}
     >
       <div
         className={`rounded-[28px] border bg-surface-2 px-3 py-2 ${
@@ -182,7 +248,9 @@ export const ChatComposer = forwardRef<
                   )}
                 </span>
                 <span className="min-w-0 truncate text-foreground">{chip.title}</span>
-                {chip.size ? (
+                {chip.status === "uploading" ? (
+                  <span className="shrink-0 whitespace-nowrap text-muted">იტვირთება…</span>
+                ) : chip.size ? (
                   <span className="shrink-0 whitespace-nowrap text-muted">{formatBytes(chip.size)}</span>
                 ) : null}
                 <button
@@ -197,44 +265,54 @@ export const ChatComposer = forwardRef<
             ))}
           </div>
         )}
-        <textarea
-          ref={areaRef}
-          value={draft}
-          onChange={(event) => onDraft(event.target.value)}
-          onKeyDown={onKey}
-          onPaste={onPaste}
-          placeholder={placeholder}
-          rows={1}
-          className="max-h-[160px] min-h-[40px] w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted"
-        />
-        <div className="flex items-center gap-1 pb-0.5">
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            accept={COMPOSER_FILE_ACCEPT}
-            className="hidden"
-            onChange={(event) => {
-              takeFiles(event.target.files, "picker");
-              event.target.value = "";
-            }}
+        <div className={`flex items-center px-1.5 pt-0.5 ${fieldStart ? "gap-2.5" : ""}`}>
+          {fieldStart}
+          <textarea
+            ref={areaRef}
+            value={draft}
+            onChange={(event) => onDraft(event.target.value)}
+            onKeyDown={onKey}
+            onPaste={onPaste}
+            placeholder={placeholder}
+            rows={1}
+            className={`max-h-[160px] min-h-[40px] min-w-0 flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted ${fieldStart ? "" : "px-1"}`}
           />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-foreground"
-            aria-label="Attach file"
-          >
-            <IconPlus className="h-[18px] w-[18px]" />
-          </button>
-          <button
-            type="submit"
-            disabled={!canSend}
-            className="ml-auto flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30"
-            aria-label="Send"
-          >
-            <IconSend className="h-4 w-4" />
-          </button>
+        </div>
+        <div className="flex items-center gap-1 pb-0.5">
+          {allowAttach ? (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept={COMPOSER_FILE_ACCEPT}
+                className="hidden"
+                onChange={(event) => {
+                  takeFiles(event.target.files, "picker");
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-foreground"
+                aria-label="Attach file"
+              >
+                <UiIcon name="plus" size={18} />
+              </button>
+            </>
+          ) : null}
+          <div className="ml-auto flex items-center gap-1">
+            {showParameters ? <ComposerParameters /> : null}
+            <button
+              type="submit"
+              disabled={!canSend}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30"
+              aria-label="Send"
+            >
+              <UiIcon name="send" size={16} />
+            </button>
+          </div>
         </div>
       </div>
       {error ? <p className="mt-2 px-1 text-xs text-red-400">{error}</p> : null}

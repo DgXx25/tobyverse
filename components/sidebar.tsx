@@ -1,26 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { writeSignedInCookie } from "@/lib/signed-in-cookie";
-import { subscribeProjectsForUser } from "@/lib/projects";
+import { subscribeProjectsForUser, listDiscardedProjectIds, PROJECT_DISCARDED_EVENT } from "@/lib/projects";
 import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
 import { SidebarChatRow } from "@/components/sidebar-chat-row";
 import type { Project } from "@/types/project";
-import {
-  IconGear,
-  IconHelp,
-  IconLibrary,
-  IconPlus,
-  IconSidebar,
-  IconSignOut,
-  IconAccount,
-  IconBilling,
-} from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 
 export function Sidebar() {
   const { collapsed, setCollapsed, sidebarHidden, mobileNavOpen, setMobileNavOpen } = useShell();
@@ -91,16 +83,35 @@ function SidebarFrame({
   const { openSettings, openAccountSheet } = useShell();
   const [projects, setProjects] = useState<Project[]>([]);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+  const [discardedIds, setDiscardedIds] = useState<Set<string>>(() => listDiscardedProjectIds());
   const [held, setHeld] = useState<Project | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [chatMenuId, setChatMenuId] = useState<string | null>(null);
+  const [flyoutPos, setFlyoutPos] = useState<{ left: number; bottom: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const pfpRef = useRef<HTMLButtonElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!user) return;
     setHiddenIds(new Set());
+    setDiscardedIds(listDiscardedProjectIds());
     return subscribeProjectsForUser(user.uid, setProjects);
   }, [user]);
+
+  useEffect(() => {
+    function onDiscarded(event: Event) {
+      const id = (event as CustomEvent<string>).detail;
+      if (typeof id !== "string" || !id) return;
+      setDiscardedIds((current) => {
+        const next = new Set(current);
+        next.add(id);
+        return next;
+      });
+    }
+    window.addEventListener(PROJECT_DISCARDED_EVENT, onDiscarded);
+    return () => window.removeEventListener(PROJECT_DISCARDED_EVENT, onDiscarded);
+  }, []);
 
   useEffect(() => {
     if (collapsed) {
@@ -142,11 +153,31 @@ function SidebarFrame({
 
   useEffect(() => {
     function onDoc(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || flyoutRef.current?.contains(target)) return;
+      setMenuOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!collapsed || !menuOpen || !pfpRef.current) {
+      setFlyoutPos(null);
+      return;
+    }
+    function place() {
+      const rect = pfpRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setFlyoutPos({
+        left: Math.round(rect.right + 8),
+        bottom: Math.round(window.innerHeight - rect.bottom),
+      });
+    }
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [collapsed, menuOpen]);
 
   useEffect(() => {
     if (!mobile) return;
@@ -166,14 +197,17 @@ function SidebarFrame({
   const activeProjectId = pathname.startsWith("/project/") ? pathname.split("/")[2] : null;
   const startActive = pathname === "/" || pathname === "/new";
   const libraryActive = pathname === "/library" || pathname.startsWith("/library/");
-  const name = user?.displayName || user?.email || "Signed in";
-  const visibleProjects = projects.filter((project) => !hiddenIds.has(project.id));
+  const name = user?.isAnonymous ? "Guest" : user?.displayName || user?.email || "Signed in";
+  const guest = Boolean(user?.isAnonymous);
+  const visibleProjects = projects.filter(
+    (project) => !hiddenIds.has(project.id) && !discardedIds.has(project.id),
+  );
   const chats =
     held && !visibleProjects.some((project) => project.id === held.id) && !hiddenIds.has(held.id)
       ? [...visibleProjects, held]
       : visibleProjects;
 
-  const iconBtn = "flex h-[25px] w-[25px] shrink-0 items-center justify-center";
+  const iconBtn = "flex h-8 w-8 shrink-0 items-center justify-center text-foreground";
   const labelFade = "sidebar-label min-w-0 truncate text-[14px] font-normal text-foreground";
 
   return (
@@ -204,7 +238,11 @@ function SidebarFrame({
                 mask: "url(/logo.svg) center / contain no-repeat",
               }}
             />
-            <IconSidebar className="sidebar-brand-toggle pointer-events-none absolute h-[18px] w-[18px] opacity-0 transition-opacity duration-150" />
+            <UiIcon
+              name="panel"
+              size={18}
+              className="sidebar-brand-toggle pointer-events-none absolute opacity-0 transition-opacity duration-150"
+            />
           </Link>
           <span className="sidebar-label text-[13px] font-bold leading-none text-foreground">beta</span>
         </div>
@@ -215,38 +253,40 @@ function SidebarFrame({
             className="sidebar-collapse-btn flex h-8 w-8 items-center justify-center rounded-xl text-foreground hover:bg-surface-2"
             aria-label={mobile ? "Close menu" : "Collapse sidebar"}
           >
-            <IconSidebar className="h-[18px] w-[18px]" />
+            <UiIcon name="panel" size={18} />
           </button>
         </div>
       </div>
 
       <nav className="sidebar-rail flex shrink-0 flex-col gap-0.5 px-1.5 pb-2">
         <NavLink
-          href="/"
+          href="/new"
           title="New"
           active={startActive}
           icon={
             <span className={iconBtn}>
-              <IconPlus className="h-[17px] w-[17px]" />
+              <UiIcon name="plus" size={18} />
             </span>
           }
           onNavigate={onNavigate}
         >
           <span className={labelFade}>New</span>
         </NavLink>
+        {!guest ? (
         <NavLink
           href="/library"
           title="Library"
           active={libraryActive}
           icon={
             <span className={iconBtn}>
-              <IconLibrary className="h-[17px] w-[17px]" />
+              <UiIcon name="library" size={18} />
             </span>
           }
           onNavigate={onNavigate}
         >
           <span className={labelFade}>Library</span>
         </NavLink>
+        ) : null}
       </nav>
 
       <nav
@@ -278,52 +318,42 @@ function SidebarFrame({
       </nav>
 
         <div className="sidebar-rail relative mt-auto px-1.5 pb-3 max-md:pb-[max(12px,env(safe-area-inset-bottom,0px))]" ref={menuRef}>
-        {!mobile && menuOpen && (
-          <div className="absolute bottom-14 left-2 right-2 z-30 overflow-hidden rounded-xl border border-border bg-surface-2 p-1 shadow-xl">
-            <p className="truncate px-2.5 py-2 text-[11px] text-muted">{user?.email}</p>
-            <MenuRow
-              icon={<IconAccount />}
-              label="Account"
-              onClick={() => {
-                setMenuOpen(false);
-                openSettings("account");
-              }}
-            />
-            <MenuRow
-              icon={<IconGear />}
-              label="Settings"
-              onClick={() => {
-                setMenuOpen(false);
-                openSettings("appearance");
-              }}
-            />
-            <MenuRow
-              icon={<IconHelp />}
-              label="Help"
-              onClick={() => {
-                setMenuOpen(false);
-                openSettings("help");
-              }}
-            />
-            <MenuRow
-              icon={<IconBilling />}
-              label="Billing"
-              onClick={() => {
-                setMenuOpen(false);
-                openSettings("billing");
-              }}
-            />
-            <MenuRow icon={<IconSignOut />} label="Sign out" onClick={() => void handleSignOut()} />
-          </div>
+        {!mobile && menuOpen && !collapsed && (
+          <AccountMenu
+            email={user?.email}
+            onAccount={() => {
+              setMenuOpen(false);
+              openSettings("account");
+            }}
+            onSettings={() => {
+              setMenuOpen(false);
+              openSettings("appearance");
+            }}
+            onHelp={() => {
+              setMenuOpen(false);
+              openSettings("help");
+            }}
+            onBilling={() => {
+              setMenuOpen(false);
+              openSettings("billing");
+            }}
+            onSignOut={() => void handleSignOut()}
+            className="absolute bottom-14 left-2 right-2 z-30"
+          />
         )}
         <button
+          ref={pfpRef}
           type="button"
           onClick={() => {
+            if (guest) {
+              if (mobile) onNavigate?.();
+              router.push("/login");
+              return;
+            }
             if (mobile) {
               openAccountSheet("root");
               return;
             }
-            if (collapsed) return;
             setChatMenuId(null);
             setMenuOpen((open) => !open);
           }}
@@ -333,6 +363,34 @@ function SidebarFrame({
           <span className={labelFade}>{name}</span>
         </button>
       </div>
+      {!mobile && menuOpen && collapsed && flyoutPos && typeof document !== "undefined"
+        ? createPortal(
+            <AccountMenu
+              ref={flyoutRef}
+              email={user?.email}
+              onAccount={() => {
+                setMenuOpen(false);
+                openSettings("account");
+              }}
+              onSettings={() => {
+                setMenuOpen(false);
+                openSettings("appearance");
+              }}
+              onHelp={() => {
+                setMenuOpen(false);
+                openSettings("help");
+              }}
+              onBilling={() => {
+                setMenuOpen(false);
+                openSettings("billing");
+              }}
+              onSignOut={() => void handleSignOut()}
+              className="fixed z-50 w-[220px]"
+              style={{ left: flyoutPos.left, bottom: flyoutPos.bottom }}
+            />,
+            document.body,
+          )
+        : null}
     </aside>
   );
 }
@@ -367,6 +425,43 @@ function NavLink({
   );
 }
 
+function AccountMenu({
+  email,
+  onAccount,
+  onSettings,
+  onHelp,
+  onBilling,
+  onSignOut,
+  className,
+  style,
+  ref,
+}: {
+  email?: string | null;
+  onAccount: () => void;
+  onSettings: () => void;
+  onHelp: () => void;
+  onBilling: () => void;
+  onSignOut: () => void;
+  className?: string;
+  style?: CSSProperties;
+  ref?: Ref<HTMLDivElement>;
+}) {
+  return (
+    <div
+      ref={ref}
+      style={style}
+      className={`overflow-hidden rounded-xl border border-border bg-surface-2 p-1 shadow-xl ${className ?? ""}`}
+    >
+      <p className="truncate px-2.5 py-2 text-[11px] text-muted">{email}</p>
+      <MenuRow icon={<UiIcon name="user" size={16} />} label="Account" onClick={onAccount} />
+      <MenuRow icon={<UiIcon name="settings" size={16} />} label="Settings" onClick={onSettings} />
+      <MenuRow icon={<UiIcon name="help" size={16} />} label="Help" onClick={onHelp} />
+      <MenuRow icon={<UiIcon name="billing" size={16} />} label="Billing" onClick={onBilling} />
+      <MenuRow icon={<UiIcon name="logout" size={16} />} label="Sign out" onClick={onSignOut} />
+    </div>
+  );
+}
+
 function MenuRow({
   icon,
   label,
@@ -382,7 +477,7 @@ function MenuRow({
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-foreground hover:bg-foreground/[0.08]"
     >
-      <span className="text-muted">{icon}</span>
+      <span className="text-foreground">{icon}</span>
       {label}
     </button>
   );

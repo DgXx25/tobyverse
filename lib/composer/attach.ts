@@ -25,8 +25,22 @@ export function fileTypeBadge(type: string, title = ""): string {
 }
 
 export function isImageAttachment(type: string, title = ""): boolean {
+  const kind = type.toLowerCase();
+  if (
+    kind === "pptx" ||
+    kind === "ppt" ||
+    kind === "pdf" ||
+    kind === "docx" ||
+    kind === "txt" ||
+    kind === "md" ||
+    kind === "paste" ||
+    kind === "url"
+  ) {
+    return false;
+  }
+  if (kind === "image" || kind.startsWith("image/")) return true;
   const hay = `${type} ${title}`.toLowerCase();
-  return type === "image" || type.startsWith("image/") || /\b(png|jpe?g|jpg|webp|gif|img)\b/.test(hay);
+  return /\.(png|jpe?g|jpg|webp|gif)$/i.test(hay) || kind === "img";
 }
 
 function optionalText(value: unknown): string | undefined {

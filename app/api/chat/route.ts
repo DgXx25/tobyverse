@@ -2,6 +2,7 @@ import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { DEFAULT_AI_PROVIDER, isEnabledProvider } from "@/lib/ai/catalog";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
+import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
 import { parseChatArtifact } from "@/lib/artifacts/active";
 import { fallbackChatTool, gateChatTool } from "@/lib/composer/intent";
@@ -96,7 +97,7 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     acceptedTool: asAcceptedTool(row.acceptedTool),
     priorClarify: row.priorClarify === true,
     pendingTopic: typeof row.pendingTopic === "string" ? row.pendingTopic.trim() || undefined : undefined,
-    pendingKind: row.pendingKind === "sheet" ? "sheet" : row.pendingKind === "practice" ? "practice" : undefined,
+    pendingKind: row.pendingKind === "sheet" ? "sheet" : row.pendingKind === "practice" ? "practice" : row.pendingKind === "images" ? "images" : undefined,
   };
 }
 
@@ -148,7 +149,12 @@ function encodeSse(payload: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-function gateFromContext(tool: ChatToolCall | null, prompt: string, context: ChatGenerationContext): ChatToolCall {
+function gateFromContext(
+  tool: ChatToolCall | null,
+  prompt: string,
+  context: ChatGenerationContext,
+  keywordFallback: boolean,
+): ChatToolCall {
   return gateChatTool({
     tool,
     prompt,
@@ -158,12 +164,14 @@ function gateFromContext(tool: ChatToolCall | null, prompt: string, context: Cha
     pendingTopic: context.pendingTopic,
     pendingKind: context.pendingKind,
     active: context.activeArtifact,
+    keywordFallback,
   });
 }
 
 export async function POST(request: Request) {
+  let session;
   try {
-    await assertSignedInRequest(request);
+    session = await assertSignedInRequest(request);
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -207,18 +215,29 @@ export async function POST(request: Request) {
   }
 
   const history = asHistory(body.history).slice(-20);
+  if (session.anonymous) {
+    const assistantTurns = history.filter((item) => item.role === "assistant").length;
+    if (assistantTurns >= GUEST_ASSISTANT_CAP) {
+      return Response.json({ error: GUEST_CAP_LINE, code: GUEST_CAP_CODE }, { status: 403 });
+    }
+  }
   const context = asContext(body.context, mode);
-  const systemInstruction = buildChatSystemPrompt(context);
+  const guestContext = session.anonymous
+    ? { ...context, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined }
+    : context;
+  const systemInstruction = buildChatSystemPrompt(guestContext);
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        let raw: ChatToolCall | null = context.acceptedTool
-          ? { name: context.acceptedTool, args: {} }
+        let raw: ChatToolCall | null = guestContext.acceptedTool
+          ? { name: guestContext.acceptedTool, args: {} }
           : null;
         let streamed = false;
         let textChars = 0;
-        const supportsTools = Boolean(getAIProvider().generateToolStream) && !context.acceptedTool;
+        const supportsTools = Boolean(getAIProvider().generateToolStream) && !guestContext.acceptedTool;
+        let providerReturnedTool = Boolean(raw);
+        let toolSent = false;
 
         if (supportsTools) {
           for await (const part of generateToolStream(prompt, {
@@ -226,11 +245,24 @@ export async function POST(request: Request) {
             history,
             systemInstruction,
             tools: true,
-            images: context.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+            images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
           })) {
-            if (part.tool && !raw) raw = part.tool;
-            const preview = raw ? gateFromContext(raw, prompt, context) : null;
-            const waitForTool = Boolean(context.priorClarify && context.pendingKind);
+            if (part.tool && !raw) {
+              raw = part.tool;
+              providerReturnedTool = true;
+              const preview = gateFromContext(raw, prompt, guestContext, false);
+              if (
+                preview &&
+                !toolStreamsText(preview.name) &&
+                preview.name !== "suggest_practice" &&
+                preview.name !== "suggest_sheet"
+              ) {
+                toolSent = true;
+                controller.enqueue(encodeSse({ tool: preview }));
+              }
+            }
+            const preview = raw ? gateFromContext(raw, prompt, guestContext, !providerReturnedTool) : null;
+            const waitForTool = Boolean(guestContext.priorClarify && guestContext.pendingKind);
             if (part.text && (!waitForTool || preview) && (!preview || toolStreamsText(preview.name))) {
               streamed = true;
               textChars += part.text.length;
@@ -240,19 +272,19 @@ export async function POST(request: Request) {
         } else if (!raw) {
           raw = fallbackChatTool({
             prompt,
-            active: context.activeArtifact,
-            accepted: context.acceptedTool,
-            priorClarify: context.priorClarify,
-            pendingTopic: context.pendingTopic,
-            pendingKind: context.pendingKind,
+            active: guestContext.activeArtifact,
+            accepted: guestContext.acceptedTool,
+            priorClarify: guestContext.priorClarify,
+            pendingTopic: guestContext.pendingTopic,
+            pendingKind: guestContext.pendingKind,
           });
-          const preview = gateFromContext(raw, prompt, context);
+          const preview = gateFromContext(raw, prompt, guestContext, true);
           if (toolStreamsText(preview.name)) {
             for await (const delta of generateTextStream(prompt, {
               mode,
               history,
               systemInstruction,
-              images: context.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+              images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
             })) {
               streamed = true;
               textChars += delta.length;
@@ -261,7 +293,8 @@ export async function POST(request: Request) {
           }
         }
 
-        let tool = gateFromContext(raw, prompt, context);
+        let tool = gateFromContext(raw, prompt, guestContext, !providerReturnedTool);
+        if (session.anonymous) tool = gateGuestChatTool(tool);
         if ((tool.name === "suggest_practice" || tool.name === "suggest_sheet") && textChars < 280) {
           tool = { name: "answer", args: {} };
         }
@@ -274,7 +307,7 @@ export async function POST(request: Request) {
               mode,
               history,
               systemInstruction,
-              images: context.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+              images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
             })) {
               streamed = true;
               textChars += delta.length;
@@ -282,7 +315,7 @@ export async function POST(request: Request) {
             }
           }
         }
-        controller.enqueue(encodeSse({ tool }));
+        if (!toolSent) controller.enqueue(encodeSse({ tool }));
         controller.enqueue(encodeSse({ done: true }));
         controller.close();
       } catch (error) {

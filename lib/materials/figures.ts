@@ -1,6 +1,9 @@
+import { isImageAttachment } from "@/lib/composer/attach";
 import { CHAT_IMAGE_LIMIT, CHAT_IMAGE_MAX_BYTES } from "@/lib/materials/limits";
 import { pickRelevantMaterials } from "@/lib/materials/relevance";
-import { readStorageBytes } from "@/lib/materials/storage";
+import { isMissingMaterialFile, readStorageBytes } from "@/lib/materials/storage";
+import { storedObjectName } from "@/lib/materials/storage-path";
+import type { ChatAttachment } from "@/types/chat";
 import type { Material, MaterialImage } from "@/types/material";
 
 export type ChatFigure = {
@@ -37,28 +40,56 @@ function askedPages(query: string): number[] {
 }
 
 function wantsFigure(query: string): boolean {
-  return /figure|diagram|image|photo|picture|სურათ|ფოტო|ფიგურ/i.test(query);
+  return /\b(figure|diagram|image|photo|picture)s?\b|სურათ|ფოტო|ფიგურ/i.test(query);
 }
 
 function imageLabel(material: Material, image: MaterialImage): string {
   return `${material.title} · slide ${image.page}`;
 }
 
-export function materialImageIndex(material: Material): string {
-  if (!material.hasImages || material.images.length === 0) {
-    return material.pageCount > 1 ? `${material.pageCount} slides` : "";
+function originalObjectName(material: Material): string | null {
+  const name = storedObjectName(material.storagePath);
+  return name && name !== "extracted.txt" ? name : null;
+}
+
+/** Paths actually stored on the material. Never invents slide-N.png from pageCount. */
+export function existingMaterialImages(material: Material): MaterialImage[] {
+  const original = originalObjectName(material);
+  const seen = new Set<string>();
+  const next: MaterialImage[] = [];
+  for (const image of material.images ?? []) {
+    const name = storedObjectName(image.path);
+    if (!name || name === "extracted.txt") continue;
+    if (material.type !== "image" && original && name === original) continue;
+    if (isMissingMaterialFile(image.path)) continue;
+    const key = name;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(image);
   }
-  const pages = [...new Set(material.images.map((item) => item.page))].sort((a, b) => a - b);
-  return `${material.pageCount || pages.length} slides; images on ${pages.join(", ")}`;
+  return next;
 }
 
 export function promptAsksForVisual(query: string): boolean {
   return askedPages(query).length > 0 || wantsFigure(query);
 }
 
-export async function pickChatFigures(query: string, materials: Material[]): Promise<ChatFigure[]> {
-  const imageOnly = materials.filter((item) => item.type === "image");
-  if (!promptAsksForVisual(query) && imageOnly.length === 0) return [];
+export function shouldAttachChatFigures(
+  query: string,
+  materials: Material[],
+  attachments: ChatAttachment[] = [],
+): boolean {
+  if (promptAsksForVisual(query)) return true;
+  const attachedImages = attachments.filter((item) => isImageAttachment(item.type, item.title));
+  return attachedImages.length === 1;
+}
+
+export function pickFigureTargets(
+  query: string,
+  materials: Material[],
+  attachments: ChatAttachment[] = [],
+): { material: Material; image: MaterialImage }[] {
+  if (!shouldAttachChatFigures(query, materials, attachments)) return [];
 
   const ranked = pickRelevantMaterials(query, materials, 4);
   const pages = askedPages(query);
@@ -66,16 +97,32 @@ export async function pickChatFigures(query: string, materials: Material[]): Pro
 
   if (pages.length > 0) {
     for (const material of ranked) {
+      const images = existingMaterialImages(material);
       for (const page of pages) {
-        const match = material.images.find((item) => item.page === page);
+        const match = images.find((item) => item.page === page);
         if (match) picks.push({ material, image: match });
       }
     }
   } else if (wantsFigure(query)) {
-    const material = ranked.find((item) => item.images.length > 0);
-    if (material?.images[0]) picks.push({ material, image: material.images[0] });
-  } else if (imageOnly[0]?.images[0]) {
-    picks.push({ material: imageOnly[0], image: imageOnly[0].images[0] });
+    const material = ranked.find((item) => existingMaterialImages(item).length > 0);
+    const image = material ? existingMaterialImages(material)[0] : undefined;
+    if (material && image) picks.push({ material, image });
+  } else {
+    const attached = attachments.find((item) => isImageAttachment(item.type, item.title));
+    const imageFile =
+      (attached?.materialId ? materials.find((item) => item.id === attached.materialId) : undefined) ||
+      materials.find((item) => item.type === "image");
+    if (imageFile) {
+      const sidecar = existingMaterialImages(imageFile)[0];
+      const path = sidecar?.path || attached?.storagePath || imageFile.storagePath;
+      const name = storedObjectName(path);
+      if (path && name && name !== "extracted.txt" && !isMissingMaterialFile(path)) {
+        picks.push({
+          material: imageFile,
+          image: sidecar ?? { page: 1, path, mime: imageFile.images[0]?.mime || "image/jpeg" },
+        });
+      }
+    }
   }
 
   const unique: { material: Material; image: MaterialImage }[] = [];
@@ -86,10 +133,23 @@ export async function pickChatFigures(query: string, materials: Material[]): Pro
     unique.push(pick);
     if (unique.length >= CHAT_IMAGE_LIMIT) break;
   }
+  return unique;
+}
+
+export async function pickChatFigures(
+  query: string,
+  materials: Material[],
+  attachments: ChatAttachment[] = [],
+): Promise<{ figures: ChatFigure[]; fileGets: number }> {
+  const targets = pickFigureTargets(query, materials, attachments);
+  if (targets.length === 0) return { figures: [], fileGets: 0 };
 
   const figures: ChatFigure[] = [];
-  for (const pick of unique) {
+  let fileGets = 0;
+  for (const pick of targets) {
+    if (isMissingMaterialFile(pick.image.path)) continue;
     try {
+      fileGets += 1;
       const bytes = await readStorageBytes(pick.image.path);
       if (bytes.byteLength > CHAT_IMAGE_MAX_BYTES) continue;
       figures.push({
@@ -100,8 +160,8 @@ export async function pickChatFigures(query: string, materials: Material[]): Pro
         data: bytesToBase64(bytes),
       });
     } catch {
-      // Skip missing sidecars.
+      // Missing sidecar — cached as 404. Do not invent another name.
     }
   }
-  return figures;
+  return { figures, fileGets };
 }

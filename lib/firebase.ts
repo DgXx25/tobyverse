@@ -15,7 +15,7 @@ function readEnv(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function getFirebaseConfig() {
+function envFirebaseConfig() {
   return {
     apiKey: readEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
     authDomain: readEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
@@ -26,8 +26,23 @@ function getFirebaseConfig() {
   };
 }
 
+function authDomainForOrigin(configured?: string): string | undefined {
+  if (typeof window === "undefined") return configured;
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return configured;
+  return host;
+}
+
+function getFirebaseConfig() {
+  const env = envFirebaseConfig();
+  return {
+    ...env,
+    authDomain: authDomainForOrigin(env.authDomain),
+  };
+}
+
 export function isFirebaseConfigured(): boolean {
-  const config = getFirebaseConfig();
+  const config = envFirebaseConfig();
 
   return Boolean(
     config.apiKey &&

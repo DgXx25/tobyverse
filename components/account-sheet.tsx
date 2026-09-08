@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useShell, type AccountSheetPage } from "@/components/workspace/shell-context";
 import { useTheme } from "@/components/workspace/theme-provider";
 import { ThemePicker } from "@/components/workspace/theme-picker";
+import { ParametersPanel } from "@/components/workspace/parameters-panel";
 import { BillingCard } from "@/components/account/billing-card";
 import { UsageMeters } from "@/components/account/usage-meters";
 import { AccountDataControls } from "@/components/account/data-controls";
@@ -21,16 +22,7 @@ import {
   DrawerHandle,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import {
-  IconAccount,
-  IconAppearance,
-  IconBack,
-  IconBilling,
-  IconData,
-  IconForward,
-  IconSignOut,
-  IconUsage,
-} from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 import { THEME_OPTIONS } from "@/lib/workspace/theme";
 
 export function AccountSheet() {
@@ -79,12 +71,12 @@ export function AccountSheet() {
                   <span className="block truncate text-[16px] font-medium text-foreground">{name}</span>
                   {email ? <span className="block truncate text-[13px] text-muted">{email}</span> : null}
                 </span>
-                <IconForward className="h-4 w-4 shrink-0 text-muted" />
+                <UiIcon name="forward" size={16} className="shrink-0 text-muted" />
               </button>
 
               <p className="px-3 pb-1 pt-4 text-[12px] text-muted">General</p>
               <SheetRow
-                icon={<IconAccount className="h-[18px] w-[18px]" />}
+                icon={<UiIcon name="user" size={18} />}
                 label="Account"
                 onClick={() => {
                   closeAccountSheet();
@@ -92,27 +84,32 @@ export function AccountSheet() {
                 }}
               />
               <SheetRow
-                icon={<IconAppearance className="h-[18px] w-[18px]" />}
+                icon={<UiIcon name="appearance" size={18} />}
                 label="Appearance"
                 value={themeLabel}
                 onClick={() => setAccountSheetPage("appearance")}
               />
+              <SheetRow
+                icon={<UiIcon name="sliders" size={18} />}
+                label="Parameters"
+                onClick={() => setAccountSheetPage("parameters")}
+              />
 
               <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Payments</p>
               <SheetRow
-                icon={<IconBilling className="h-[18px] w-[18px]" />}
+                icon={<UiIcon name="billing" size={18} />}
                 label="Billing"
                 onClick={() => setAccountSheetPage("billing")}
               />
               <SheetRow
-                icon={<IconUsage className="h-[18px] w-[18px]" />}
+                icon={<UiIcon name="usage" size={18} />}
                 label="Usage"
                 onClick={() => setAccountSheetPage("usage")}
               />
 
               <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Data & Information</p>
               <SheetRow
-                icon={<IconData className="h-[18px] w-[18px]" />}
+                icon={<UiIcon name="data" size={18} />}
                 label="Data"
                 onClick={() => setAccountSheetPage("data")}
               />
@@ -123,7 +120,7 @@ export function AccountSheet() {
                 className="mt-4 flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-[15px] text-foreground hover:bg-surface-2"
               >
                 <span className="flex h-[25px] w-[25px] items-center justify-center text-muted">
-                  <IconSignOut className="h-[18px] w-[18px]" />
+                  <UiIcon name="logout" size={18} />
                 </span>
                 Sign out
               </button>
@@ -134,6 +131,11 @@ export function AccountSheet() {
                 <div className="px-4 pb-6">
                   <p className="mb-4 text-[15px] font-medium text-foreground">Theme</p>
                   <ThemePicker />
+                </div>
+              )}
+              {accountSheetPage === "parameters" && (
+                <div className="px-4 pb-8">
+                  <ParametersPanel />
                 </div>
               )}
               {accountSheetPage === "billing" && (
@@ -161,6 +163,7 @@ export function AccountSheet() {
 
 function pageTitle(page: AccountSheetPage): string {
   if (page === "appearance") return "Appearance";
+  if (page === "parameters") return "Parameters";
   if (page === "billing") return "Billing";
   if (page === "usage") return "Usage";
   if (page === "data") return "Data";
@@ -185,7 +188,7 @@ function NestedPage({
           className="flex h-11 w-11 items-center justify-center rounded-full text-foreground hover:bg-surface-2"
           aria-label="Back"
         >
-          <IconBack className="h-5 w-5" />
+          <UiIcon name="back" size={20} />
         </button>
       </div>
       <h2 className="px-5 pb-3 text-[22px] font-semibold tracking-tight text-foreground">{title}</h2>
@@ -214,7 +217,7 @@ function SheetRow({
       <span className="flex h-[25px] w-[25px] items-center justify-center text-muted">{icon}</span>
       <span className="min-w-0 flex-1 text-[15px] text-foreground">{label}</span>
       {value ? <span className="text-[13px] text-muted">{value}</span> : null}
-      <IconForward className="h-4 w-4 shrink-0 text-muted" />
+      <UiIcon name="forward" size={16} className="shrink-0 text-muted" />
     </button>
   );
 }

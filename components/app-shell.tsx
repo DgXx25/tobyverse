@@ -18,7 +18,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (loading || user || sent.current) return;
     sent.current = true;
-    router.replace("/login");
+    router.replace("/");
   }, [loading, user, router]);
 
   if (loading) {

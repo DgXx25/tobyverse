@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CATALOG_KINDS } from "@/types/visual";
+import { GENERABLE_EXERCISE_TYPES } from "@/lib/exercises/plan";
 import type { ExercisePayloadMap, ExerciseType } from "@/types/exercise";
 
 const id = z.string().min(1).max(32);
@@ -140,6 +141,20 @@ export const exercisePayloadSchemas = {
 
 export function payloadSchemaFor(type: ExerciseType) {
   return exercisePayloadSchemas[type];
+}
+
+export function practiceSetEnvelopeSchema(minItems: number, maxItems: number) {
+  return z.object({
+    items: z
+      .array(
+        z.object({
+          type: z.enum(GENERABLE_EXERCISE_TYPES),
+          data: z.unknown(),
+        }),
+      )
+      .min(minItems)
+      .max(maxItems),
+  });
 }
 
 export type ParsedPayload<T extends ExerciseType> = ExercisePayloadMap[T];

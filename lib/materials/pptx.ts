@@ -75,7 +75,10 @@ function imageRels(xml: string): string[] {
   return targets;
 }
 
-export async function extractPptx(buffer: Buffer): Promise<ExtractedPptx> {
+export async function extractPptx(
+  buffer: Buffer,
+  options?: { includeImages?: boolean },
+): Promise<ExtractedPptx> {
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(OLE_MAGIC)) {
     throw new Error("This is an old .ppt file. Save it as .pptx and try again.");
   }
@@ -95,6 +98,7 @@ export async function extractPptx(buffer: Buffer): Promise<ExtractedPptx> {
     throw new Error("This PowerPoint file has no slides.");
   }
 
+  const includeImages = options?.includeImages !== false;
   const parts: string[] = [];
   const images: ExtractedSlideImage[] = [];
 
@@ -105,9 +109,10 @@ export async function extractPptx(buffer: Buffer): Promise<ExtractedPptx> {
     const text = xml ? textFromSlideXml(xml) : "";
     parts.push(`Slide ${page}\n${text || "no text on this slide"}`);
 
+    if (!includeImages || images.length >= MAX_SLIDE_IMAGES) continue;
     const relsName = name.replace(/slides\/(slide\d+\.xml)$/i, "slides/_rels/$1.rels");
     const relsFile = zip.files[relsName];
-    if (!relsFile || images.length >= MAX_SLIDE_IMAGES) continue;
+    if (!relsFile) continue;
     const rels = imageRels(await relsFile.async("string"));
     for (const target of rels) {
       if (images.length >= MAX_SLIDE_IMAGES) break;
@@ -130,7 +135,7 @@ export async function extractPptx(buffer: Buffer): Promise<ExtractedPptx> {
 }
 
 export async function extractPptxText(buffer: Buffer): Promise<string> {
-  const result = await extractPptx(buffer);
+  const result = await extractPptx(buffer, { includeImages: false });
   if (!result.text.trim()) {
     throw new Error("This PowerPoint file has no extractable text.");
   }

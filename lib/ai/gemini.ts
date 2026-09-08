@@ -156,7 +156,14 @@ export function setAIProvider(provider: AIProvider): void {
   currentProvider = provider;
 }
 
+let generateTextCalls = 0;
+
+export function getGenerateTextCallCount(): number {
+  return generateTextCalls;
+}
+
 export async function generateText(prompt: string, options?: GenerateOptions): Promise<string> {
+  generateTextCalls += 1;
   return getAIProvider().generateText(prompt, options);
 }
 

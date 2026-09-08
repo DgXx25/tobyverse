@@ -11,7 +11,10 @@ import {
 } from "firebase/firestore";
 import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
+import { PREVIEW_HTML_MAX } from "@/lib/materials/limits";
 import { extractedTextPath } from "@/lib/materials/storage";
+import { storedObjectName } from "@/lib/materials/storage-path";
+import { mimeFromName } from "@/lib/materials/types";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { MATERIAL_TYPES, type Material, type MaterialImage, type MaterialStatus, type MaterialType } from "@/types/material";
 
@@ -37,38 +40,82 @@ function asStatus(value: unknown): MaterialStatus {
   return "ready";
 }
 
+function pageFromName(path: string): number {
+  const name = storedObjectName(path);
+  const match = name?.match(/^(?:slide|page)-(\d+)/i);
+  const page = match ? Number(match[1]) : 0;
+  return Number.isFinite(page) && page > 0 ? page : 1;
+}
+
 function asImages(value: unknown): MaterialImage[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
+    if (typeof item === "string" && item) {
+      return [
+        {
+          page: pageFromName(item),
+          path: item,
+          mime: mimeFromName(storedObjectName(item) || item),
+        },
+      ];
+    }
     if (!item || typeof item !== "object") return [];
     const row = item as { page?: unknown; path?: unknown; mime?: unknown };
     if (typeof row.path !== "string" || !row.path) return [];
+    const namedPage = pageFromName(row.path);
     return [
       {
-        page: typeof row.page === "number" && Number.isFinite(row.page) ? Math.max(1, Math.floor(row.page)) : 1,
+        page:
+          typeof row.page === "number" && Number.isFinite(row.page) && row.page > 0
+            ? Math.floor(row.page)
+            : namedPage,
         path: row.path,
-        mime: typeof row.mime === "string" && row.mime ? row.mime : "image/jpeg",
+        mime: typeof row.mime === "string" && row.mime ? row.mime : mimeFromName(storedObjectName(row.path) || row.path),
       },
     ];
   });
 }
 
+function mergeImages(images: unknown, imagePaths: unknown): MaterialImage[] {
+  const fromImages = asImages(images);
+  const fromPaths = asImages(imagePaths);
+  if (fromImages.length === 0) return fromPaths;
+  const seen = new Set(fromImages.map((item) => storedObjectName(item.path) || item.path));
+  const extra = fromPaths.filter((item) => {
+    const name = storedObjectName(item.path) || item.path;
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+  return extra.length ? [...fromImages, ...extra] : fromImages;
+}
+
 function mapMaterial(id: string, projectId: string, data: Record<string, unknown>): Material {
   const userId = asString(data.userId);
+  const storagePath = asString(data.storagePath);
+  const extractedPath =
+    asString(data.extractedPath) || asString(data.textPath) || extractedTextPath(userId, projectId, id);
+  const fromField = asString(data.originalName);
+  const fromPath = storedObjectName(storagePath) || "";
+  const originalName = fromField !== "extracted.txt" ? fromField : "";
+  const pathName = fromPath && fromPath !== "extracted.txt" ? fromPath : "";
   return {
     id,
     projectId,
     userId,
     title: asString(data.title) || asString(data.name, "Untitled"),
     type: asType(data.type),
-    storagePath: asString(data.storagePath),
-    textPath: asString(data.textPath) || extractedTextPath(userId, projectId, id),
+    originalName: originalName || pathName || undefined,
+    storagePath,
+    textPath: extractedPath,
+    extractedPath,
     extractedTextPreview: asString(data.extractedTextPreview).slice(0, 300),
+    previewHtml: asString(data.previewHtml).slice(0, PREVIEW_HTML_MAX) || undefined,
     sizeBytes: typeof data.sizeBytes === "number" ? data.sizeBytes : 0,
     pageCount: typeof data.pageCount === "number" ? data.pageCount : 0,
     hasImages: data.hasImages === true,
     textChars: typeof data.textChars === "number" ? data.textChars : 0,
-    images: asImages(data.images),
+    images: mergeImages(data.images, data.imagePaths),
     status: asStatus(data.status),
     createdAt: toIsoDate(data.createdAt),
   };
@@ -139,6 +186,48 @@ export async function listMaterials(projectId: string): Promise<Material[]> {
   return snapshot.docs
     .map((item) => mapMaterial(item.id, projectId, item.data()))
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+}
+
+export async function waitForMaterialPreviews(
+  projectId: string,
+  materialIds: string[],
+  options?: { timeoutMs?: number; intervalMs?: number },
+): Promise<Material[]> {
+  const timeoutMs = options?.timeoutMs ?? 25_000;
+  const intervalMs = options?.intervalMs ?? 350;
+  const ids = materialIds.filter((id) => id.trim());
+  const deadline = Date.now() + timeoutMs;
+
+  const load = () => listMaterials(projectId);
+  let latest = await load();
+  if (ids.length === 0) return latest;
+
+  while (true) {
+    const failed = latest.find((item) => ids.includes(item.id) && item.status === "failed");
+    if (failed) {
+      throw new Error(failed.title.trim() ? `Could not read ${failed.title}.` : "Could not read that file.");
+    }
+    const ready = ids.every((id) => {
+      const item = latest.find((row) => row.id === id);
+      return Boolean(item?.extractedTextPreview.trim());
+    });
+    if (ready) return latest;
+    if (Date.now() >= deadline) {
+      throw new Error("Could not read that file.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    latest = await load();
+  }
+}
+
+export async function patchMaterialPreviewHtml(
+  projectId: string,
+  materialId: string,
+  previewHtml: string,
+): Promise<void> {
+  const html = previewHtml.slice(0, PREVIEW_HTML_MAX);
+  if (!html) return;
+  await setDoc(doc(materialsRef(projectId), materialId), { previewHtml: html }, { merge: true });
 }
 
 export async function deleteMaterialDoc(projectId: string, materialId: string): Promise<void> {

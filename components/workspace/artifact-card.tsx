@@ -1,12 +1,12 @@
 "use client";
 
-import { IconPlan, IconPractice, IconSheet } from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 import type { ChatArtifact } from "@/types/chat";
 
 function kindIcon(kind: ChatArtifact["kind"]) {
-  if (kind === "practice") return <IconPractice className="h-[18px] w-[18px]" />;
-  if (kind === "plan") return <IconPlan className="h-[18px] w-[18px]" />;
-  return <IconSheet className="h-[18px] w-[18px]" />;
+  if (kind === "practice") return <UiIcon name="practice" size={18} />;
+  if (kind === "plan") return <UiIcon name="plan" size={18} />;
+  return <UiIcon name="notes" size={18} />;
 }
 
 function subtitleFor(artifact: ChatArtifact): string | null {

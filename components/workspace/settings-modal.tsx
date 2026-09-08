@@ -1,31 +1,25 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useShell, type SettingsSection } from "@/components/workspace/shell-context";
 import { ThemePicker } from "@/components/workspace/theme-picker";
+import { ParametersPanel } from "@/components/workspace/parameters-panel";
 import { BillingCard } from "@/components/account/billing-card";
 import { UsageMeters } from "@/components/account/usage-meters";
 import { AccountDataControls } from "@/components/account/data-controls";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { emptyUsage } from "@/lib/account/plan";
-import {
-  IconAccount,
-  IconAppearance,
-  IconBilling,
-  IconData,
-  IconHelp,
-  IconUsage,
-  IconX,
-} from "@/components/workspace/icons";
+import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
 
-const NAV: { id: SettingsSection; label: string; group: string; icon: ReactNode }[] = [
-  { id: "account", label: "Account", group: "General", icon: <IconAccount className="h-[18px] w-[18px]" /> },
-  { id: "appearance", label: "Appearance", group: "General", icon: <IconAppearance className="h-[18px] w-[18px]" /> },
-  { id: "help", label: "Help", group: "TobyVerse", icon: <IconHelp className="h-[18px] w-[18px]" /> },
-  { id: "billing", label: "Billing", group: "Payments", icon: <IconBilling className="h-[18px] w-[18px]" /> },
-  { id: "usage", label: "Usage", group: "Payments", icon: <IconUsage className="h-[18px] w-[18px]" /> },
-  { id: "data", label: "Data", group: "Data & Information", icon: <IconData className="h-[18px] w-[18px]" /> },
+const NAV: { id: SettingsSection; label: string; group: string; icon: UiIconName }[] = [
+  { id: "account", label: "Account", group: "General", icon: "user" },
+  { id: "appearance", label: "Appearance", group: "General", icon: "appearance" },
+  { id: "parameters", label: "Parameters", group: "General", icon: "sliders" },
+  { id: "help", label: "Help", group: "TobyVerse", icon: "help" },
+  { id: "billing", label: "Billing", group: "Payments", icon: "billing" },
+  { id: "usage", label: "Usage", group: "Payments", icon: "usage" },
+  { id: "data", label: "Data", group: "Data & Information", icon: "data" },
 ];
 
 const GROUPS = ["General", "TobyVerse", "Payments", "Data & Information"];
@@ -79,7 +73,9 @@ export function SettingsModal() {
                       active ? "bg-surface-2 text-foreground" : "text-foreground/90 hover:bg-surface-2/70"
                     }`}
                   >
-                    <span className={active ? "text-foreground" : "text-muted"}>{item.icon}</span>
+                    <span className={active ? "text-foreground" : "text-muted"}>
+                      <UiIcon name={item.icon} size={18} />
+                    </span>
                     {item.label}
                   </button>
                 );
@@ -95,7 +91,7 @@ export function SettingsModal() {
             className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-surface-2 text-foreground hover:bg-border"
             aria-label="Close settings"
           >
-            <IconX className="h-[18px] w-[18px]" />
+            <UiIcon name="close" size={18} />
           </button>
 
           {settingsSection === "account" && (
@@ -121,6 +117,15 @@ export function SettingsModal() {
               <p className="mt-8 text-[15px] font-medium text-foreground">Theme</p>
               <div className="mt-4">
                 <ThemePicker />
+              </div>
+            </div>
+          )}
+
+          {settingsSection === "parameters" && (
+            <div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Parameters</h2>
+              <div className="mt-8 max-w-sm">
+                <ParametersPanel />
               </div>
             </div>
           )}

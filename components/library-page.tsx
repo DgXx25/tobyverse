@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
-import { IconSearch } from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 import { LibraryCardThumb, LibraryLightbox, LibrarySlideViewer } from "@/components/library-media";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { isLibraryImage, isLibraryPptx } from "@/lib/library/media";
@@ -46,6 +46,10 @@ export function LibraryPage() {
   const [deck, setDeck] = useState<LibraryItem | null>(null);
 
   useEffect(() => {
+    if (user?.isAnonymous) {
+      router.replace("/new");
+      return;
+    }
     if (!user) return;
     let cancelled = false;
     listLibraryItems(user.uid)
@@ -61,7 +65,7 @@ export function LibraryPage() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, router]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -90,6 +94,8 @@ export function LibraryPage() {
     router.push(`/project/${item.projectId}`);
   }
 
+  if (user?.isAnonymous) return null;
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-10 md:py-5">
       <div className="mx-auto max-w-6xl">
@@ -111,7 +117,7 @@ export function LibraryPage() {
             ))}
           </nav>
           <label className="mb-2 flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-muted">
-            <IconSearch className="h-4 w-4" />
+            <UiIcon name="search" size={16} />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}

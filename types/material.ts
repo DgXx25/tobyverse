@@ -18,9 +18,12 @@ export type Material = {
   userId: EntityId;
   title: string;
   type: MaterialType;
+  originalName?: string;
   storagePath: string;
   textPath: string;
+  extractedPath?: string;
   extractedTextPreview: string;
+  previewHtml?: string;
   sizeBytes: number;
   pageCount: number;
   hasImages: boolean;

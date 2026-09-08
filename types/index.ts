@@ -18,6 +18,7 @@ export {
   type ChatThread,
   type ChatMessage,
   type ChatImageHit,
+  type PendingKind,
   type ChatAttachment,
   type ChatArtifact,
   type ChatArtifactKind,

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { AccountDataControls } from "@/components/account/data-controls";
-import { IconAccount, IconBack, IconData } from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 import { firstNameFromUser, initialsFromName, signInMethodsFromProviderData } from "@/lib/account/providers";
 import { planLabel } from "@/lib/account/plan";
 
@@ -49,13 +49,13 @@ export function AccountWorkspace() {
           <nav className="mt-8 space-y-1">
             <NavItem
               active={tab === "account"}
-              icon={<IconAccount className="h-[18px] w-[18px]" />}
+              icon={<UiIcon name="user" size={18} />}
               label="Account"
               onClick={() => setTab("account")}
             />
             <NavItem
               active={tab === "data"}
-              icon={<IconData className="h-[18px] w-[18px]" />}
+              icon={<UiIcon name="data" size={18} />}
               label="Data"
               onClick={() => setTab("data")}
             />
@@ -65,7 +65,7 @@ export function AccountWorkspace() {
             href="/new"
             className="mt-10 inline-flex w-fit items-center gap-2 rounded-full px-1 py-2 text-[14px] text-foreground hover:bg-surface-2 md:mt-auto"
           >
-            <IconBack className="h-4 w-4" />
+            <UiIcon name="back" size={16} />
             Return to TobyVerse
           </Link>
         </aside>
@@ -202,7 +202,7 @@ function ProviderGlyph({ providerId }: { providerId: string }) {
       </svg>
     );
   }
-  return <IconAccount className="h-4 w-4" />;
+  return <UiIcon name="user" size={16} />;
 }
 
 function formatCreated(iso: string | null): string {

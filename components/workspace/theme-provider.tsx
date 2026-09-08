@@ -5,6 +5,7 @@ import {
   applyThemeClass,
   persistTheme,
   readStoredTheme,
+  THEME_KEY,
   type ThemeId,
 } from "@/lib/workspace/theme";
 
@@ -19,9 +20,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>("dark");
 
   useEffect(() => {
+    const stored = (() => {
+      try {
+        return window.localStorage.getItem(THEME_KEY);
+      } catch {
+        return null;
+      }
+    })();
     const next = readStoredTheme();
     setThemeState(next);
-    applyThemeClass(next);
+    if (stored && stored !== next) persistTheme(next);
+    else applyThemeClass(next);
   }, []);
 
   const setTheme = useCallback((next: ThemeId) => {

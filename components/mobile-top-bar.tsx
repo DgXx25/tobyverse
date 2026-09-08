@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
-import { IconMenu } from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 
 export function MobileTopBar() {
   const { user } = useAuth();
@@ -17,7 +17,7 @@ export function MobileTopBar() {
         className="flex h-11 w-11 items-center justify-center rounded-xl text-foreground hover:bg-surface-2"
         aria-label="Open menu"
       >
-        <IconMenu className="h-5 w-5" />
+        <UiIcon name="menu" size={18} />
       </button>
       <div className="flex items-center gap-0.5">
         {mobileTopActions}

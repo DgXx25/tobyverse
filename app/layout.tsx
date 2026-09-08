@@ -5,7 +5,7 @@ import "./fonts/google-sans.css";
 import "./globals.css";
 
 const THEME_BOOT =
-  "(function(){try{var t=localStorage.getItem('tv.theme');var r=document.documentElement;r.classList.remove('dark','light','coffee','razer','crimson');if(t==='light'||t==='coffee'||t==='razer'||t==='crimson'){r.classList.add(t)}else{r.classList.add('dark')}}catch(e){document.documentElement.classList.add('dark')}})();";
+  "(function(){try{var t=localStorage.getItem('tv.theme');var r=document.documentElement;r.classList.remove('dark','light','coffee','razer','crimson');if(t==='light'||t==='coffee'){r.classList.add('light')}else{r.classList.add('dark')}}catch(e){document.documentElement.classList.add('dark')}})();";
 
 export const metadata: Metadata = {
   title: "TobyVerse",

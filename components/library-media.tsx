@@ -2,17 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import {
-  IconBack,
-  IconDeck,
-  IconDownload,
-  IconFile,
-  IconForward,
-  IconPractice,
-  IconSheet,
-  IconTrash,
-  IconX,
-} from "@/components/workspace/icons";
+import { UiIcon } from "@/components/workspace/ui-icon";
 import { fileTypeBadge } from "@/lib/composer/attach";
 import { librarySlidePaths, libraryThumbPaths, isLibraryPptx } from "@/lib/library/media";
 import type { LibraryItem } from "@/lib/library/items";
@@ -81,12 +71,12 @@ function fileNameFor(item: LibraryItem, url?: string | null) {
 
 function IconFallback({ item }: { item: LibraryItem }) {
   if (item.kind === "practice") {
-    return <IconPractice className="h-10 w-10 text-muted" />;
+    return <UiIcon name="practice" size={40} className="text-muted" />;
   }
   if (item.kind === "sheet") {
     return (
       <div className="flex h-full w-full flex-col px-4 py-4">
-        <IconSheet className="h-5 w-5 text-muted" />
+        <UiIcon name="notes" size={20} className="text-muted" />
         <p className="mt-3 line-clamp-5 text-left text-[12px] leading-5 text-muted">{item.preview || item.title}</p>
       </div>
     );
@@ -94,14 +84,14 @@ function IconFallback({ item }: { item: LibraryItem }) {
   if (isLibraryPptx(item)) {
     return (
       <div className="flex flex-col items-center gap-2">
-        <IconDeck className="h-10 w-10 text-muted" />
+        <UiIcon name="deck" size={40} className="text-muted" />
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted">PPT</span>
       </div>
     );
   }
   return (
     <div className="flex flex-col items-center gap-2">
-      <IconFile className="h-10 w-10 text-muted" />
+      <UiIcon name="file" size={40} className="text-muted" />
       <span className="font-mono text-[10px] uppercase tracking-wide text-muted">
         {fileTypeBadge(item.materialType || item.meta, item.title)}
       </span>
@@ -181,7 +171,7 @@ function ViewerChrome({
               className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
               aria-label="Previous"
             >
-              <IconBack className="h-6 w-6" />
+              <UiIcon name="back" size={24} />
             </button>
           ) : null}
           {canNext ? (
@@ -191,7 +181,7 @@ function ViewerChrome({
               className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
               aria-label="Next"
             >
-              <IconForward className="h-6 w-6" />
+              <UiIcon name="forward" size={24} />
             </button>
           ) : null}
         </div>
@@ -199,7 +189,7 @@ function ViewerChrome({
         <div className="flex justify-center pb-7 pt-2">
           <div className="flex items-center gap-1 rounded-full bg-[#2a2a2a] px-1.5 py-1 shadow-[0_8px_28px_rgba(0,0,0,0.45)]">
             <button type="button" onClick={onDownload} disabled={!onDownload} className={actionBtn} aria-label="Download">
-              <IconDownload className="h-[18px] w-[18px]" />
+              <UiIcon name="download" size={18} />
             </button>
             <button
               type="button"
@@ -209,10 +199,10 @@ function ViewerChrome({
               aria-label={confirmDelete ? "Confirm delete" : "Delete"}
               title={confirmDelete ? "Click again to delete" : "Delete"}
             >
-              <IconTrash className="h-[18px] w-[18px]" />
+              <UiIcon name="trash" size={18} />
             </button>
             <button type="button" onClick={onClose} className={actionBtn} aria-label="Close">
-              <IconX className="h-[18px] w-[18px]" />
+              <UiIcon name="close" size={18} />
             </button>
           </div>
         </div>
@@ -402,7 +392,7 @@ export function LibrarySlideViewer({
         />
       ) : (
         <div className="flex flex-col items-center gap-2 text-white/60">
-          <IconDeck className="h-12 w-12" />
+          <UiIcon name="deck" size={48} />
           <p className="text-sm">No stored slides for this deck.</p>
         </div>
       )}

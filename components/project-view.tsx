@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deleteProject, getProjectById, updateProjectActiveArtifact } from "@/lib/projects";
@@ -15,7 +15,7 @@ import { useAuth } from "@/components/auth-provider";
 import { ProjectChat } from "@/components/project-chat";
 import { ArtifactPanel, type ArtifactFocus } from "@/components/workspace/artifact-panel";
 import { useShell } from "@/components/workspace/shell-context";
-import { IconPanel, IconShare } from "@/components/workspace/icons";
+import { QuietIconCluster, type QuietIconAction } from "@/components/workspace/quiet-icon-cluster";
 import { DEFAULT_AI_PROVIDER } from "@/lib/ai/catalog";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import type { ChatArtifact, ChatMode } from "@/types/chat";
@@ -23,7 +23,9 @@ import type { ActiveArtifactStatus } from "@/types/project";
 import type { Material } from "@/types/material";
 import type { Project } from "@/types";
 
-const MIN_ARTIFACT = 360;
+const MIN_ARTIFACT = 400;
+const MIN_NOTES = 480;
+const WIDTH_EASE = "transition-[width,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]";
 
 function focusFromPending(pending: {
   kind: "material" | "sheet" | "plan" | "practice";
@@ -55,11 +57,18 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const [session, setSession] = useState<{ setId: string; ids: string[] } | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(420);
   const [resizing, setResizing] = useState(false);
+  const [panelView, setPanelView] = useState<"materials" | "sheets" | "practice">("materials");
   const openedAt = useRef(Date.now());
   const prefsRef = useRef<WorkspacePrefs | null>(null);
   const widthRef = useRef(420);
   const savedLayout = useRef<{ width: number } | null>(null);
   widthRef.current = artifactWidth;
+
+  function ensureMinWidth(min: number) {
+    const cap = typeof window === "undefined" ? min : Math.round(window.innerWidth * 0.55);
+    const target = Math.min(min, cap);
+    setArtifactWidth((current) => (current < target ? target : current));
+  }
 
   useEffect(() => {
     openedAt.current = Date.now();
@@ -137,6 +146,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     const next = focusFromPending(pendingPanel);
     setFocus(next);
     setPanelOpen(true);
+    if (next.kind === "sheet" || next.kind === "plan") ensureMinWidth(MIN_NOTES);
     if (next.kind !== "material" && "title" in next) rememberActive(next, "open");
     setPendingPanel(null);
   }, [pendingPanel, projectId, setPendingPanel]);
@@ -179,15 +189,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
   function openArtifact(next: ChatArtifact) {
     setFocus(next);
     setPanelOpen(true);
+    if (next.kind === "sheet" || next.kind === "plan") ensureMinWidth(MIN_NOTES);
     rememberActive(next, "open");
-  }
-
-  function togglePanel() {
-    if (session) {
-      exitSession();
-      return;
-    }
-    setPanelOpen((open) => !open);
   }
 
   async function copyShare() {
@@ -225,31 +228,44 @@ export function ProjectView({ projectId }: { projectId: string }) {
     setPanelOpen(false);
   }
 
+  function openPanel(next?: ArtifactFocus) {
+    if (next) setFocus(next);
+    setPanelOpen(true);
+    if (next && (next.kind === "sheet" || next.kind === "plan")) ensureMinWidth(MIN_NOTES);
+  }
+
+  const onPanelViewChange = useCallback((view: "materials" | "sheets" | "practice") => {
+    setPanelView(view);
+    if (view === "sheets") {
+      const cap = typeof window === "undefined" ? MIN_NOTES : Math.round(window.innerWidth * 0.55);
+      const target = Math.min(MIN_NOTES, cap);
+      setArtifactWidth((current) => (current < target ? target : current));
+    }
+  }, []);
+
+  const headerActions: QuietIconAction[] = [
+    {
+      id: "share",
+      label: "Share",
+      icon: "share",
+      onClick: () => void copyShare(),
+    },
+    ...(!panelOpen
+      ? [
+          {
+            id: "panel",
+            label: "Panel",
+            icon: "panel" as const,
+            onClick: () => openPanel(),
+          },
+        ]
+      : []),
+  ];
+
   useEffect(() => {
-    setMobileTopActions(
-      <>
-        <button
-          type="button"
-          onClick={() => void copyShare()}
-          className="flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-foreground"
-          aria-label="Share"
-        >
-          <IconShare />
-        </button>
-        {!panelOpen ? (
-          <button
-            type="button"
-            onClick={togglePanel}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-foreground"
-            aria-label="Open panel"
-          >
-            <IconPanel />
-          </button>
-        ) : null}
-      </>,
-    );
+    setMobileTopActions(<QuietIconCluster size={20} actions={headerActions} />);
     return () => setMobileTopActions(null);
-  }, [panelOpen, setMobileTopActions]);
+  }, [setMobileTopActions, panelOpen, projectId]);
 
   function onResizeStart(event: ReactMouseEvent) {
     event.preventDefault();
@@ -261,7 +277,12 @@ export function ProjectView({ projectId }: { projectId: string }) {
       const max = session
         ? Math.max(420, window.innerWidth - minChat)
         : Math.round(window.innerWidth * 0.55);
-      const min = session ? Math.round(window.innerWidth * 0.42) : MIN_ARTIFACT;
+      const desiredMin = session
+        ? Math.round(window.innerWidth * 0.42)
+        : panelView === "sheets"
+          ? MIN_NOTES
+          : MIN_ARTIFACT;
+      const min = Math.min(desiredMin, max);
       const next = Math.min(max, Math.max(min, startW + (startX - ev.clientX)));
       setArtifactWidth(next);
     }
@@ -292,25 +313,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
   return (
     <div className="relative flex h-full min-h-0 bg-transparent">
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
-        <div className="pointer-events-none absolute right-3 top-3 z-20 hidden items-center gap-1 md:flex">
-          <button
-            type="button"
-            onClick={() => void copyShare()}
-            className="pointer-events-auto rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
-            aria-label="Share"
-          >
-            <IconShare />
-          </button>
-          {!panelOpen && (
-            <button
-              type="button"
-              onClick={togglePanel}
-              className="pointer-events-auto rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
-              aria-label="Open panel"
-            >
-              <IconPanel />
-            </button>
-          )}
+        <div className="pointer-events-none absolute right-3 top-3 z-20 hidden md:flex">
+          <QuietIconCluster className="pointer-events-auto" size={20} actions={headerActions} />
         </div>
         <ProjectChat
           project={project}
@@ -319,27 +323,31 @@ export function ProjectView({ projectId }: { projectId: string }) {
           materials={materials}
           selectedIds={selectedIds}
           onOpenArtifact={openArtifact}
+          onOpenMaterial={(id) => {
+            setFocus({ kind: "material", id });
+            setPanelOpen(true);
+          }}
           onProjectPatch={(patch) => setProject((current) => (current ? { ...current, ...patch } : current))}
         />
       </div>
       <div
         className={`h-full shrink-0 overflow-hidden max-md:absolute max-md:inset-0 max-md:z-30 max-md:bg-surface ${
-          resizing ? "" : "transition-[width,opacity] duration-[220ms] ease-[ease]"
+          resizing ? "" : WIDTH_EASE
         } ${panelOpen ? "opacity-100 max-md:!w-full" : "pointer-events-none opacity-0 max-md:!w-0"}`}
         style={{ width: panelOpen ? artifactWidth : 0 }}
         aria-hidden={!panelOpen}
       >
-        <div className="h-full max-md:!w-full" style={{ width: artifactWidth }}>
+        <div className="h-full w-full max-md:!w-full">
           <ArtifactPanel
             projectId={project.id}
             userId={user.uid}
             focus={focus}
             session={session}
-            width={artifactWidth}
             onResizeStart={onResizeStart}
             onClose={closePanel}
             onStartPractice={startPractice}
             onExitSession={exitSession}
+            onViewChange={onPanelViewChange}
             onActivate={(artifact) => rememberActive(artifact, "open")}
           />
         </div>

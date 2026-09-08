@@ -1,19 +1,22 @@
-import { authHeaders } from "@/lib/api/client";
 import { isArtifactTool, type ChatToolCall, type ChatToolName } from "@/lib/ai/tools";
 import {
   extractAppendCount,
   intentFromTool,
   isMutationIntent,
+  promptIsKa,
   wantsPractice,
   wantsSheet,
+  wantsImages,
   type ComposerIntent,
 } from "@/lib/composer/intent";
+import { searchImagesClient } from "@/lib/images/client";
 import { generatePracticeSet } from "@/lib/exercises/generate-set";
 import { appendPracticeItems, rewritePracticeItems } from "@/lib/exercises/mutate-client";
 import { generateStudySheetFromPrompt, rewriteStudySheetFromPrompt } from "@/lib/study-sheets/generate-client";
 import { getStudySheet } from "@/lib/study-sheets/store";
 import { activeToChatArtifact } from "@/lib/artifacts/active";
-import type { ChatArtifact, ChatArtifactKind, ChatImageHit, ChatMessage } from "@/types/chat";
+import { localImageHits } from "@/lib/images/local";
+import type { ChatArtifact, ChatArtifactKind, ChatAttachment, ChatImageHit, ChatMessage, PendingKind } from "@/types/chat";
 import type { ActiveArtifact, Project } from "@/types/project";
 import type { Material } from "@/types/material";
 
@@ -27,7 +30,8 @@ export type ChatDispatchContext = {
   active: ActiveArtifact | null;
   messages?: Pick<ChatMessage, "artifact">[];
   count?: number;
-  pendingKind?: "practice" | "sheet" | null;
+  pendingKind?: PendingKind | null;
+  attachments?: ChatAttachment[];
   onStatus?: (status: string) => void;
 };
 
@@ -36,7 +40,7 @@ export type ChatDispatchResult = {
   content: string;
   artifact?: ChatArtifact | null;
   options?: string[];
-  pendingKind?: "practice" | "sheet";
+  pendingKind?: PendingKind;
   images?: ChatImageHit[];
   suggest?: "practice" | "sheet";
 };
@@ -55,12 +59,25 @@ function oneChatLine(text: string, fallback: string): string {
   return line && line.length <= 80 ? line : fallback;
 }
 
-function pendingKindForClarify(ctx: ChatDispatchContext): "practice" | "sheet" | undefined {
-  if (ctx.pendingKind === "sheet" || ctx.pendingKind === "practice") return ctx.pendingKind;
+function pendingKindForClarify(ctx: ChatDispatchContext): PendingKind | undefined {
+  if (ctx.pendingKind === "sheet" || ctx.pendingKind === "practice" || ctx.pendingKind === "images") {
+    return ctx.pendingKind;
+  }
   if (wantsSheet(ctx.prompt)) return "sheet";
   if (wantsPractice(ctx.prompt)) return "practice";
+  if (wantsImages(ctx.prompt)) return "images";
   return undefined;
 }
+
+function imageFailLine(prompt: string): string {
+  return promptIsKa(prompt) ? "სურათი ვერ მოიძებნა" : "Couldn't find an image.";
+}
+
+function imageFoundLine(prompt: string): string {
+  return promptIsKa(prompt) ? "აქ არის სურათები." : "Here are some photos.";
+}
+
+export { imageFailLine, imageFoundLine };
 
 function textResult(ctx: ChatDispatchContext, extra?: Partial<ChatDispatchResult>): ChatDispatchResult {
   return {
@@ -86,6 +103,7 @@ async function runAnswer(ctx: ChatDispatchContext): Promise<ChatDispatchResult> 
 
 async function runClarify(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   return textResult(ctx, {
+    content: ctx.text.trim() || ctx.tool.args.question || "",
     options: ctx.tool.args.options ?? [],
     pendingKind: pendingKindForClarify(ctx),
   });
@@ -196,29 +214,47 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
 
 async function runSearchImages(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const query = ctx.tool.args.query?.trim() || ctx.prompt.trim();
+  const local = localImageHits({
+    query,
+    materials: ctx.materials,
+    attachments: ctx.attachments,
+    limit: 8,
+  });
   ctx.onStatus?.("Searching images…");
-  try {
-    const response = await fetch("/api/images/search", {
-      method: "POST",
-      headers: await authHeaders(),
-      body: JSON.stringify({ query }),
-    });
-    const data = (await response.json()) as { images?: ChatImageHit[]; error?: string };
-    if (!response.ok) {
-      return { intent: "ask", content: data.error?.trim() || "Image search is not available." };
-    }
-    const images = Array.isArray(data.images) ? data.images : [];
-    if (images.length === 0) {
-      return { intent: "ask", content: "No images found." };
-    }
-    return {
-      intent: "ask",
-      content: oneChatLine(ctx.text, query),
-      images,
-    };
-  } catch {
-    return { intent: "ask", content: "Image search is not available." };
+  const need = 8 - local.length;
+  const seen = new Set(local.map((hit) => hit.thumb || hit.url).filter(Boolean));
+  const web =
+    need > 0
+      ? (await searchImagesClient(query))
+          .flatMap((hit) => {
+            const thumb = hit.thumb || hit.url;
+            const key = thumb || hit.url;
+            if (!key || seen.has(key)) return [];
+            seen.add(key);
+            return [
+              {
+                url: hit.url,
+                thumb,
+                title: hit.title,
+                source: hit.source,
+                license: hit.license || "",
+                credit: hit.credit || "",
+                pageUrl: hit.pageUrl,
+                kind: "web" as const,
+              },
+            ];
+          })
+          .slice(0, need)
+      : [];
+  const images = [...local, ...web].slice(0, 8);
+  if (images.length === 0) {
+    return { intent: "ask", content: imageFailLine(ctx.prompt), images: [] };
   }
+  return {
+    intent: "ask",
+    content: imageFoundLine(ctx.prompt),
+    images,
+  };
 }
 
 async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {

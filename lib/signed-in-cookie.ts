@@ -1,4 +1,10 @@
 export const SIGNED_IN_COOKIE = "tv.signed-in";
+export const POST_LOGIN_PATH = "/new";
+
+export function hasSignedInCookie(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.cookie.split(";").some((part) => part.trim().startsWith(`${SIGNED_IN_COOKIE}=1`));
+}
 
 export function writeSignedInCookie(on: boolean) {
   if (typeof document === "undefined") return;

@@ -2,23 +2,32 @@ import type { ExerciseCategory, ExerciseType } from "@/types/exercise";
 import type { LessonRecipe } from "@/types/lesson";
 import type { ProjectGoal } from "@/types/goals";
 
-export const PRACTICE_SET_SIZES = [10, 20, 30] as const;
-export const FREE_PRACTICE_SET_CAP = 20;
-export const EXERCISE_SET_CAP = FREE_PRACTICE_SET_CAP;
+export const PRACTICE_SET_MIN = 8;
+export const PRACTICE_SET_CAP = 10;
+export const PRACTICE_SET_SIZES = [10] as const;
+export const FREE_PRACTICE_SET_CAP = PRACTICE_SET_CAP;
+export const EXERCISE_SET_CAP = PRACTICE_SET_CAP;
 
 export type PracticeFamily = "recall" | "procedure" | "writing";
 
 export const GENERABLE_EXERCISE_TYPES = ["mcq", "connect", "problem_steps", "open_short", "analysis", "essay"] as const;
+export type GenerableExerciseType = (typeof GENERABLE_EXERCISE_TYPES)[number];
+
+export function isGenerableExerciseType(type: string): type is GenerableExerciseType {
+  return (GENERABLE_EXERCISE_TYPES as readonly string[]).includes(type);
+}
 
 /** Click-first types for recall / one-word facts (capitals, terms). Never true_false or open_short. */
 export const CLICK_FIRST_TYPES: ExerciseType[] = ["mcq", "connect"];
 
-export function choosePracticeSetSize(input: { goal?: ProjectGoal | string } = {}): number {
-  const cap = FREE_PRACTICE_SET_CAP;
-  let pick = 20;
-  if (input.goal === "review") pick = 10;
-  if (input.goal === "exam_prep" || input.goal === "practice" || input.goal === "deep_understanding") pick = 30;
-  return Math.min(pick, cap);
+export function choosePracticeSetSize(_input: { goal?: ProjectGoal | string } = {}): number {
+  return PRACTICE_SET_CAP;
+}
+
+export function practiceSetBounds(count: number): { requested: number; minAccept: number } {
+  const requested = Math.min(PRACTICE_SET_CAP, Math.max(1, Math.floor(count)));
+  const minAccept = requested >= PRACTICE_SET_MIN ? PRACTICE_SET_MIN : requested;
+  return { requested, minAccept };
 }
 
 export type PlannedExercise = {

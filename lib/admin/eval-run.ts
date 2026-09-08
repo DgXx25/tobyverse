@@ -35,7 +35,7 @@ import type {
   EvalSuiteId,
   EvalTranscriptMessage,
 } from "@/types/admin";
-import type { ChatArtifact, ChatMessage, ChatTurn } from "@/types/chat";
+import type { ChatArtifact, ChatMessage, ChatTurn, PendingKind } from "@/types/chat";
 import type { ActiveArtifact, Project } from "@/types/project";
 
 type Live = {
@@ -99,7 +99,7 @@ async function record(
     intent: ChatMessage["intent"];
     artifact?: ChatArtifact | null;
     options?: string[];
-    pendingKind?: "practice" | "sheet";
+    pendingKind?: PendingKind;
     images?: ChatMessage["images"];
   },
 ): Promise<ChatMessage> {
