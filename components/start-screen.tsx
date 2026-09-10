@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { GuestGoogleCta } from "@/components/guest-google-cta";
 import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
-import { IconDumbbell, IconFile, IconPlus, IconSheet, IconSpark, IconX } from "@/components/workspace/icons";
+import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
 import { newChipId } from "@/lib/composer/attach";
 import { ensureSessionUser } from "@/lib/auth";
 import { guestCapReached, GuestCapError, isGuestUser } from "@/lib/guest";
@@ -18,43 +18,62 @@ type StartMode = "practice" | "sheet" | "materials" | "explain";
 const MODES: {
   id: StartMode;
   label: string;
-  hint: string;
   placeholder: string;
   intent: ComposerIntent;
-  icon: ReactNode;
+  icon: UiIconName;
 }[] = [
-  { id: "practice", label: "პრაქტიკა", hint: "სავარჯიშოები და კითხვები", placeholder: "What should I practice?", intent: "practice", icon: <IconDumbbell className="h-4 w-4" /> },
-  { id: "sheet", label: "კონსპექტი", hint: "მოკლე, მკაფიო ჩანაწერი", placeholder: "What should I take notes on?", intent: "study", icon: <IconSheet className="h-4 w-4" /> },
-  { id: "materials", label: "მასალიდან სწავლა", hint: "ატვირთე ფაილი და ისწავლე", placeholder: "What should we learn from this?", intent: "ask", icon: <IconFile className="h-4 w-4" /> },
-  { id: "explain", label: "ახსენი თემა", hint: "ნაბიჯ-ნაბიჯ ახსნა", placeholder: "What should I explain?", intent: "ask", icon: <IconSpark className="h-4 w-4" /> },
+  { id: "practice", label: "Practice", placeholder: "What should I practice?", intent: "practice", icon: "practice" },
+  { id: "sheet", label: "Study notes", placeholder: "What should I take notes on?", intent: "study", icon: "notes" },
+  { id: "materials", label: "Learn from a file", placeholder: "What should we learn from this?", intent: "ask", icon: "file" },
+  { id: "explain", label: "Explain a topic", placeholder: "What should I explain?", intent: "ask", icon: "spark" },
 ];
 
-const CARDS: Record<StartMode, { title: string; upload?: boolean }[]> = {
-  practice: [
-    { title: "კვადრატული განტოლებები" },
-    { title: "ინგლისური ზმნები" },
-    { title: "საქართველოს ისტორია" },
-    { title: "წარმოებულები" },
-  ],
-  sheet: [
-    { title: "ბიოლოგიის თავი" },
-    { title: "ლექციის კონსპექტი" },
-    { title: "გამოცდის ჩანაწერები" },
-    { title: "თემის შემაჯამება" },
-  ],
-  materials: [
-    { title: "ატვირთე ფაილი", upload: true },
-    { title: "PDF-იდან სწავლა" },
-    { title: "სლაიდებიდან კითხვები" },
-    { title: "ჩანაწერებიდან კონსპექტი" },
-  ],
-  explain: [
-    { title: "ფოტოსინთეზი" },
-    { title: "წილადები" },
-    { title: "პითაგორას თეორემა" },
-    { title: "მეორე მსოფლიო ომი" },
-  ],
+const SUGGESTIONS: Record<StartMode, string[]> = {
+  practice: ["Quadratic equations", "English verb tenses", "History of Georgia", "Derivatives"],
+  sheet: ["A biology chapter", "Lecture notes", "Exam notes", "A topic summary"],
+  materials: ["Learn from a PDF", "Questions from slides", "Notes from a recording", "Study this chapter"],
+  explain: ["Photosynthesis", "Fractions", "The Pythagorean theorem", "World War II"],
 };
+
+type RowItem = {
+  id: string;
+  icon: UiIconName;
+  label: string;
+  action: "mode" | "prompt";
+  mode?: StartMode;
+};
+
+function defaultRows(): RowItem[] {
+  return MODES.map((item) => ({
+    id: item.id,
+    icon: item.icon,
+    label: item.label,
+    action: "mode" as const,
+    mode: item.id,
+  }));
+}
+
+function suggestionRows(mode: StartMode): RowItem[] {
+  const icon = MODES.find((item) => item.id === mode)?.icon ?? "spark";
+  return SUGGESTIONS[mode].map((label) => ({
+    id: `${mode}-${label}`,
+    icon,
+    label,
+    action: "prompt" as const,
+  }));
+}
+
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(media.matches);
+    const onChange = () => setReduced(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
+}
 
 export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   const router = useRouter();
@@ -71,6 +90,7 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   const [mode, setMode] = useState<StartMode | null>(null);
   const [needGoogle, setNeedGoogle] = useState(false);
   const guest = publicHome || isGuestUser(user);
+  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     if (!guest) {
@@ -81,6 +101,30 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   }, [guest]);
 
   const activeMode = mode ? MODES.find((item) => item.id === mode) : null;
+  const rows = mode ? suggestionRows(mode) : defaultRows();
+  const rowKey = mode ?? "default";
+  const shownRef = useRef(rowKey);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const [shownRows, setShownRows] = useState(rows);
+  const [rowPhase, setRowPhase] = useState<"in" | "out">("in");
+
+  useEffect(() => {
+    if (rowKey === shownRef.current) return;
+    if (reducedMotion) {
+      shownRef.current = rowKey;
+      setShownRows(rowsRef.current);
+      setRowPhase("in");
+      return;
+    }
+    setRowPhase("out");
+    const timer = window.setTimeout(() => {
+      shownRef.current = rowKey;
+      setShownRows(rowsRef.current);
+      setRowPhase("in");
+    }, 90);
+    return () => window.clearTimeout(timer);
+  }, [rowKey, reducedMotion]);
 
   const chips: ComposerChip[] = attachments.map((item) => {
     const status = ingestPhase ?? "ready";
@@ -194,20 +238,9 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   }
 
   const fieldStart = !guest && activeMode ? (
-    <span
-      key={activeMode.id}
-      className="composer-chip-in inline-flex h-8 max-w-[240px] shrink-0 items-center gap-1.5 rounded-full bg-accent/15 py-0.5 pl-2.5 pr-1 text-[13px] text-foreground"
-    >
-      <span className="text-muted">{activeMode.icon}</span>
-      <span className="truncate">{activeMode.label}</span>
-      <button
-        type="button"
-        onClick={clearMode}
-        className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-foreground/10 hover:text-foreground"
-        aria-label="Dismiss"
-      >
-        <IconX className="h-3 w-3" />
-      </button>
+    <span className="start-action-prefix pointer-events-none inline-flex shrink-0 select-none items-center gap-1.5 whitespace-nowrap pt-3 text-[15px] leading-6 text-foreground">
+      <UiIcon name={activeMode.icon} size={18} className="accent-symbol" />
+      <span>{activeMode.label}</span>
     </span>
   ) : null;
 
@@ -222,6 +255,7 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
         chips={guest ? [] : chips}
         placeholder={guest ? "Ask anything" : (activeMode?.placeholder ?? "Ask anything")}
         fieldStart={fieldStart}
+        fadePlaceholder={!guest}
         pad={false}
         allowAttach={!guest}
         showParameters
@@ -256,7 +290,7 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
     return (
       <div className="relative flex h-full min-h-0 flex-col items-center justify-center px-6 pb-16">
         <h1 className="mb-8 text-center text-[32px] font-medium tracking-tight text-foreground">What should we learn?</h1>
-        <div className="w-full max-w-[850px] mx-auto composer-pad">{composer}</div>
+        <div className="mx-auto w-full max-w-[850px] composer-pad">{composer}</div>
       </div>
     );
   }
@@ -295,68 +329,27 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
         <div className="mx-auto w-[min(850px,calc(100%-32px))] composer-pad max-md:mt-auto md:pb-8">
           {composer}
 
-          {!mode ? (
-            <div className="start-panel-in px-5 pb-4 pt-5">
-              <div className="flex flex-col gap-1.5">
-                {MODES.map((item, index) => (
-                  <button
-                    key={item.id}
-                    ref={index === 0 ? firstActionRef : undefined}
-                    type="button"
-                    onClick={() => pickMode(item.id)}
-                    onKeyDown={(event) => onListKey(event, index, MODES.length)}
-                    className="flex w-full items-center gap-3.5 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.06] text-muted">
-                      {item.icon}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[15px] text-foreground">{item.label}</span>
-                      <span className="mt-0.5 block text-[13px] text-muted">{item.hint}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="start-panel-in px-5 pb-5 pt-5">
-              <p className="mb-3.5 text-[15px] font-medium text-foreground">სასწავლო იდეები</p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {CARDS[mode].map((card, index) => (
-                  <button
-                    key={card.title}
-                    ref={index === 0 ? firstActionRef : undefined}
-                    type="button"
-                    onClick={() => {
-                      if (card.upload) {
-                        composerRef.current?.openFile();
-                        return;
-                      }
-                      fillTopic(card.title);
-                    }}
-                    onKeyDown={(event) => onListKey(event, index, CARDS[mode].length)}
-                    className={
-                      card.upload
-                        ? "group flex aspect-[1.08] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-transparent p-4 text-center text-muted transition-colors hover:border-foreground/25 hover:bg-surface-2/60 hover:text-foreground"
-                        : "group relative flex aspect-[1.08] flex-col items-start justify-between overflow-hidden rounded-2xl bg-surface-2 p-4 text-left text-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-foreground/[0.08]"
-                    }
-                  >
-                    {card.upload ? (
-                      <>
-                        <IconPlus className="h-7 w-7" />
-                        <span className="mt-3 text-[13px] leading-5">{card.title}</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-muted transition-colors group-hover:text-foreground">{activeMode?.icon}</span>
-                        <span className="text-[13px] font-medium leading-5">{card.title}</span>
-                      </>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <div className="start-suggest-list mt-6" aria-live="polite">
+            {shownRows.map((item, index) => (
+              <button
+                key={item.id}
+                ref={index === 0 ? firstActionRef : undefined}
+                type="button"
+                onClick={() => {
+                  if (item.action === "mode" && item.mode) pickMode(item.mode);
+                  else fillTopic(item.label);
+                }}
+                onKeyDown={(event) => onListKey(event, index, shownRows.length)}
+                className={`start-suggest-row ${rowPhase === "out" ? "start-suggest-out" : "start-suggest-in"}`}
+                style={rowPhase === "in" && !reducedMotion ? { animationDelay: `${index * 20}ms` } : undefined}
+              >
+                <span className="start-suggest-icon">
+                  <UiIcon name={item.icon} size={20} />
+                </span>
+                <span className="start-suggest-label">{item.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

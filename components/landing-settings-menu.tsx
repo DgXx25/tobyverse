@@ -72,7 +72,7 @@ export function LandingSettingsMenu() {
                 onClick={() => setPage("parameters")}
                 className="mt-0.5 flex h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-[14px] text-foreground hover:bg-foreground/10"
               >
-                <UiIcon name="sliders" size={18} className="text-muted" />
+                <UiIcon name="sliders" size={18} className="accent-symbol" />
                 Parameters
               </button>
             </>

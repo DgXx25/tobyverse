@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   authErrorMessage,
   enterAppAfterSignIn,
@@ -33,6 +34,7 @@ function GoogleIcon() {
 }
 
 export function GuestGoogleCta({ line = GUEST_CAP_LINE }: { line?: string }) {
+  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +45,7 @@ export function GuestGoogleCta({ line = GUEST_CAP_LINE }: { line?: string }) {
       const credential = await signInWithGoogle();
       if (!credential) return;
       persistSignedInSession(credential.user);
-      enterAppAfterSignIn(true);
+      enterAppAfterSignIn(true, (path) => router.replace(path));
     } catch (err) {
       const message = authErrorMessage(err);
       if (message) setError(message);

@@ -9,7 +9,8 @@ import {
   wantsImages,
   type ComposerIntent,
 } from "@/lib/composer/intent";
-import { searchImagesClient } from "@/lib/images/client";
+import { searchImagesClient, toImageAttach } from "@/lib/images/client";
+import { IMAGE_SEARCH_DEFAULT } from "@/lib/images/types";
 import { generatePracticeSet } from "@/lib/exercises/generate-set";
 import { appendPracticeItems, rewritePracticeItems } from "@/lib/exercises/mutate-client";
 import { generateStudySheetFromPrompt, rewriteStudySheetFromPrompt } from "@/lib/study-sheets/generate-client";
@@ -214,39 +215,23 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
 
 async function runSearchImages(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const query = ctx.tool.args.query?.trim() || ctx.prompt.trim();
+  const count = ctx.tool.args.count ?? IMAGE_SEARCH_DEFAULT;
+  ctx.onStatus?.("Searching…");
   const local = localImageHits({
     query,
     materials: ctx.materials,
     attachments: ctx.attachments,
-    limit: 8,
+    limit: count,
   });
-  ctx.onStatus?.("Searching images…");
-  const need = 8 - local.length;
   const seen = new Set(local.map((hit) => hit.thumb || hit.url).filter(Boolean));
-  const web =
-    need > 0
-      ? (await searchImagesClient(query))
-          .flatMap((hit) => {
-            const thumb = hit.thumb || hit.url;
-            const key = thumb || hit.url;
-            if (!key || seen.has(key)) return [];
-            seen.add(key);
-            return [
-              {
-                url: hit.url,
-                thumb,
-                title: hit.title,
-                source: hit.source,
-                license: hit.license || "",
-                credit: hit.credit || "",
-                pageUrl: hit.pageUrl,
-                kind: "web" as const,
-              },
-            ];
-          })
-          .slice(0, need)
-      : [];
-  const images = [...local, ...web].slice(0, 8);
+  const imageAttaches = await searchImagesClient(query, count);
+  const web = imageAttaches.flatMap((hit) => {
+    const key = hit.thumb || hit.url;
+    if (!key || seen.has(key) || !toImageAttach(hit)) return [];
+    seen.add(key);
+    return [hit];
+  });
+  const images = [...local, ...web];
   if (images.length === 0) {
     return { intent: "ask", content: imageFailLine(ctx.prompt), images: [] };
   }
@@ -301,7 +286,8 @@ export function toolProducesArtifact(name: ChatToolName): boolean {
   return Boolean(CHAT_TOOL_HANDLERS[name]?.artifactKind) || isArtifactTool(name);
 }
 
-export function dispatchStatus(intent: ComposerIntent): string {
+export function dispatchStatus(intent: ComposerIntent, toolName?: ChatToolName): string {
+  if (toolName === "search_images") return "Searching…";
   if (intent === "study" || intent === "rewrite_sheet") return "Writing";
   if (intent === "practice") return "Generating a practice set…";
   if (intent === "plan") return "Writing";

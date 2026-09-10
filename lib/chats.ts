@@ -113,16 +113,22 @@ function asImages(value: unknown): ChatImageHit[] | undefined {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
     const url = typeof row.url === "string" ? row.url.trim() : "";
-    const thumb = typeof row.thumb === "string" ? row.thumb.trim() : "";
+    const thumbnail = typeof row.thumbnail === "string" ? row.thumbnail.trim() : "";
+    const thumb = (typeof row.thumb === "string" ? row.thumb.trim() : "") || thumbnail;
     const storagePath = typeof row.storagePath === "string" ? row.storagePath.trim() : "";
     if (!url && !thumb && !storagePath) return [];
     const kind: ChatImageHit["kind"] =
       row.kind === "upload" ? "upload" : row.kind === "web" ? "web" : storagePath ? "upload" : "web";
+    const alt = typeof row.alt === "string" ? row.alt.trim() : "";
+    const title =
+      typeof row.title === "string" && row.title.trim() ? row.title.trim() : alt || url || "Image";
     return [
       {
         url: url || storagePath || thumb,
         thumb: thumb || storagePath || url,
-        title: typeof row.title === "string" && row.title.trim() ? row.title.trim() : url || "Image",
+        thumbnail: thumbnail || thumb || undefined,
+        title,
+        alt: alt || title,
         source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : kind === "upload" ? "upload" : "web",
         license: typeof row.license === "string" ? row.license.trim() : "",
         credit: typeof row.credit === "string" ? row.credit.trim() : "",

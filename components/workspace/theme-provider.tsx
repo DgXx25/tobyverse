@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lockMobileZoom, markIosStandalone } from "@/lib/mobile-zoom";
 import {
   applyMarketingDark,
   applyThemeClass,
@@ -22,6 +23,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>("dark");
 
   useEffect(() => {
+    markIosStandalone();
+    const unlockZoom = lockMobileZoom();
     const stored = (() => {
       try {
         return window.localStorage.getItem(THEME_KEY);
@@ -33,10 +36,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeState(next);
     if (isMarketingPath(window.location.pathname)) {
       applyMarketingDark();
-      return;
+    } else if (stored && stored !== next) {
+      persistTheme(next);
+    } else {
+      applyThemeClass(next);
     }
-    if (stored && stored !== next) persistTheme(next);
-    else applyThemeClass(next);
+    return unlockZoom;
   }, []);
 
   const setTheme = useCallback((next: ThemeId) => {

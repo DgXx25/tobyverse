@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { UiIcon } from "@/components/workspace/ui-icon";
-import { fileTypeBadge } from "@/lib/composer/attach";
-import { librarySlidePaths, libraryThumbPaths, isLibraryPptx } from "@/lib/library/media";
+import { librarySlidePaths, libraryThumbPaths, isLibraryImage, isLibraryPptx } from "@/lib/library/media";
 import type { LibraryItem } from "@/lib/library/items";
 import { removeLibraryMaterial } from "@/lib/materials/save";
 import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
@@ -70,40 +69,23 @@ function fileNameFor(item: LibraryItem, url?: string | null) {
 }
 
 function IconFallback({ item }: { item: LibraryItem }) {
-  if (item.kind === "practice") {
-    return <UiIcon name="practice" size={40} className="text-muted" />;
-  }
-  if (item.kind === "sheet") {
-    return (
-      <div className="flex h-full w-full flex-col px-4 py-4">
-        <UiIcon name="notes" size={20} className="text-muted" />
-        <p className="mt-3 line-clamp-5 text-left text-[12px] leading-5 text-muted">{item.preview || item.title}</p>
-      </div>
-    );
-  }
-  if (isLibraryPptx(item)) {
-    return (
-      <div className="flex flex-col items-center gap-2">
-        <UiIcon name="deck" size={40} className="text-muted" />
-        <span className="font-mono text-[10px] uppercase tracking-wide text-muted">PPT</span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <UiIcon name="file" size={40} className="text-muted" />
-      <span className="font-mono text-[10px] uppercase tracking-wide text-muted">
-        {fileTypeBadge(item.materialType || item.meta, item.title)}
-      </span>
-    </div>
-  );
+  const icon =
+    item.kind === "practice"
+      ? "practice"
+      : item.kind === "sheet"
+        ? "notes"
+        : isLibraryPptx(item)
+          ? "deck"
+          : "file";
+  return <UiIcon name={icon} size={40} className="accent-symbol text-muted" />;
 }
 
 export function LibraryCardThumb({ item }: { item: LibraryItem }) {
-  const paths = useMemo(() => libraryThumbPaths(item), [item]);
+  const image = isLibraryImage(item);
+  const paths = useMemo(() => (image ? libraryThumbPaths(item) : []), [image, item]);
   const url = useFirstObjectUrl(paths);
 
-  if (url) {
+  if (image && url) {
     return <img src={url} alt="" className="h-full w-full object-cover" />;
   }
 

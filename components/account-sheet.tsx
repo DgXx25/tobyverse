@@ -13,6 +13,7 @@ import { ParametersPanel } from "@/components/workspace/parameters-panel";
 import { BillingCard } from "@/components/account/billing-card";
 import { UsageMeters } from "@/components/account/usage-meters";
 import { AccountDataControls } from "@/components/account/data-controls";
+import { MemoriesPanel } from "@/components/account/memories-panel";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { emptyUsage } from "@/lib/account/plan";
 import {
@@ -109,6 +110,11 @@ export function AccountSheet() {
 
               <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Data & Information</p>
               <SheetRow
+                icon={<UiIcon name="brain" size={18} />}
+                label="Memory"
+                onClick={() => setAccountSheetPage("memory")}
+              />
+              <SheetRow
                 icon={<UiIcon name="data" size={18} />}
                 label="Data"
                 onClick={() => setAccountSheetPage("data")}
@@ -148,6 +154,11 @@ export function AccountSheet() {
                   <UsageMeters usage={profile?.usage ?? emptyUsage()} />
                 </div>
               )}
+              {accountSheetPage === "memory" && (
+                <div className="px-4 pb-8">
+                  <MemoriesPanel />
+                </div>
+              )}
               {accountSheetPage === "data" && (
                 <div className="px-4 pb-8">
                   <AccountDataControls />
@@ -166,6 +177,7 @@ function pageTitle(page: AccountSheetPage): string {
   if (page === "parameters") return "Parameters";
   if (page === "billing") return "Billing";
   if (page === "usage") return "Usage";
+  if (page === "memory") return "Memory";
   if (page === "data") return "Data";
   return "Account";
 }
@@ -214,7 +226,7 @@ function SheetRow({
       onClick={onClick}
       className="flex h-12 w-full items-center gap-3 rounded-xl px-3 text-left hover:bg-surface-2"
     >
-      <span className="flex h-[25px] w-[25px] items-center justify-center text-muted">{icon}</span>
+      <span className="accent-symbol flex h-[25px] w-[25px] items-center justify-center">{icon}</span>
       <span className="min-w-0 flex-1 text-[15px] text-foreground">{label}</span>
       {value ? <span className="text-[13px] text-muted">{value}</span> : null}
       <UiIcon name="forward" size={16} className="shrink-0 text-muted" />

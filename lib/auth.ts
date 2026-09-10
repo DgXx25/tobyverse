@@ -82,13 +82,13 @@ function isPreAuthPath(pathname: string): boolean {
 
 let enteredApp = false;
 
-export function enterAppAfterSignIn(cookieJustSet: boolean) {
+export function enterAppAfterSignIn(_cookieJustSet: boolean, go?: (path: string) => void) {
   if (typeof window === "undefined" || enteredApp) return;
   if (!isPreAuthPath(window.location.pathname)) return;
   if (peekCurrentUser()?.isAnonymous) return;
   enteredApp = true;
-  if (cookieJustSet) {
-    window.location.assign(POST_LOGIN_PATH);
+  if (go) {
+    go(POST_LOGIN_PATH);
     return;
   }
   window.location.replace(POST_LOGIN_PATH);

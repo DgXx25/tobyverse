@@ -1,4 +1,5 @@
 export type { EntityId, IsoDateString } from "@/types/common";
+export type { UserMemory, ChatMemoryContext, MemoryOp } from "@/types/memory";
 export type { AppUser, UserPlan, UserProfile, UserUsage } from "@/types/user";
 export { USER_PLANS } from "@/types/user";
 export { PROJECT_GOALS, type ProjectGoal } from "@/types/goals";

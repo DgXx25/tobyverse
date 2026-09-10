@@ -44,7 +44,7 @@ function ThemeCard({
           <div className="flex flex-1 flex-col gap-1.5 p-2.5">
             <div className="h-1.5 w-9 rounded-full" style={{ background: preview.text, opacity: 0.9 }} />
             <div className="h-1 w-full rounded-full" style={{ background: preview.muted }} />
-            <div className="h-1 w-[72%] rounded-full" style={{ background: preview.muted }} />
+            <div className="h-1 w-[72%] rounded-full" style={{ background: preview.accent }} />
             <div className="mt-auto h-4 w-full rounded" style={{ background: preview.sidebar }} />
           </div>
         </div>

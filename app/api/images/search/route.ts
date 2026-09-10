@@ -1,5 +1,5 @@
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
-import { allowImageSearch, ImageSearchError, searchWebImages } from "@/lib/images/search";
+import { allowImageSearch, clampImageCount, ImageSearchError, searchWebImages } from "@/lib/images/search";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     return authErrorResponse(error);
   }
 
-  let body: { query?: unknown };
+  let body: { query?: unknown; count?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -29,8 +29,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "Too many image searches. Try again in a minute." }, { status: 429 });
   }
 
+  const rawCount = typeof body.count === "number" ? body.count : typeof body.count === "string" ? Number(body.count) : NaN;
+
   try {
-    const images = await searchWebImages(query);
+    const images = await searchWebImages(query, Number.isFinite(rawCount) ? clampImageCount(rawCount) : undefined);
     return Response.json({ images });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Image search failed.";

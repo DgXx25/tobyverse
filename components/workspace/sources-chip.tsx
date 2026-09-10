@@ -26,7 +26,7 @@ function webSourceUrl(hit: ChatImageHit): string | null {
   if (hit.kind === "upload" || hit.storagePath) return null;
   const url = (hit.pageUrl || hit.url || "").trim();
   if (!/^https?:\/\//i.test(url)) return null;
-  const title = hit.title?.trim();
+  const title = hit.title?.trim() || hit.alt?.trim();
   if (!title) return null;
   return url;
 }
@@ -40,11 +40,12 @@ export function sourcesForTurn(assistant: ChatMessage): SourceItem[] {
     const url = webSourceUrl(hit);
     if (!url || seen.has(url)) continue;
     seen.add(url);
+    const thumb = (hit.thumb || hit.thumbnail || "").trim();
     items.push({
-      title: hit.title.trim(),
+      title: (hit.title || hit.alt || "").trim(),
       host: hostOf(url) || hit.source,
       license: hit.license,
-      thumb: hit.thumb && !hit.thumb.startsWith("users/") ? hit.thumb : undefined,
+      thumb: thumb && !thumb.startsWith("users/") ? thumb : undefined,
       url,
     });
   }
@@ -83,7 +84,7 @@ export function SourcesChip({ items, locale }: { items: SourceItem[]; locale: "k
     locale === "ka" ? `${items.length} წყარო` : items.length === 1 ? "1 source" : `${items.length} sources`;
 
   return (
-    <div ref={rootRef} className="relative mt-1.5">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -94,7 +95,7 @@ export function SourcesChip({ items, locale }: { items: SourceItem[]; locale: "k
         {label}
       </button>
       {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-30 w-[280px] overflow-hidden rounded-xl border border-border bg-surface p-1">
+        <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-[280px] overflow-hidden rounded-xl border border-border bg-surface p-1">
           {items.map((item, index) => (
             <SourceRow
               key={`${item.url}-${index}`}

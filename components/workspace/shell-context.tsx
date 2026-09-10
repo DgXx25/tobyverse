@@ -4,8 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useRouter } from "next/navigation";
 import { isMobileWidth, MOBILE_MQ } from "@/lib/workspace/media";
 
-export type SettingsSection = "account" | "appearance" | "parameters" | "help" | "billing" | "usage" | "data";
-export type AccountSheetPage = "root" | "appearance" | "parameters" | "billing" | "usage" | "data";
+export type SettingsSection = "account" | "appearance" | "parameters" | "help" | "billing" | "usage" | "data" | "memory";
+export type AccountSheetPage = "root" | "appearance" | "parameters" | "billing" | "usage" | "data" | "memory";
 
 export type PendingPanel = {
   projectId: string;
@@ -50,7 +50,16 @@ const ShellContext = createContext<ShellContextValue | null>(null);
 const COLLAPSE_KEY = "tv.sidebar.collapsed";
 
 function sectionToSheetPage(section?: SettingsSection): AccountSheetPage {
-  if (section === "appearance" || section === "parameters" || section === "billing" || section === "usage" || section === "data") return section;
+  if (
+    section === "appearance" ||
+    section === "parameters" ||
+    section === "billing" ||
+    section === "usage" ||
+    section === "data" ||
+    section === "memory"
+  ) {
+    return section;
+  }
   return "root";
 }
 

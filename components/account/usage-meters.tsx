@@ -1,7 +1,7 @@
 "use client";
 
 import { formatBytes } from "@/lib/format";
-import { FREE_CAPS, usageRatio } from "@/lib/account/plan";
+import { FREE_CAPS, STORAGE_CAP_LABEL, usageRatio } from "@/lib/account/plan";
 import type { UserUsage } from "@/types/user";
 
 export function UsageMeters({ usage }: { usage: UserUsage }) {
@@ -14,27 +14,38 @@ export function UsageMeters({ usage }: { usage: UserUsage }) {
         <Meter label="Chat turns" used={usage.chatTurns} cap={FREE_CAPS.chatTurns} />
         <Meter label="Practice" used={usage.practiceGenerated} cap={FREE_CAPS.practiceGenerated} />
         <Meter label="Notes" used={usage.notesGenerated} cap={FREE_CAPS.notesGenerated} />
-        <div>
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-[15px] text-foreground">Storage</p>
-            <p className="text-[13px] text-muted">{formatBytes(usage.storageBytes) || "0 B"}</p>
-          </div>
-        </div>
+        <Meter
+          label="Storage"
+          used={usage.storageBytes}
+          cap={FREE_CAPS.storageBytes}
+          display={`${formatBytes(usage.storageBytes) || "0 B"} / ${STORAGE_CAP_LABEL}`}
+        />
       </div>
-      <p className="mt-8 text-[13px] leading-6 text-muted">Shown for this week. Not enforced during beta.</p>
+      <p className="mt-8 text-[13px] leading-6 text-muted">
+        Storage is capped at {STORAGE_CAP_LABEL} for materials, including during beta. Chat, practice, and notes
+        totals are shown for this week and not enforced yet.
+      </p>
     </div>
   );
 }
 
-function Meter({ label, used, cap }: { label: string; used: number; cap: number }) {
+function Meter({
+  label,
+  used,
+  cap,
+  display,
+}: {
+  label: string;
+  used: number;
+  cap: number;
+  display?: string;
+}) {
   const ratio = usageRatio(used, cap);
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[15px] text-foreground">{label}</p>
-        <p className="text-[13px] text-muted">
-          {used} / {cap}
-        </p>
+        <p className="text-[13px] text-muted">{display ?? `${used} / ${cap}`}</p>
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
         <div className="h-full rounded-full bg-foreground/80" style={{ width: `${ratio * 100}%` }} />

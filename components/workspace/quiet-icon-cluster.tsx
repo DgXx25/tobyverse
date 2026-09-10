@@ -135,11 +135,7 @@ export function QuietIconCluster({
                 : "cursor-pointer bg-transparent text-muted hover:text-foreground"
           }`}
         >
-          <UiIcon
-            name={action.icon}
-            size={size}
-            strokeWidth={action.active && !action.disabled ? 1.75 : 1.5}
-          />
+          <UiIcon name={action.icon} size={size} />
         </button>
       ))}
       {tip && typeof document !== "undefined"

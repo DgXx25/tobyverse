@@ -1,12 +1,14 @@
 import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/gemini";
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { DEFAULT_AI_PROVIDER, isEnabledProvider } from "@/lib/ai/catalog";
+import { FREE_CAPS } from "@/lib/account/plan";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
 import { parseChatArtifact } from "@/lib/artifacts/active";
 import { fallbackChatTool, gateChatTool } from "@/lib/composer/intent";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
+import { asMemoryFacts } from "@/lib/memory/normalize";
 import { CHAT_MODES, type ChatArtifact, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
 
 export const runtime = "nodejs";
@@ -98,6 +100,7 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     priorClarify: row.priorClarify === true,
     pendingTopic: typeof row.pendingTopic === "string" ? row.pendingTopic.trim() || undefined : undefined,
     pendingKind: row.pendingKind === "sheet" ? "sheet" : row.pendingKind === "practice" ? "practice" : row.pendingKind === "images" ? "images" : undefined,
+    memories: asMemoryFacts(row.memories, FREE_CAPS.memories),
   };
 }
 
@@ -223,7 +226,7 @@ export async function POST(request: Request) {
   }
   const context = asContext(body.context, mode);
   const guestContext = session.anonymous
-    ? { ...context, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined }
+    ? { ...context, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [] }
     : context;
   const systemInstruction = buildChatSystemPrompt(guestContext);
 

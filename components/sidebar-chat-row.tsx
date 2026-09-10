@@ -357,7 +357,7 @@ function MenuItem({
         danger ? "text-red-400" : "text-foreground"
       }`}
     >
-      {icon ? <span className={danger ? "text-red-400" : "text-foreground/80"}>{icon}</span> : null}
+      {icon ? <span className={danger ? "text-red-400" : "accent-symbol"}>{icon}</span> : null}
       {label}
     </button>
   );

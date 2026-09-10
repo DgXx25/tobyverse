@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { ParametersPanel } from "@/components/workspace/parameters-panel";
+import { ModelOptions } from "@/components/workspace/model-options";
 import { UiIcon } from "@/components/workspace/ui-icon";
+import { usePreferredModel } from "@/components/account/use-preferred-model";
 
 export function ComposerParameters() {
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const { name } = usePreferredModel();
 
   useEffect(() => {
     if (!open) return;
@@ -33,7 +35,8 @@ export function ComposerParameters() {
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        aria-label="Parameters"
+        aria-label="Model"
+        aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((current) => !current)}
@@ -41,16 +44,15 @@ export function ComposerParameters() {
           open ? "bg-surface text-foreground" : "text-muted hover:bg-surface hover:text-foreground"
         }`}
       >
-        Gemini
+        {name}
         <UiIcon name="chevronDown" size={14} />
       </button>
       {open ? (
         <div
           id={menuId}
-          role="menu"
-          className="absolute bottom-[calc(100%+8px)] right-0 z-50 w-[220px] rounded-2xl bg-surface p-1.5 shadow-2xl ring-1 ring-border"
+          className="absolute bottom-[calc(100%+8px)] right-0 z-50 min-w-[220px] rounded-2xl bg-surface-2 p-1.5 shadow-2xl ring-1 ring-border"
         >
-          <ParametersPanel />
+          <ModelOptions compact onPicked={() => setOpen(false)} />
         </div>
       ) : null}
     </div>

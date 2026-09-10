@@ -11,11 +11,17 @@ service cloud.firestore {
     //   - plan: string (required, "free" only in beta, immutable after create)
     //   - usage: map (required) weekStart string YYYY-MM-DD, chatTurns int,
     //            practiceGenerated int, notesGenerated int, storageBytes number
+    //            (storageBytes capped at 1 GiB / 1073741824; existing over-cap
+    //            accounts may keep or lower, never grow)
     //   - displayName: string|null (optional, <= 120)
     //   - email: string|null (optional, <= 320)
     //   - photoURL: string|null (optional, <= 2048)
+    //   - preferredModel: string|null (optional, "gemini" | "grok" | "gpt")
     //   - createdAt: timestamp (set on create, immutable)
     //   - updatedAt: timestamp
+    //
+    // Subcollection: users/{uid}/memories/{memoryId}
+    //   id, content (<= 200), createdAt, updatedAt
     //
     // Collection: projects — existing owner-scoped project documents
     // ===============================================================
@@ -45,7 +51,17 @@ service cloud.firestore {
         && usage.chatTurns is number && usage.chatTurns >= 0 && usage.chatTurns <= 1000000
         && usage.practiceGenerated is number && usage.practiceGenerated >= 0 && usage.practiceGenerated <= 1000000
         && usage.notesGenerated is number && usage.notesGenerated >= 0 && usage.notesGenerated <= 1000000
-        && usage.storageBytes is number && usage.storageBytes >= 0 && usage.storageBytes <= 1099511627776;
+        && usage.storageBytes is number && usage.storageBytes >= 0 && usage.storageBytes <= 1099511627776
+        && storageWithinCap(usage);
+    }
+
+    // 1 GiB materials cap. Accounts already over the cap may keep or lower usage, never grow.
+    function storageWithinCap(usage) {
+      return usage.storageBytes <= 1073741824
+        || (resource != null
+          && resource.data.usage is map
+          && resource.data.usage.storageBytes is number
+          && usage.storageBytes <= resource.data.usage.storageBytes);
     }
 
     function isValidOptionalText(data, field, maxLen) {
@@ -54,14 +70,21 @@ service cloud.firestore {
         || (data[field] is string && data[field].size() <= maxLen);
     }
 
+    function isValidPreferredModel(data) {
+      return !("preferredModel" in data)
+        || data.preferredModel == null
+        || (data.preferredModel is string && data.preferredModel in ["gemini", "grok", "gpt"]);
+    }
+
     function isValidUser(data) {
-      return data.keys().hasOnly(["displayName", "email", "photoURL", "plan", "usage", "createdAt", "updatedAt"])
+      return data.keys().hasOnly(["displayName", "email", "photoURL", "plan", "usage", "preferredModel", "createdAt", "updatedAt"])
         && data.keys().hasAll(["plan", "usage"])
         && data.plan == "free"
         && isValidUsage(data.usage)
         && isValidOptionalText(data, "displayName", 120)
         && isValidOptionalText(data, "email", 320)
         && isValidOptionalText(data, "photoURL", 2048)
+        && isValidPreferredModel(data)
         && (!("createdAt" in data) || data.createdAt is timestamp || data.createdAt is string)
         && (!("updatedAt" in data) || data.updatedAt is timestamp || data.updatedAt is string);
     }
@@ -69,6 +92,15 @@ service cloud.firestore {
     function userPlanLocked() {
       return request.resource.data.plan == "free"
         && (!("plan" in resource.data) || resource.data.plan == request.resource.data.plan);
+    }
+
+    function isValidMemory(memoryId, data) {
+      return data.keys().hasOnly(["id", "content", "createdAt", "updatedAt"])
+        && data.keys().hasAll(["id", "content", "createdAt", "updatedAt"])
+        && data.id == memoryId
+        && data.content is string && data.content.size() > 0 && data.content.size() <= 200
+        && (data.createdAt is timestamp || data.createdAt is string)
+        && (data.updatedAt is timestamp || data.updatedAt is string);
     }
 
     match /users/{userId} {
@@ -80,6 +112,16 @@ service cloud.firestore {
         && (!("createdAt" in resource.data)
           || request.resource.data.createdAt == resource.data.createdAt);
       allow delete: if isOwner(userId);
+
+      match /memories/{memoryId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidMemory(memoryId, request.resource.data);
+        allow update: if isOwner(userId)
+          && isValidMemory(memoryId, request.resource.data)
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
     }
 
     match /projects/{projectId} {

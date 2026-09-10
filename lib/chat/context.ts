@@ -2,6 +2,7 @@ import { withAskWritingContract } from "@/lib/ai/voice";
 import { compactArtifactLine } from "@/lib/composer/memory";
 import { chatSystemInstruction } from "@/lib/core/chat-modes";
 import { PROJECT_GOAL_LABELS } from "@/lib/core/constants";
+import { formatMemoryBlock } from "@/lib/memory/prompt";
 import type { ChatGenerationContext } from "@/types/chat";
 import type { ProjectGoal } from "@/types/goals";
 
@@ -31,6 +32,9 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     .join("\n");
 
   const sections: string[] = [chatSystemInstruction(context.mode, extra)];
+
+  const memoryBlock = formatMemoryBlock(context.memories ?? []);
+  if (memoryBlock) sections.push(memoryBlock);
 
   if (context.knowledgeItems.length > 0) {
     const facts = context.knowledgeItems

@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
 import { ensureUserProfile } from "@/lib/account/store";
@@ -30,6 +31,7 @@ const AuthContext = createContext<AuthContextValue>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const configured = isFirebaseConfigured();
@@ -43,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const auth = getFirebaseAuth();
     let unsub: (() => void) | undefined;
     let cancelled = false;
+    const go = (path: string) => router.replace(path);
 
     void (async () => {
       try {
@@ -52,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           persistSignedInSession(result.credential.user);
           setUser(result.credential.user);
           void ensureUserProfile(result.credential.user).catch(() => undefined);
-          if (!result.credential.user.isAnonymous) enterAppAfterSignIn(true);
+          if (!result.credential.user.isAnonymous) enterAppAfterSignIn(true, go);
         }
       } catch {
         /* consumeRedirectResult maps errors onto the result */
@@ -65,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (nextUser) {
           persistSignedInSession(nextUser);
           void ensureUserProfile(nextUser).catch(() => undefined);
-          if (!nextUser.isAnonymous) enterAppAfterSignIn(true);
+          if (!nextUser.isAnonymous) enterAppAfterSignIn(true, go);
         }
       });
     })();
@@ -74,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unsub?.();
     };
-  }, [configured]);
+  }, [configured, router]);
 
   const value = useMemo(
     () => ({ user, loading, configured }),

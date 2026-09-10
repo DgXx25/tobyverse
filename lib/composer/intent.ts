@@ -450,6 +450,7 @@ export function gateChatTool(input: {
       name: "search_images",
       args: {
         query: tool.args.query?.trim() || prompt.trim(),
+        count: tool.args.count,
       },
     };
   }
@@ -464,7 +465,7 @@ export function gateChatTool(input: {
     }
     return {
       name: "search_images",
-      args: { query: tool.args.query?.trim() || prompt.trim() },
+      args: { query: tool.args.query?.trim() || prompt.trim(), count: tool.args.count },
     };
   }
 
@@ -476,7 +477,7 @@ export function gateChatTool(input: {
         args: { question: tool.args.question || imageClarifyQuestion(prompt), options: tool.args.options },
       };
     }
-    return { name: "search_images", args: { query } };
+    return { name: "search_images", args: { query, count: tool.args.count } };
   }
 
   if (factQuestion && (isCreateTool(tool.name) || tool.name === "clarify")) {

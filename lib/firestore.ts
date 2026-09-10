@@ -4,7 +4,13 @@
  * users/{userId}
  *   displayName, email, photoURL, plan ("free" in beta; not client-writable to other values),
  *   usage { weekStart, chatTurns, practiceGenerated, notesGenerated, storageBytes },
+ *     storageBytes is capped at 1 GiB per user (materials), enforced during beta.
+ *   preferredModel (optional: gemini | grok | gpt),
  *   createdAt, updatedAt
+ *
+ *   memories/{memoryId}
+ *     id, content (short atomic fact, max 200), createdAt, updatedAt
+ *     Model-chosen durable facts only — never chat transcripts or summaries.
  *
  * projects/{projectId}
  *   title, description, userId, goal, recipe, preferredChatMode, createdAt, updatedAt
@@ -62,6 +68,7 @@
 
 export const COLLECTIONS = {
   users: "users",
+  memories: "memories",
   projects: "projects",
   lessons: "lessons",
   exercises: "exercises",
@@ -85,6 +92,9 @@ export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];
 export const firestorePaths = {
   users: () => COLLECTIONS.users,
   user: (userId: string) => `${COLLECTIONS.users}/${userId}`,
+  memories: (userId: string) => `${COLLECTIONS.users}/${userId}/${COLLECTIONS.memories}`,
+  memory: (userId: string, memoryId: string) =>
+    `${COLLECTIONS.users}/${userId}/${COLLECTIONS.memories}/${memoryId}`,
 
   projects: () => COLLECTIONS.projects,
   project: (projectId: string) => `${COLLECTIONS.projects}/${projectId}`,

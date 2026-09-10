@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { AccountDataControls } from "@/components/account/data-controls";
+import { MemoriesPanel } from "@/components/account/memories-panel";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { firstNameFromUser, initialsFromName, signInMethodsFromProviderData } from "@/lib/account/providers";
 import { planLabel } from "@/lib/account/plan";
 
-type AccountTab = "account" | "data";
+type AccountTab = "account" | "memory" | "data";
 
 export function AccountWorkspace() {
   const { user } = useAuth();
@@ -27,7 +28,7 @@ export function AccountWorkspace() {
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
       <header className="flex h-14 shrink-0 items-center justify-between px-5 pt-[env(safe-area-inset-top)] md:px-8">
-        <Link href="/" draggable={false} className="select-none text-foreground" aria-label="TobyVerse">
+        <Link href="/" draggable={false} className="accent-symbol select-none text-foreground" aria-label="TobyVerse">
           <span
             className="block h-7 w-7 bg-current"
             style={{
@@ -54,6 +55,12 @@ export function AccountWorkspace() {
               onClick={() => setTab("account")}
             />
             <NavItem
+              active={tab === "memory"}
+              icon={<UiIcon name="brain" size={18} />}
+              label="Memory"
+              onClick={() => setTab("memory")}
+            />
+            <NavItem
               active={tab === "data"}
               icon={<UiIcon name="data" size={18} />}
               label="Data"
@@ -65,7 +72,7 @@ export function AccountWorkspace() {
             href="/new"
             className="mt-10 inline-flex w-fit items-center gap-2 rounded-full px-1 py-2 text-[14px] text-foreground hover:bg-surface-2 md:mt-auto"
           >
-            <UiIcon name="back" size={16} />
+            <UiIcon name="back" size={16} className="accent-symbol" />
             Return to TobyVerse
           </Link>
         </aside>
@@ -111,6 +118,14 @@ export function AccountWorkspace() {
                 </div>
               </div>
             </div>
+          ) : tab === "memory" ? (
+            <div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Memory</h2>
+              <p className="mt-1 text-[14px] text-muted">Facts TobyVerse remembers about you.</p>
+              <div className="mt-6 max-w-lg">
+                <MemoriesPanel />
+              </div>
+            </div>
           ) : (
             <div>
               <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Data</h2>
@@ -146,7 +161,7 @@ function NavItem({
       }`}
     >
       {active ? <span className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-foreground" /> : null}
-      <span className={active ? "text-foreground" : "text-muted"}>{icon}</span>
+      <span className="accent-symbol">{icon}</span>
       {label}
     </button>
   );

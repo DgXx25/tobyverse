@@ -28,25 +28,9 @@ function usablePaths(paths: string[]): string[] {
 }
 
 export function libraryThumbPaths(item: LibraryItem): string[] {
-  if (item.kind !== "material") return [];
-  if (
-    item.materialType === "pdf" ||
-    item.materialType === "txt" ||
-    item.materialType === "md" ||
-    item.materialType === "paste" ||
-    item.materialType === "url" ||
-    item.materialType === "docx"
-  ) {
-    return [];
-  }
-
+  if (!isLibraryImage(item)) return [];
   const fromImages = sortedImagePaths(item);
-  if (isLibraryImage(item)) {
-    return usablePaths([...fromImages, item.storagePath ?? ""]);
-  }
-
-  if (fromImages[0]) return usablePaths([fromImages[0]]);
-  return [];
+  return usablePaths([...fromImages, item.storagePath ?? ""]);
 }
 
 export function librarySlidePaths(item: LibraryItem): string[] {

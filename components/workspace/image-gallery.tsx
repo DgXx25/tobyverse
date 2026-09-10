@@ -13,13 +13,13 @@ export function ImageGallery({
   images: ChatImageHit[];
   onOpenUpload?: (image: ChatImageHit) => void;
 }) {
-  const visible = images.filter((image) => image.thumb || image.url || image.storagePath);
+  const visible = images.filter((image) => image.thumb || image.thumbnail || image.url || image.storagePath);
   const [preview, setPreview] = useState<ChatImageHit | null>(null);
 
   if (visible.length === 0) return null;
   return (
     <>
-      <div className="mt-2 grid max-w-[22rem] grid-cols-3 gap-1.5 sm:grid-cols-4">
+      <div className="grid max-w-[22rem] grid-cols-3 gap-2 sm:grid-cols-4">
         {visible.map((image, index) => {
           const upload = image.kind === "upload" || Boolean(image.storagePath);
           return (
@@ -34,8 +34,8 @@ export function ImageGallery({
                 <StorageThumb path={image.storagePath || image.thumb} className="h-full w-full" />
               ) : (
                 <img
-                  src={image.thumb || image.url}
-                  alt={image.title}
+                  src={image.thumb || image.thumbnail || image.url}
+                  alt={image.alt || image.title}
                   referrerPolicy="no-referrer"
                   className="h-full w-full object-cover"
                 />
@@ -71,8 +71,8 @@ function ImageLightbox({ image, onClose }: { image: ChatImageHit; onClose: () =>
         <UiIcon name="close" size={18} />
       </button>
       <img
-        src={image.url || image.thumb}
-        alt={image.title}
+        src={image.url || image.thumb || image.thumbnail}
+        alt={image.alt || image.title}
         referrerPolicy="no-referrer"
         className="max-h-[86vh] max-w-[min(92vw,960px)] object-contain"
         onClick={(event) => event.stopPropagation()}

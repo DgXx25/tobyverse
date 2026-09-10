@@ -8,7 +8,7 @@ import type { ChatAttachment } from "@/types/chat";
 export function MessageAttachments({ items }: { items: ChatAttachment[] }) {
   if (!items.length) return null;
   return (
-    <div className="flex flex-wrap justify-end gap-1.5">
+    <div className="flex flex-wrap justify-end gap-2">
       {items.map((item, index) => (
         <AttachmentChip key={`${item.materialId || item.title}-${index}`} item={item} />
       ))}

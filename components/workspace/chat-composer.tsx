@@ -1,6 +1,15 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type TransitionEvent,
+} from "react";
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import { attachFileKey, fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
 import { formatBytes } from "@/lib/format";
@@ -36,6 +45,7 @@ export const ChatComposer = forwardRef<
     chips: ComposerChip[];
     onRemoveChip: (id: string) => void;
     onSend: () => void;
+    onStop?: () => void;
     onFile: (file: File) => void;
     onPasteText: (text: string) => void;
     onUrl: (url: string) => void;
@@ -48,6 +58,7 @@ export const ChatComposer = forwardRef<
     onBackspaceEmpty?: () => void;
     onEscape?: () => void;
     onArrowDown?: () => void;
+    fadePlaceholder?: boolean;
   }
 >(function ChatComposer(
   {
@@ -58,6 +69,7 @@ export const ChatComposer = forwardRef<
     chips,
     onRemoveChip,
     onSend,
+    onStop,
     onFile,
     onPasteText,
     onUrl,
@@ -70,6 +82,7 @@ export const ChatComposer = forwardRef<
     onBackspaceEmpty,
     onEscape,
     onArrowDown,
+    fadePlaceholder = false,
   },
   ref,
 ) {
@@ -77,6 +90,32 @@ export const ChatComposer = forwardRef<
   const fileRef = useRef<HTMLInputElement>(null);
   const lastDropRef = useRef<{ at: number; keys: Set<string> }>({ at: 0, keys: new Set() });
   const [dropOver, setDropOver] = useState(false);
+  const [shownPlaceholder, setShownPlaceholder] = useState(placeholder);
+  const [prevPlaceholder, setPrevPlaceholder] = useState<string | null>(null);
+  const shownPlaceholderRef = useRef(placeholder);
+  shownPlaceholderRef.current = shownPlaceholder;
+
+  useEffect(() => {
+    if (!fadePlaceholder) {
+      shownPlaceholderRef.current = placeholder;
+      setShownPlaceholder(placeholder);
+      setPrevPlaceholder(null);
+      return;
+    }
+    if (shownPlaceholderRef.current === placeholder) return;
+    const from = shownPlaceholderRef.current;
+    shownPlaceholderRef.current = placeholder;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) {
+      setPrevPlaceholder(null);
+      setShownPlaceholder(placeholder);
+      return;
+    }
+    setPrevPlaceholder(from);
+    setShownPlaceholder(placeholder);
+    const timer = window.setTimeout(() => setPrevPlaceholder(null), 200);
+    return () => window.clearTimeout(timer);
+  }, [fadePlaceholder, placeholder]);
 
   useImperativeHandle(ref, () => ({
     focus() {
@@ -94,6 +133,65 @@ export const ChatComposer = forwardRef<
     node.style.height = "auto";
     node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
   }, [draft]);
+
+  const hasPrefix = Boolean(fieldStart);
+  const prefixHoldRef = useRef<ReactNode>(null);
+  const prefixInnerRef = useRef<HTMLDivElement>(null);
+  if (fieldStart) prefixHoldRef.current = fieldStart;
+  const [prefixVisible, setPrefixVisible] = useState(hasPrefix);
+  const [prefixOpen, setPrefixOpen] = useState(hasPrefix);
+  const [prefixWidth, setPrefixWidth] = useState(0);
+  const prefixFrame = useRef(0);
+  const showPrefix = prefixVisible || hasPrefix;
+
+  useLayoutEffect(() => {
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (hasPrefix) {
+      setPrefixVisible(true);
+      const inner = prefixInnerRef.current;
+      if (inner) setPrefixWidth(inner.scrollWidth);
+      if (reduced) {
+        setPrefixOpen(true);
+        return;
+      }
+      setPrefixOpen(false);
+      cancelAnimationFrame(prefixFrame.current);
+      prefixFrame.current = requestAnimationFrame(() => {
+        prefixFrame.current = requestAnimationFrame(() => setPrefixOpen(true));
+      });
+      return () => cancelAnimationFrame(prefixFrame.current);
+    }
+    setPrefixOpen(false);
+    if (reduced) setPrefixVisible(false);
+  }, [hasPrefix]);
+
+  useLayoutEffect(() => {
+    if (!showPrefix || !hasPrefix) return;
+    const inner = prefixInnerRef.current;
+    if (!inner) return;
+    const update = () => {
+      const next = inner.scrollWidth;
+      setPrefixWidth((prev) => (prev === next ? prev : next));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, [showPrefix, hasPrefix]);
+
+  useEffect(() => {
+    if (hasPrefix || !prefixVisible) return;
+    const timer = window.setTimeout(() => setPrefixVisible(false), 220);
+    return () => window.clearTimeout(timer);
+  }, [hasPrefix, prefixVisible]);
+
+  useEffect(() => () => cancelAnimationFrame(prefixFrame.current), []);
+
+  function onPrefixTransitionEnd(event: TransitionEvent) {
+    if (event.target !== event.currentTarget) return;
+    if (event.propertyName !== "width" && event.propertyName !== "opacity") return;
+    if (!hasPrefix) setPrefixVisible(false);
+  }
 
   const busyChip = chips.some((chip) => chip.status === "uploading");
   const canSend = !sending && !busyChip && Boolean(draft.trim() || chips.some((chip) => chip.status === "ready"));
@@ -265,18 +363,75 @@ export const ChatComposer = forwardRef<
             ))}
           </div>
         )}
-        <div className={`flex items-center px-1.5 pt-0.5 ${fieldStart ? "gap-2.5" : ""}`}>
-          {fieldStart}
-          <textarea
-            ref={areaRef}
-            value={draft}
-            onChange={(event) => onDraft(event.target.value)}
-            onKeyDown={onKey}
-            onPaste={onPaste}
-            placeholder={placeholder}
-            rows={1}
-            className={`max-h-[160px] min-h-[40px] min-w-0 flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted ${fieldStart ? "" : "px-1"}`}
-          />
+        <div
+          className={`flex px-1.5 ${
+            showPrefix ? "items-start" : "items-center"
+          } ${fadePlaceholder || showPrefix ? "" : "pt-0.5"}`}
+          onMouseDown={(event) => {
+            if (!showPrefix) return;
+            if (event.target === areaRef.current) return;
+            if ((event.target as HTMLElement).closest("button, a, input, textarea")) return;
+            event.preventDefault();
+            areaRef.current?.focus();
+          }}
+        >
+          {showPrefix ? (
+            <div
+              className={`start-action-clip${prefixOpen ? " is-open" : ""}`}
+              style={{ width: prefixOpen ? prefixWidth : 0 }}
+              onTransitionEnd={onPrefixTransitionEnd}
+            >
+              <div ref={prefixInnerRef} className="start-action-clip-inner">
+                {fieldStart ?? prefixHoldRef.current}
+              </div>
+            </div>
+          ) : null}
+          {fadePlaceholder || showPrefix ? (
+            <div className="relative min-w-0 flex-1">
+              {fadePlaceholder && !draft ? (
+                <>
+                  {prevPlaceholder ? (
+                    <span
+                      className={`composer-placeholder-fade-out pointer-events-none absolute inset-0 flex items-start text-[15px] leading-6 text-muted ${
+                        showPrefix ? "pt-3" : "px-1 pt-3"
+                      }`}
+                    >
+                      {prevPlaceholder}
+                    </span>
+                  ) : null}
+                  <span
+                    key={shownPlaceholder}
+                    className={`pointer-events-none absolute inset-0 flex items-start text-[15px] leading-6 text-muted ${
+                      showPrefix ? "pt-3" : "px-1 pt-3"
+                    } ${prevPlaceholder ? "composer-placeholder-fade-in" : ""}`}
+                  >
+                    {shownPlaceholder}
+                  </span>
+                </>
+              ) : null}
+              <textarea
+                ref={areaRef}
+                value={draft}
+                onChange={(event) => onDraft(event.target.value)}
+                onKeyDown={onKey}
+                onPaste={onPaste}
+                placeholder={fadePlaceholder ? undefined : placeholder}
+                rows={1}
+                className={`max-h-[160px] min-h-[40px] w-full resize-none bg-transparent pt-3 pb-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted ${showPrefix ? "" : "px-1"}`}
+              />
+            </div>
+          ) : (
+            <textarea
+              ref={areaRef}
+              value={draft}
+              onChange={(event) => onDraft(event.target.value)}
+              onKeyDown={onKey}
+              onPaste={onPaste}
+              placeholder={placeholder}
+              rows={1}
+              className="max-h-[160px] min-h-[40px] min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted"
+            />
+          )}
         </div>
         <div className="flex items-center gap-1 pb-0.5">
           {allowAttach ? (
@@ -295,7 +450,7 @@ export const ChatComposer = forwardRef<
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-foreground"
+                className="composer-attach flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-foreground"
                 aria-label="Attach file"
               >
                 <UiIcon name="plus" size={18} />
@@ -305,12 +460,28 @@ export const ChatComposer = forwardRef<
           <div className="ml-auto flex items-center gap-1">
             {showParameters ? <ComposerParameters /> : null}
             <button
-              type="submit"
-              disabled={!canSend}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background disabled:opacity-30"
-              aria-label="Send"
+              type={sending && onStop ? "button" : "submit"}
+              disabled={sending ? !onStop : !canSend}
+              onClick={
+                sending && onStop
+                  ? (event) => {
+                      event.preventDefault();
+                      onStop();
+                    }
+                  : undefined
+              }
+              className={`composer-send flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background ${
+                sending && !onStop ? "" : "disabled:opacity-30"
+              }`}
+              aria-label={sending ? (onStop ? "Stop" : "Starting") : "Send"}
             >
-              <UiIcon name="send" size={16} />
+              {sending && onStop ? (
+                <span className="block h-2.5 w-2.5 rounded-[2px] bg-current" />
+              ) : sending ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-background/30 border-t-background" />
+              ) : (
+                <UiIcon name="send" size={16} />
+              )}
             </button>
           </div>
         </div>

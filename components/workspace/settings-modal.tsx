@@ -8,6 +8,7 @@ import { ParametersPanel } from "@/components/workspace/parameters-panel";
 import { BillingCard } from "@/components/account/billing-card";
 import { UsageMeters } from "@/components/account/usage-meters";
 import { AccountDataControls } from "@/components/account/data-controls";
+import { MemoriesPanel } from "@/components/account/memories-panel";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { emptyUsage } from "@/lib/account/plan";
 import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
@@ -19,6 +20,7 @@ const NAV: { id: SettingsSection; label: string; group: string; icon: UiIconName
   { id: "help", label: "Help", group: "TobyVerse", icon: "help" },
   { id: "billing", label: "Billing", group: "Payments", icon: "billing" },
   { id: "usage", label: "Usage", group: "Payments", icon: "usage" },
+  { id: "memory", label: "Memory", group: "Data & Information", icon: "brain" },
   { id: "data", label: "Data", group: "Data & Information", icon: "data" },
 ];
 
@@ -73,7 +75,7 @@ export function SettingsModal() {
                       active ? "bg-surface-2 text-foreground" : "text-foreground/90 hover:bg-surface-2/70"
                     }`}
                   >
-                    <span className={active ? "text-foreground" : "text-muted"}>
+                    <span className="accent-symbol">
                       <UiIcon name={item.icon} size={18} />
                     </span>
                     {item.label}
@@ -151,6 +153,15 @@ export function SettingsModal() {
               <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Usage</h2>
               <div className="mt-8 max-w-md">
                 <UsageMeters usage={profile?.usage ?? emptyUsage()} />
+              </div>
+            </div>
+          )}
+
+          {settingsSection === "memory" && (
+            <div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Memory</h2>
+              <div className="mt-6 max-w-lg">
+                <MemoriesPanel />
               </div>
             </div>
           )}

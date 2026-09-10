@@ -25,6 +25,7 @@ export type UserProfile = {
   photoURL: string | null;
   plan: UserPlan;
   usage: UserUsage;
+  preferredModel: string | null;
   createdAt: IsoDateString | null;
   updatedAt: IsoDateString | null;
 };

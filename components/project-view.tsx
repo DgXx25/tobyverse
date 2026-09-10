@@ -16,7 +16,7 @@ import { ProjectChat } from "@/components/project-chat";
 import { ArtifactPanel, type ArtifactFocus } from "@/components/workspace/artifact-panel";
 import { useShell } from "@/components/workspace/shell-context";
 import { QuietIconCluster, type QuietIconAction } from "@/components/workspace/quiet-icon-cluster";
-import { DEFAULT_AI_PROVIDER } from "@/lib/ai/catalog";
+import { usePreferredModel } from "@/components/account/use-preferred-model";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import type { ChatArtifact, ChatMode } from "@/types/chat";
 import type { ActiveArtifactStatus } from "@/types/project";
@@ -25,7 +25,8 @@ import type { Project } from "@/types";
 
 const MIN_ARTIFACT = 400;
 const MIN_NOTES = 480;
-const WIDTH_EASE = "transition-[width,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]";
+const WIDTH_EASE =
+  "transition-[width,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
 
 function focusFromPending(pending: {
   kind: "material" | "sheet" | "plan" | "practice";
@@ -45,7 +46,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<Project | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [mode, setMode] = useState<ChatMode>("normal");
-  const model = DEFAULT_AI_PROVIDER;
+  const { model } = usePreferredModel();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [prefsReady, setPrefsReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -319,7 +320,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
         <ProjectChat
           project={project}
           userId={user.uid}
-          model={model}
           materials={materials}
           selectedIds={selectedIds}
           onOpenArtifact={openArtifact}
@@ -331,13 +331,16 @@ export function ProjectView({ projectId }: { projectId: string }) {
         />
       </div>
       <div
-        className={`h-full shrink-0 overflow-hidden max-md:absolute max-md:inset-0 max-md:z-30 max-md:bg-surface ${
+        className={`h-full shrink-0 overflow-hidden max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30 max-md:bg-surface ${
           resizing ? "" : WIDTH_EASE
         } ${panelOpen ? "opacity-100 max-md:!w-full" : "pointer-events-none opacity-0 max-md:!w-0"}`}
-        style={{ width: panelOpen ? artifactWidth : 0 }}
+        style={{
+          width: panelOpen ? artifactWidth : 0,
+          ["--artifact-expanded" as string]: `${artifactWidth}px`,
+        }}
         aria-hidden={!panelOpen}
       >
-        <div className="h-full w-full max-md:!w-full">
+        <div className="ml-auto h-full w-[var(--artifact-expanded)] min-w-[var(--artifact-expanded)] shrink-0 max-md:!w-[100vw] max-md:!min-w-[100vw]">
           <ArtifactPanel
             projectId={project.id}
             userId={user.uid}

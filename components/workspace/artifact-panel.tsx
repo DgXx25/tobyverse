@@ -55,18 +55,46 @@ export function ArtifactPanel({
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [practiceId, setPracticeId] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
+  const [sheetsReady, setSheetsReady] = useState(false);
+  const [practiceReady, setPracticeReady] = useState(false);
+
+  useEffect(() => {
+    setSheetsReady(false);
+    setPracticeReady(false);
+    setTab("materials");
+    setMaterialId(null);
+    setSheetId(null);
+    setPracticeId(null);
+  }, [projectId]);
 
   useEffect(() => subscribeMaterials(projectId, setMaterials), [projectId]);
   useEffect(
     () =>
       subscribeStudySheets(
         projectId,
-        setSheets,
-        (err) => setSheetError(err.message),
+        (items) => {
+          setSheets(items);
+          setSheetsReady(true);
+        },
+        (err) => {
+          setSheetError(err.message);
+          setSheetsReady(true);
+        },
       ),
     [projectId],
   );
-  useEffect(() => subscribeChatMessages(projectId, setMessages), [projectId]);
+  useEffect(
+    () =>
+      subscribeChatMessages(
+        projectId,
+        (items) => {
+          setMessages(items);
+          setPracticeReady(true);
+        },
+        () => setPracticeReady(true),
+      ),
+    [projectId],
+  );
   useEffect(() => {
     setProgress(loadPracticeProgress(projectId));
   }, [projectId, session]);
@@ -110,11 +138,16 @@ export function ArtifactPanel({
   }, [focus, session]);
 
   useEffect(() => {
-    if (session || focus || counts[tab] > 0) return;
-    if (counts.materials > 0) setTab("materials");
-    else if (counts.sheets > 0) setTab("sheets");
-    else if (counts.practice > 0) setTab("practice");
-  }, [counts.materials, counts.sheets, counts.practice, session, tab, focus]);
+    if (session) return;
+    if (tab === "sheets" && sheetsReady && counts.sheets === 0) {
+      setTab("materials");
+      setSheetId(null);
+    }
+    if (tab === "practice" && practiceReady && counts.practice === 0) {
+      setTab("materials");
+      setPracticeId(null);
+    }
+  }, [counts.sheets, counts.practice, session, tab, sheetsReady, practiceReady]);
 
   useEffect(() => {
     if (session) return;
@@ -124,6 +157,8 @@ export function ArtifactPanel({
   const selectedMaterial = materials.find((item) => item.id === materialId) ?? null;
   const selectedSheet = sheets.find((item) => item.id === sheetId) ?? null;
   const selectedSet = practiceSets.find((item) => item.id === practiceId) ?? null;
+  const showSheets = counts.sheets > 0 || (tab === "sheets" && !sheetsReady);
+  const showPractice = counts.practice > 0 || (tab === "practice" && !practiceReady);
 
   return (
     <aside className="relative z-[1] flex h-full w-full shrink-0 flex-col bg-transparent py-2 pl-1 pr-2 max-md:!w-full">
@@ -161,28 +196,34 @@ export function ArtifactPanel({
                         setMaterialId(null);
                       },
                     },
-                    {
-                      id: "sheets",
-                      label: "კონსპექტი",
-                      icon: "notes",
-                      active: tab === "sheets",
-                      disabled: counts.sheets === 0,
-                      onClick: () => {
-                        setTab("sheets");
-                        setSheetId(null);
-                      },
-                    },
-                    {
-                      id: "practice",
-                      label: "სავარჯიშო",
-                      icon: "practice",
-                      active: tab === "practice",
-                      disabled: counts.practice === 0,
-                      onClick: () => {
-                        setTab("practice");
-                        setPracticeId(null);
-                      },
-                    },
+                    ...(showSheets
+                      ? [
+                          {
+                            id: "sheets",
+                            label: "კონსპექტი",
+                            icon: "notes" as const,
+                            active: tab === "sheets",
+                            onClick: () => {
+                              setTab("sheets");
+                              setSheetId(null);
+                            },
+                          },
+                        ]
+                      : []),
+                    ...(showPractice
+                      ? [
+                          {
+                            id: "practice",
+                            label: "სავარჯიშო",
+                            icon: "practice" as const,
+                            active: tab === "practice",
+                            onClick: () => {
+                              setTab("practice");
+                              setPracticeId(null);
+                            },
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               </nav>

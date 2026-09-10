@@ -232,7 +232,7 @@ function SidebarFrame({
             className="sidebar-brand relative flex h-9 w-9 select-none items-center justify-center rounded-xl text-foreground hover:bg-surface-2"
           >
             <span
-              className="sidebar-brand-logo pointer-events-none block h-6 w-6 bg-current transition-opacity duration-150"
+              className="sidebar-brand-logo accent-symbol pointer-events-none block h-6 w-6 bg-current transition-opacity duration-150"
               style={{
                 WebkitMask: "url(/logo.svg) center / contain no-repeat",
                 mask: "url(/logo.svg) center / contain no-repeat",
@@ -291,7 +291,6 @@ function SidebarFrame({
 
       <nav
         className="sidebar-label min-h-0 flex-1 space-y-0.5 overflow-x-hidden overflow-y-auto px-1.5 pb-2"
-        style={{ scrollbarGutter: "stable" }}
         onClick={(event) => {
           if (!onNavigate) return;
           const target = event.target as HTMLElement | null;
@@ -477,7 +476,7 @@ function MenuRow({
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-foreground hover:bg-foreground/[0.08]"
     >
-      <span className="text-foreground">{icon}</span>
+      <span className="accent-symbol">{icon}</span>
       {label}
     </button>
   );

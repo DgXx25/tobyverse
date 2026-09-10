@@ -1,14 +1,8 @@
 import { englishImageQuery, expandEnglishImageQuery } from "@/lib/images/query";
+import { IMAGE_SEARCH_DEFAULT, IMAGE_SEARCH_MAX, type ImageSearchHit } from "@/lib/images/types";
 
-export type ImageSearchHit = {
-  url: string;
-  thumb: string;
-  title: string;
-  source: string;
-  license: string;
-  credit: string;
-  pageUrl?: string;
-};
+export type { ImageSearchHit } from "@/lib/images/types";
+export { IMAGE_SEARCH_DEFAULT, IMAGE_SEARCH_MAX } from "@/lib/images/types";
 
 export class ImageSearchError extends Error {
   constructor(message: string) {
@@ -17,33 +11,37 @@ export class ImageSearchError extends Error {
   }
 }
 
-export const IMAGE_SEARCH_MAX = 8;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 200;
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 20;
 const FETCH_MS = 8000;
+const GOOGLE_MS = 4000;
 const UA = "Tobyverse/1.0 (study app; image search)";
-
-const BLOCK_HOST =
-  /pinterest|instagram|facebook|fbcdn|twitter|x\.com|tiktok|gettyimages|shutterstock|alamy|istockphoto/i;
-
-const IMG_HOST =
-  /gstatic|googleusercontent|ggpht|ytimg|wikimedia|wikipedia|openverse|flickr|staticflickr|imgur|unsplash|pexels|pixabay|cloudinary|imgix|twimg|bp\.blogspot|wp\.com|media\.tumblr/i;
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 type CacheEntry = { at: number; hits: ImageSearchHit[] };
 
 const memoryCache = new Map<string, CacheEntry>();
 const rateStamps = new Map<string, number[]>();
 
-function cseConfig() {
-  const cx = (process.env.GOOGLE_CSE_ID ?? process.env.GOOGLE_SEARCH_ENGINE_ID ?? "").trim();
-  const key = (process.env.GOOGLE_CSE_API_KEY ?? "").trim();
-  return { cx, key };
+function pexelsKey(): string {
+  return (process.env.PEXELS_API_KEY ?? "").trim();
 }
 
+function pixabayKey(): string {
+  return (process.env.PIXABAY_API_KEY ?? "").trim();
+}
+
+/** Always on: Wikimedia + Openverse need no keys. */
 export function imageSearchConfigured(): boolean {
   return true;
+}
+
+export function clampImageCount(count?: number): number {
+  if (!Number.isFinite(count)) return IMAGE_SEARCH_DEFAULT;
+  return Math.min(IMAGE_SEARCH_MAX, Math.max(1, Math.floor(count as number)));
 }
 
 export function normalizeImageQuery(query: string): string {
@@ -64,14 +62,6 @@ export function allowImageSearch(uid: string): boolean {
   return true;
 }
 
-function hostOf(value: string): string {
-  try {
-    return new URL(value).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
 function isHttps(url: string): boolean {
   try {
     return new URL(url).protocol === "https:";
@@ -80,66 +70,27 @@ function isHttps(url: string): boolean {
   }
 }
 
-function isDirectImage(url: string): boolean {
-  return /\.(jpe?g|png|gif|webp|svg|avif)(\?|$)/i.test(url) || /upload\.wikimedia|flickrstatic|openverse/i.test(url);
-}
-
-function embeddable(url: string): boolean {
-  if (!url || !isHttps(url)) return false;
-  if (BLOCK_HOST.test(url)) return false;
-  if (isDirectImage(url)) return true;
-  if (IMG_HOST.test(url)) return true;
-  return false;
-}
-
-function stripHtml(value: string): string {
-  return value
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function formatLicense(license: string, version?: string): string {
-  const id = license.trim();
-  if (!id) return "";
-  const lower = id.toLowerCase();
-  if (lower === "cc0" || lower.startsWith("cc0")) return "CC0";
-  if (lower === "pdm" || lower === "pd" || lower.includes("public domain")) return "Public domain";
-  if (/^by(-[a-z]+)*$/i.test(lower)) {
-    const ver = version?.trim() ? ` ${version.trim()}` : "";
-    return `CC ${id.toUpperCase()}${ver}`;
+function cleanUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete("utm_source");
+    parsed.searchParams.delete("utm_campaign");
+    parsed.searchParams.delete("utm_content");
+    return parsed.toString();
+  } catch {
+    return url;
   }
-  return id;
 }
 
-function asHit(input: {
-  url?: string;
-  thumb?: string;
-  title?: string;
-  source?: string;
-  license?: string;
-  credit?: string;
-  pageUrl?: string;
-  fallbackTitle: string;
-}): ImageSearchHit | null {
-  const thumb = (input.thumb || "").trim();
-  const url = (input.url || "").trim();
-  const display = embeddable(thumb) ? thumb : embeddable(url) ? url : "";
-  if (!display) return null;
-  const pageUrl = (input.pageUrl || "").trim();
-  const source = (input.source || "").trim() || hostOf(pageUrl || display) || "web";
+function asHit(input: { url?: string; thumbnail?: string; alt?: string; source: string; fallbackAlt: string }): ImageSearchHit | null {
+  const url = cleanUrl((input.url || "").trim());
+  const thumbnail = cleanUrl((input.thumbnail || "").trim() || url);
+  if (!isHttps(url) || !isHttps(thumbnail)) return null;
   return {
-    url: embeddable(url) ? url : display,
-    thumb: display,
-    title: (input.title || "").trim() || input.fallbackTitle,
-    source,
-    license: (input.license || "").trim(),
-    credit: stripHtml(input.credit || ""),
-    pageUrl: pageUrl || undefined,
+    url,
+    thumbnail,
+    alt: (input.alt || "").trim() || input.fallbackAlt,
+    source: input.source,
   };
 }
 
@@ -174,29 +125,28 @@ function writeCache(key: string, hits: ImageSearchHit[]) {
   pruneCache(Date.now());
 }
 
-function mergeHits(base: ImageSearchHit[], extra: ImageSearchHit[]): ImageSearchHit[] {
+function mergeHits(base: ImageSearchHit[], extra: ImageSearchHit[], limit: number): ImageSearchHit[] {
   const out = [...base];
-  const seen = new Set(base.map((hit) => hit.thumb || hit.url));
+  const seen = new Set(base.map((hit) => hit.url));
   for (const hit of extra) {
-    const key = hit.thumb || hit.url;
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    if (!hit.url || seen.has(hit.url)) continue;
+    seen.add(hit.url);
     out.push(hit);
-    if (out.length >= IMAGE_SEARCH_MAX) break;
+    if (out.length >= limit) break;
   }
   return out;
 }
 
 type FetchJson = { ok: true; data: unknown } | { ok: false };
 
-async function fetchJson(url: string): Promise<FetchJson> {
+async function fetchJson(url: string, headers: Record<string, string> = {}, timeoutMs = FETCH_MS): Promise<FetchJson> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       cache: "no-store",
       signal: controller.signal,
-      headers: { Accept: "application/json", "User-Agent": UA },
+      headers: { Accept: "application/json", "User-Agent": UA, ...headers },
     });
     if (!response.ok) return { ok: false };
     return { ok: true, data: await response.json() };
@@ -209,57 +159,7 @@ async function fetchJson(url: string): Promise<FetchJson> {
 
 type ProviderHits = { hits: ImageSearchHit[]; ok: boolean };
 
-async function searchOpenverse(query: string): Promise<ProviderHits> {
-  const url = new URL("https://api.openverse.org/v1/images/");
-  url.searchParams.set("q", query);
-  url.searchParams.set("page_size", String(IMAGE_SEARCH_MAX));
-  url.searchParams.set("mature", "false");
-  const fetched = await fetchJson(url.toString());
-  if (!fetched.ok) return { hits: [], ok: false };
-  const data = fetched.data as {
-    results?: Array<{
-      title?: unknown;
-      url?: unknown;
-      thumbnail?: unknown;
-      foreign_landing_url?: unknown;
-      license?: unknown;
-      license_version?: unknown;
-      creator?: unknown;
-      attribution?: unknown;
-      source?: unknown;
-    }>;
-  };
-  if (!data?.results) return { hits: [], ok: true };
-  return {
-    ok: true,
-    hits: data.results.flatMap((item) => {
-    const pageUrl = typeof item.foreign_landing_url === "string" ? item.foreign_landing_url : "";
-    const license = formatLicense(
-      typeof item.license === "string" ? item.license : "",
-      typeof item.license_version === "string" ? item.license_version : undefined,
-    );
-    const credit =
-      typeof item.attribution === "string"
-        ? item.attribution
-        : typeof item.creator === "string"
-          ? item.creator
-          : "";
-    const hit = asHit({
-      url: typeof item.url === "string" ? item.url : "",
-      thumb: typeof item.thumbnail === "string" ? item.thumbnail : "",
-      title: typeof item.title === "string" ? item.title : "",
-      source: hostOf(pageUrl) || (typeof item.source === "string" ? item.source : "") || "openverse.org",
-      license,
-      credit,
-      pageUrl,
-      fallbackTitle: query,
-    });
-    return hit ? [hit] : [];
-    }),
-  };
-}
-
-async function searchWikimedia(query: string): Promise<ProviderHits> {
+async function searchWikimedia(query: string, count: number): Promise<ProviderHits> {
   const url = new URL("https://commons.wikimedia.org/w/api.php");
   url.searchParams.set("action", "query");
   url.searchParams.set("format", "json");
@@ -268,9 +168,9 @@ async function searchWikimedia(query: string): Promise<ProviderHits> {
   url.searchParams.set("generator", "search");
   url.searchParams.set("gsrsearch", query);
   url.searchParams.set("gsrnamespace", "6");
-  url.searchParams.set("gsrlimit", String(IMAGE_SEARCH_MAX));
+  url.searchParams.set("gsrlimit", String(count));
   url.searchParams.set("prop", "imageinfo");
-  url.searchParams.set("iiprop", "url|mime|extmetadata");
+  url.searchParams.set("iiprop", "url|mime");
   url.searchParams.set("iiurlwidth", "400");
   const fetched = await fetchJson(url.toString());
   if (!fetched.ok) return { hits: [], ok: false };
@@ -278,13 +178,7 @@ async function searchWikimedia(query: string): Promise<ProviderHits> {
     query?: {
       pages?: Array<{
         title?: unknown;
-        imageinfo?: Array<{
-          url?: unknown;
-          thumburl?: unknown;
-          descriptionurl?: unknown;
-          mime?: unknown;
-          extmetadata?: Record<string, { value?: unknown }>;
-        }>;
+        imageinfo?: Array<{ url?: unknown; thumburl?: unknown; mime?: unknown }>;
       }>;
     };
   };
@@ -292,111 +186,217 @@ async function searchWikimedia(query: string): Promise<ProviderHits> {
   return {
     ok: true,
     hits: pages.flatMap((page) => {
-    const info = page.imageinfo?.[0];
-    const mime = typeof info?.mime === "string" ? info.mime : "";
-    if (mime && !mime.startsWith("image/")) return [];
-    const meta = info?.extmetadata ?? {};
-    const license = typeof meta.LicenseShortName?.value === "string" ? stripHtml(meta.LicenseShortName.value) : "";
-    const credit =
-      typeof meta.Artist?.value === "string"
-        ? meta.Artist.value
-        : typeof meta.Credit?.value === "string"
-          ? meta.Credit.value
-          : "";
-    const pageUrl = typeof info?.descriptionurl === "string" ? info.descriptionurl : "";
-    const hit = asHit({
-      url: typeof info?.url === "string" ? info.url : "",
-      thumb: typeof info?.thumburl === "string" ? info.thumburl : "",
-      title: typeof page.title === "string" ? page.title.replace(/^File:/i, "") : "",
-      source: hostOf(pageUrl) || "commons.wikimedia.org",
-      license,
-      credit,
-      pageUrl,
-      fallbackTitle: query,
-    });
-    return hit ? [hit] : [];
+      const info = page.imageinfo?.[0];
+      const mime = typeof info?.mime === "string" ? info.mime : "";
+      if (mime && !mime.startsWith("image/")) return [];
+      const title = typeof page.title === "string" ? page.title.replace(/^File:/i, "") : "";
+      const hit = asHit({
+        url: typeof info?.url === "string" ? info.url : "",
+        thumbnail: typeof info?.thumburl === "string" ? info.thumburl : "",
+        alt: title,
+        source: "wikimedia",
+        fallbackAlt: query,
+      });
+      return hit ? [hit] : [];
     }),
   };
 }
 
-async function searchCse(query: string): Promise<ProviderHits> {
-  const { cx, key } = cseConfig();
-  if (!cx || !key) return { hits: [], ok: true };
-  const url = new URL("https://www.googleapis.com/customsearch/v1");
-  url.searchParams.set("key", key);
-  url.searchParams.set("cx", cx);
+async function searchOpenverse(query: string, count: number): Promise<ProviderHits> {
+  const url = new URL("https://api.openverse.org/v1/images/");
   url.searchParams.set("q", query);
-  url.searchParams.set("searchType", "image");
-  url.searchParams.set("num", String(IMAGE_SEARCH_MAX));
-  url.searchParams.set("safe", "active");
+  url.searchParams.set("page_size", String(count));
+  url.searchParams.set("mature", "false");
   const fetched = await fetchJson(url.toString());
   if (!fetched.ok) return { hits: [], ok: false };
   const data = fetched.data as {
-    items?: Array<{
-      title?: unknown;
-      link?: unknown;
-      displayLink?: unknown;
-      image?: { thumbnailLink?: unknown; contextLink?: unknown };
-    }>;
+    results?: Array<{ title?: unknown; url?: unknown; thumbnail?: unknown }>;
   };
-  if (!data?.items) return { hits: [], ok: true };
+  if (!data?.results) return { hits: [], ok: true };
   return {
     ok: true,
-    hits: data.items.flatMap((item) => {
-    const pageUrl = typeof item.image?.contextLink === "string" ? item.image.contextLink : "";
-    const hit = asHit({
-      url: typeof item.link === "string" ? item.link : "",
-      thumb: typeof item.image?.thumbnailLink === "string" ? item.image.thumbnailLink : "",
-      title: typeof item.title === "string" ? item.title : "",
-      source: typeof item.displayLink === "string" ? item.displayLink : hostOf(pageUrl),
-      license: "",
-      credit: "",
-      pageUrl,
-      fallbackTitle: query,
-    });
-    return hit ? [hit] : [];
+    hits: data.results.flatMap((item) => {
+      const imageUrl = typeof item.url === "string" ? item.url : "";
+      const thumb = typeof item.thumbnail === "string" ? item.thumbnail : "";
+      const hit = asHit({
+        url: imageUrl,
+        thumbnail: imageUrl || thumb,
+        alt: typeof item.title === "string" ? item.title : "",
+        source: "openverse",
+        fallbackAlt: query,
+      });
+      return hit ? [hit] : [];
     }),
   };
 }
 
-async function searchProviders(query: string): Promise<ImageSearchHit[]> {
+/** Port of Techblogogy/free-google-image-search, without the dead CORS proxy. Often blocked by Google. */
+async function searchGoogleImages(query: string, count: number): Promise<ProviderHits> {
+  const url =
+    "https://www.google.com/search?source=lnms&sa=X&gbv=1&tbm=isch&safe=active&q=" + encodeURIComponent(query);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GOOGLE_MS);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        Accept: "text/html",
+        "User-Agent": BROWSER_UA,
+        Cookie: "CONSENT=YES+",
+      },
+    });
+    if (!response.ok) return { hits: [], ok: false };
+    const html = await response.text();
+    const hits: ImageSearchHit[] = [];
+    const seen = new Set<string>();
+    const pattern = /<img[^>]+src="(https:[^"]+)"/gi;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(html))) {
+      const src = match[1] ?? "";
+      if (!src || seen.has(src)) continue;
+      if (/gstatic|google\.com\/images|logo|sprite|favicon|data:/i.test(src)) continue;
+      const hit = asHit({ url: src, thumbnail: src, alt: query, source: "google", fallbackAlt: query });
+      if (!hit) continue;
+      seen.add(src);
+      hits.push(hit);
+      if (hits.length >= count) break;
+    }
+    return { hits, ok: true };
+  } catch {
+    return { hits: [], ok: false };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function searchPexels(query: string, count: number): Promise<ProviderHits> {
+  const key = pexelsKey();
+  if (!key) return { hits: [], ok: true };
+  const url = new URL("https://api.pexels.com/v1/search");
+  url.searchParams.set("query", query);
+  url.searchParams.set("per_page", String(count));
+  const fetched = await fetchJson(url.toString(), { Authorization: key });
+  if (!fetched.ok) return { hits: [], ok: false };
+  const data = fetched.data as {
+    photos?: Array<{
+      alt?: unknown;
+      src?: { large?: unknown; original?: unknown; medium?: unknown; tiny?: unknown };
+    }>;
+  };
+  if (!data?.photos) return { hits: [], ok: true };
+  return {
+    ok: true,
+    hits: data.photos.flatMap((photo) => {
+      const large = typeof photo.src?.large === "string" ? photo.src.large : "";
+      const original = typeof photo.src?.original === "string" ? photo.src.original : "";
+      const medium = typeof photo.src?.medium === "string" ? photo.src.medium : "";
+      const tiny = typeof photo.src?.tiny === "string" ? photo.src.tiny : "";
+      const hit = asHit({
+        url: large || original || medium,
+        thumbnail: medium || tiny || large,
+        alt: typeof photo.alt === "string" ? photo.alt : "",
+        source: "pexels",
+        fallbackAlt: query,
+      });
+      return hit ? [hit] : [];
+    }),
+  };
+}
+
+async function searchPixabay(query: string, count: number): Promise<ProviderHits> {
+  const key = pixabayKey();
+  if (!key) return { hits: [], ok: true };
+  const url = new URL("https://pixabay.com/api/");
+  url.searchParams.set("key", key);
+  url.searchParams.set("q", query);
+  url.searchParams.set("image_type", "photo");
+  url.searchParams.set("safesearch", "true");
+  url.searchParams.set("per_page", String(Math.max(3, count)));
+  const fetched = await fetchJson(url.toString());
+  if (!fetched.ok) return { hits: [], ok: false };
+  const data = fetched.data as {
+    hits?: Array<{
+      largeImageURL?: unknown;
+      webformatURL?: unknown;
+      previewURL?: unknown;
+      tags?: unknown;
+    }>;
+  };
+  if (!data?.hits) return { hits: [], ok: true };
+  return {
+    ok: true,
+    hits: data.hits.flatMap((item) => {
+      const large = typeof item.largeImageURL === "string" ? item.largeImageURL : "";
+      const web = typeof item.webformatURL === "string" ? item.webformatURL : "";
+      const preview = typeof item.previewURL === "string" ? item.previewURL : "";
+      const hit = asHit({
+        url: large || web,
+        thumbnail: web || preview || large,
+        alt: typeof item.tags === "string" ? item.tags : "",
+        source: "pixabay",
+        fallbackAlt: query,
+      });
+      return hit ? [hit] : [];
+    }),
+  };
+}
+
+async function searchProviders(query: string, count: number): Promise<ImageSearchHit[]> {
   let hits: ImageSearchHit[] = [];
   let anyOk = false;
-  const openverse = await searchOpenverse(query);
-  anyOk = anyOk || openverse.ok;
-  hits = mergeHits(hits, openverse.hits);
-  if (hits.length < IMAGE_SEARCH_MAX) {
-    const wiki = await searchWikimedia(query);
-    anyOk = anyOk || wiki.ok;
-    hits = mergeHits(hits, wiki.hits);
+
+  const wiki = await searchWikimedia(query, count);
+  anyOk = anyOk || wiki.ok;
+  hits = mergeHits(hits, wiki.hits, count);
+
+  if (hits.length < count) {
+    const openverse = await searchOpenverse(query, count);
+    anyOk = anyOk || openverse.ok;
+    hits = mergeHits(hits, openverse.hits, count);
   }
-  if (hits.length < IMAGE_SEARCH_MAX) {
-    const cse = await searchCse(query);
-    anyOk = anyOk || cse.ok;
-    hits = mergeHits(hits, cse.hits);
+
+  if (hits.length < count) {
+    const google = await searchGoogleImages(query, count);
+    anyOk = anyOk || google.ok;
+    hits = mergeHits(hits, google.hits, count);
   }
+
+  if (hits.length < count) {
+    const pexels = await searchPexels(query, count);
+    anyOk = anyOk || pexels.ok;
+    hits = mergeHits(hits, pexels.hits, count);
+  }
+
+  if (hits.length < count) {
+    const pixabay = await searchPixabay(query, count);
+    anyOk = anyOk || pixabay.ok;
+    hits = mergeHits(hits, pixabay.hits, count);
+  }
+
   if (!anyOk && hits.length === 0) {
     throw new ImageSearchError("Image search failed.");
   }
-  return hits.slice(0, IMAGE_SEARCH_MAX);
+  return hits.slice(0, count);
 }
 
-export async function searchWebImages(query: string): Promise<ImageSearchHit[]> {
+export async function searchWebImages(query: string, count?: number): Promise<ImageSearchHit[]> {
   const q = query.trim();
   if (!q) throw new ImageSearchError("Missing search query.");
+  const limit = clampImageCount(count);
   const english = await englishImageQuery(q);
-  const key = normalizeImageQuery(english);
+  const key = `${normalizeImageQuery(english)}:${limit}`;
   const cached = readCache(key);
-  if (cached && cached.length > 0) return cached.slice(0, IMAGE_SEARCH_MAX);
+  if (cached && cached.length > 0) return cached.slice(0, limit);
 
-  let hits = await searchProviders(english);
+  let hits = await searchProviders(english, limit);
   if (hits.length === 0) {
     const expanded = expandEnglishImageQuery(english);
     if (expanded && expanded !== english) {
-      hits = await searchProviders(expanded);
+      hits = await searchProviders(expanded, limit);
     }
   }
-  hits = hits.slice(0, IMAGE_SEARCH_MAX);
+  hits = hits.slice(0, limit);
   if (hits.length > 0) writeCache(key, hits);
   return hits;
 }

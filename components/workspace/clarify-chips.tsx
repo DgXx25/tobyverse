@@ -14,7 +14,7 @@ export function ClarifyChips({
   onOther: () => void;
 }) {
   return (
-    <div className="mt-3 flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-2">
       {options.map((option) => (
         <button
           key={option}

@@ -1,71 +1,7 @@
 import { createElement, type ReactNode } from "react";
 import katex from "katex";
-import {
-  Activity,
-  Apple,
-  ArrowRight,
-  Atom,
-  Bone,
-  BookOpen,
-  Brain,
-  Bug,
-  Check,
-  Dna,
-  Droplet,
-  Flag,
-  Flame,
-  FlaskConical,
-  Globe,
-  Heart,
-  Leaf,
-  Moon,
-  Mountain,
-  Pill,
-  Shield,
-  Star,
-  Sun,
-  TriangleAlert,
-  User,
-  Wind,
-  X,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
 import { CATALOG_KINDS, type CatalogKind } from "@/types/visual";
-
-const ICONS: Record<string, LucideIcon> = {
-  activity: Activity,
-  apple: Apple,
-  arrow: ArrowRight,
-  atom: Atom,
-  bone: Bone,
-  book: BookOpen,
-  brain: Brain,
-  bug: Bug,
-  cell: Activity,
-  check: Check,
-  dna: Dna,
-  droplet: Droplet,
-  flag: Flag,
-  flame: Flame,
-  flask: FlaskConical,
-  globe: Globe,
-  heart: Heart,
-  leaf: Leaf,
-  lungs: Wind,
-  moon: Moon,
-  mountain: Mountain,
-  pill: Pill,
-  shield: Shield,
-  star: Star,
-  sun: Sun,
-  virus: Bug,
-  warning: TriangleAlert,
-  user: User,
-  wind: Wind,
-  x: X,
-  zap: Zap,
-};
+import { CATALOG_ICON_IDS, UiIcon, resolveUiIconName, type UiIconName } from "@/components/workspace/ui-icon";
 
 const ELEMENT_LIST = [
   "H",
@@ -112,10 +48,10 @@ const ELEMENT_LIST = [
 
 const ELEMENTS = new Map(ELEMENT_LIST.map((item) => [item.toUpperCase(), item]));
 
-export const CATALOG_ICON_IDS = Object.keys(ICONS);
+export { CATALOG_ICON_IDS };
 export const CATALOG_ELEMENT_IDS = ELEMENT_LIST;
 
-const LABEL_ICONS: Array<[RegExp, string]> = [
+const LABEL_ICONS: Array<[RegExp, UiIconName]> = [
   [/prokaryot|პროკარიოტ|bacter|ბაქტერ/i, "bug"],
   [/eukaryot|ევკარიოტ/i, "brain"],
   [/virus|ვირუს/i, "virus"],
@@ -136,9 +72,9 @@ const LABEL_ICONS: Array<[RegExp, string]> = [
 ];
 
 /** Known catalog id, or null when the name is unknown (caller shows a generic mark). */
-export function catalogIconId(name?: string | null, label?: string | null): string | null {
-  const key = name?.trim().toLowerCase();
-  if (key) return ICONS[key] ? key : null;
+export function catalogIconId(name?: string | null, label?: string | null): UiIconName | null {
+  const fromName = resolveUiIconName(name);
+  if (fromName) return fromName;
   const hay = label?.trim() ?? "";
   if (!hay) return null;
   for (const [pattern, id] of LABEL_ICONS) {
@@ -183,12 +119,12 @@ export function visualFromId(kind: string, id: string, className?: string): Reac
   try {
     if (!kind || kind === "none" || !id.trim()) return null;
     if (kind === "icon") {
-      const Icon = ICONS[id.trim().toLowerCase()];
-      if (!Icon) return null;
-      return createElement(Icon, {
+      const name = catalogIconId(id);
+      if (!name) return null;
+      return createElement(UiIcon, {
+        name,
+        size: 20,
         className: iconClass(className),
-        strokeWidth: 1.6,
-        "aria-hidden": true,
       });
     }
     if (kind === "flag") {

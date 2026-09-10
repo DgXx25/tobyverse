@@ -1,7 +1,7 @@
 import { requireSignedInUser } from "@/lib/auth";
 import { authHeaders } from "@/lib/api/client";
 import { trackEvent } from "@/lib/analytics/track";
-import { adjustStorageBytes } from "@/lib/account/store";
+import { adjustStorageBytes, reserveStorageBytes } from "@/lib/account/store";
 import { previewText, MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@/lib/materials/limits";
 import { newMaterialRef, writeMaterialDoc } from "@/lib/materials/store";
 import {
@@ -44,6 +44,8 @@ export type PreparedMaterial = {
   textPath: string;
   data: ExtractResponse;
   sourceFile?: File;
+  /** True until a material doc exists (delete then owns the bytes). */
+  storageHeld: boolean;
 };
 
 function bytesFromBase64(data: string): Uint8Array {
@@ -148,10 +150,13 @@ export async function prepareMaterialIngest(input: {
   const storagePath = originalStoragePath(userId, projectId, ref.id, payload.originalName);
   const textPath = extractedTextPath(userId, projectId, ref.id);
 
-  input.onPhase?.("uploading");
-  await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime);
+  await reserveStorageBytes(userId, payload.sizeBytes);
+  let storageHeld = true;
 
   try {
+    input.onPhase?.("uploading");
+    await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime);
+
     input.onPhase?.("reading");
     const data = await deriveFromApi(source, input.includeImages ? "all" : "text");
     if (!data.text || !data.type) {
@@ -169,15 +174,31 @@ export async function prepareMaterialIngest(input: {
       textPath,
       data,
       sourceFile: source.kind === "file" ? source.file : undefined,
+      storageHeld,
     };
   } catch (error) {
     await deleteStoragePath(storagePath);
+    if (storageHeld) {
+      storageHeld = false;
+      void adjustStorageBytes(userId, -payload.sizeBytes);
+    }
     throw error instanceof Error ? error : new Error("Extraction failed.");
   }
 }
 
+async function releasePreparedStorage(item: PreparedMaterial): Promise<void> {
+  if (!item.storageHeld || !item.sizeBytes) return;
+  item.storageHeld = false;
+  await adjustStorageBytes(item.userId, -item.sizeBytes);
+}
+
 export async function discardPreparedMaterials(prepared: PreparedMaterial[]): Promise<void> {
-  await Promise.all(prepared.map((item) => deleteStoragePath(item.storagePath)));
+  await Promise.all(
+    prepared.map(async (item) => {
+      await deleteStoragePath(item.storagePath);
+      await releasePreparedStorage(item);
+    }),
+  );
 }
 
 async function slideImagesFromExtract(
@@ -222,6 +243,7 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
     sizeBytes: prepared.sizeBytes,
     status: "processing",
   });
+  prepared.storageHeld = false;
 
   try {
     if (!data.text || !data.type) {
@@ -257,7 +279,6 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
         type: "material_uploaded",
         value: type,
       });
-      void adjustStorageBytes(userId, prepared.sizeBytes);
     }
 
     return materialId;
@@ -317,7 +338,6 @@ export async function finalizeMaterialImages(prepared: PreparedMaterial): Promis
       type: "material_uploaded",
       value: type,
     });
-    void adjustStorageBytes(userId, prepared.sizeBytes);
   } catch (error) {
     console.error("Slide image ingest failed; keeping text preview.", error);
     await writeMaterialDoc(projectId, materialId, {
@@ -334,7 +354,6 @@ export async function finalizeMaterialImages(prepared: PreparedMaterial): Promis
       images: [],
       status: "ready",
     });
-    void adjustStorageBytes(userId, prepared.sizeBytes);
   }
 }
 
@@ -352,7 +371,12 @@ export async function ingestMaterial(input: {
   source: IngestSource;
 }): Promise<string> {
   const prepared = await prepareMaterialIngest({ ...input, includeImages: true });
-  return finalizeMaterialIngest(prepared);
+  try {
+    return await finalizeMaterialIngest(prepared);
+  } catch (error) {
+    if (prepared.storageHeld) await discardPreparedMaterials([prepared]);
+    throw error;
+  }
 }
 
 export async function ingestMaterialFile(input: {

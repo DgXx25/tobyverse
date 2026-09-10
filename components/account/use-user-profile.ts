@@ -29,6 +29,7 @@ export function useUserProfile(): { profile: UserProfile | null; loading: boolea
             photoURL: user.photoURL,
             plan: asUserPlan(undefined),
             usage: emptyUsage(),
+            preferredModel: null,
             createdAt: user.metadata.creationTime ?? null,
             updatedAt: null,
           },

@@ -17,10 +17,37 @@ import {
   asUserPlan,
   asUserUsage,
   emptyUsage,
+  FREE_CAPS,
+  STORAGE_CAP_LABEL,
+  storageQuotaMessage,
   utcWeekStart,
+  wouldExceedStorage,
   type UsageCounter,
 } from "@/lib/account/plan";
+import { isKnownProvider, parsePreferredModel, type AiProviderId } from "@/lib/ai/catalog";
+import { formatBytes } from "@/lib/format";
 import type { UserProfile, UserUsage } from "@/types/user";
+
+export class StorageQuotaError extends Error {
+  constructor(message = storageQuotaMessage()) {
+    super(message);
+    this.name = "StorageQuotaError";
+  }
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  return code === "permission-denied" || code === "firestore/permission-denied";
+}
+
+function quotaMessage(used: number, extra: number): string {
+  const remaining = Math.max(0, FREE_CAPS.storageBytes - used);
+  if (remaining <= 0) return storageQuotaMessage();
+  const need = formatBytes(extra) || "more space";
+  const left = formatBytes(remaining) || "none";
+  return `Not enough storage. This needs ${need}; ${left} left of ${STORAGE_CAP_LABEL}.`;
+}
 
 function userRef(userId: string) {
   return doc(getFirebaseDb(), COLLECTIONS.users, userId);
@@ -35,6 +62,7 @@ function mapProfile(id: string, data: Record<string, unknown>): UserProfile {
     photoURL: typeof data.photoURL === "string" ? data.photoURL : null,
     plan: asUserPlan(data.plan),
     usage: asUserUsage(data.usage, weekStart),
+    preferredModel: parsePreferredModel(data.preferredModel),
     createdAt: toIsoDate(data.createdAt),
     updatedAt: toIsoDate(data.updatedAt),
   };
@@ -122,12 +150,42 @@ async function writeUsage(userId: string, mutate: (usage: UserUsage) => UserUsag
   });
 }
 
+export async function updatePreferredModel(userId: string, model: AiProviderId): Promise<void> {
+  if (!userId || !isKnownProvider(model)) return;
+  try {
+    await updateDoc(userRef(userId), {
+      preferredModel: model,
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Preference writes must never block the composer.
+  }
+}
+
 export async function incrementUsage(userId: string, field: UsageCounter): Promise<void> {
   if (!userId) return;
   try {
     await writeUsage(userId, (usage) => ({ ...usage, [field]: usage[field] + 1 }));
   } catch {
     // Usage must never block chat, practice, or notes.
+  }
+}
+
+export async function reserveStorageBytes(userId: string, bytes: number): Promise<void> {
+  if (!userId) return;
+  const extra = Math.floor(bytes);
+  if (extra <= 0) return;
+  try {
+    await writeUsage(userId, (usage) => {
+      if (wouldExceedStorage(usage.storageBytes, extra)) {
+        throw new StorageQuotaError(quotaMessage(usage.storageBytes, extra));
+      }
+      return { ...usage, storageBytes: usage.storageBytes + extra };
+    });
+  } catch (error) {
+    if (error instanceof StorageQuotaError) throw error;
+    if (isPermissionDenied(error)) throw new StorageQuotaError();
+    throw error instanceof Error ? error : new Error("Could not reserve storage.");
   }
 }
 
@@ -139,13 +197,18 @@ export async function adjustStorageBytes(userId: string, delta: number): Promise
       storageBytes: Math.max(0, usage.storageBytes + Math.floor(delta)),
     }));
   } catch {
-    // Storage totals are display-only.
+    // Releases must never block deletes.
   }
 }
 
 export async function exportAccountMetadata(userId: string): Promise<Record<string, unknown>> {
   const { listProjectsForUser } = await import("@/lib/projects");
-  const [profile, projects] = await Promise.all([getUserProfile(userId), listProjectsForUser(userId)]);
+  const { listMemories } = await import("@/lib/memory/store");
+  const [profile, projects, memories] = await Promise.all([
+    getUserProfile(userId),
+    listProjectsForUser(userId),
+    listMemories(userId).catch(() => []),
+  ]);
   return {
     exportedAt: new Date().toISOString(),
     user: profile
@@ -158,6 +221,12 @@ export async function exportAccountMetadata(userId: string): Promise<Record<stri
           createdAt: profile.createdAt,
         }
       : { id: userId },
+    memories: memories.map((item) => ({
+      id: item.id,
+      content: item.content,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    })),
     projects: projects.map((project) => ({
       id: project.id,
       title: project.title,
@@ -170,10 +239,12 @@ export async function exportAccountMetadata(userId: string): Promise<Record<stri
 
 export async function deleteAccountData(user: User): Promise<void> {
   const { deleteProject, listProjectsForUser } = await import("@/lib/projects");
+  const { deleteAllMemories } = await import("@/lib/memory/store");
   const projects = await listProjectsForUser(user.uid);
   for (const project of projects) {
     await deleteProject(project.id, user.uid);
   }
+  await deleteAllMemories(user.uid).catch(() => undefined);
   await deleteDoc(userRef(user.uid)).catch(() => undefined);
   await deleteUser(user);
 }

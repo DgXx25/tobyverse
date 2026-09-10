@@ -63,7 +63,7 @@ const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
         ol: ({ children }) => <ol>{children}</ol>,
         li: ({ children }) => <li>{children}</li>,
         blockquote: ({ children }) => (
-          <blockquote className="my-2 border-l border-border pl-3 text-muted">{children}</blockquote>
+          <blockquote className="my-3 border-l border-border pl-3 text-muted">{children}</blockquote>
         ),
         code: ({ className, children }) => {
           const inline = !className;
@@ -73,7 +73,7 @@ const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
           return <code className="block overflow-x-auto font-mono text-[12px] leading-5">{children}</code>;
         },
         pre: ({ children }) => (
-          <pre className="my-2 overflow-x-auto rounded-md border border-border bg-surface-2 p-2.5">{children}</pre>
+          <pre className="my-3 overflow-x-auto rounded-md border border-border bg-surface-2 p-3">{children}</pre>
         ),
         table: ({ children }) => (
           <div className="overflow-x-auto">
@@ -116,7 +116,7 @@ export function RichContent({
             />
           ))
         ) : (
-          <div key={index} className="my-3 first:mt-0">
+          <div key={index} className="my-3 first:mt-0 last:mb-0">
             <VisualBlockView block={segment.block} />
           </div>
         ),

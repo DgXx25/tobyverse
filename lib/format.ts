@@ -2,7 +2,12 @@ export function formatBytes(bytes: number): string {
   if (!bytes || bytes < 0) return "";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  const mb = bytes / (1024 * 1024);
+  if (bytes < 1024 * 1024 * 1024) {
+    return mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
+  }
+  const gb = bytes / (1024 * 1024 * 1024);
+  return gb >= 10 ? `${Math.round(gb)} GB` : `${Number.isInteger(gb) ? gb.toFixed(0) : gb.toFixed(1)} GB`;
 }
 
 export function shortDate(iso: string | null): string {

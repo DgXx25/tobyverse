@@ -25,6 +25,12 @@ export {
 export {
   AI_PROVIDER_OPTIONS,
   DEFAULT_AI_PROVIDER,
+  availableAiProviders,
   isEnabledProvider,
+  isKnownProvider,
+  parsePreferredModel,
+  providerDisplayName,
+  resolveAiProvider,
   type AiProviderId,
+  type AiProviderOption,
 } from "@/lib/ai/catalog";

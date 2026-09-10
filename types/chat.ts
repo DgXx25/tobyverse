@@ -1,5 +1,6 @@
 import type { EntityId, IsoDateString } from "@/types/common";
 import type { ExerciseType } from "@/types/exercise";
+import type { ChatMemoryContext } from "@/types/memory";
 
 export const CHAT_MODES = ["normal", "socratic"] as const;
 
@@ -64,6 +65,8 @@ export type ChatImageHit = {
   source: string;
   license: string;
   credit: string;
+  thumbnail?: string;
+  alt?: string;
   pageUrl?: string;
   kind?: "web" | "upload";
   materialId?: string;
@@ -124,6 +127,7 @@ export type ChatGenerationContext = {
   materials: ChatMaterialContext[];
   figures?: ChatFigureContext[];
   knowledgeItems: ChatKnowledgeContext[];
+  memories?: ChatMemoryContext[];
 };
 
 export type ChatTurn = {

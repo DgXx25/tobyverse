@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import {
   consumeRedirectResult,
@@ -20,6 +21,7 @@ export function LandingAuthGate({
   children: ReactNode;
   sessionHint?: boolean;
 }) {
+  const router = useRouter();
   const { user, loading } = useAuth();
   const sent = useRef(false);
   const [redirectReady, setRedirectReady] = useState(false);
@@ -37,7 +39,7 @@ export function LandingAuthGate({
         const next = result.credential?.user;
         if (isAccountUser(next)) {
           persistSignedInSession(next);
-          enterAppAfterSignIn(true);
+          enterAppAfterSignIn(true, (path) => router.replace(path));
           return;
         }
         if (result.error) setRedirectError(result.error);
@@ -48,15 +50,15 @@ export function LandingAuthGate({
     return () => {
       live = false;
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!redirectReady || loading || sent.current) return;
     if (!isAccountUser(user)) return;
     sent.current = true;
     persistSignedInSession(user);
-    enterAppAfterSignIn(true);
-  }, [redirectReady, loading, user]);
+    enterAppAfterSignIn(true, (path) => router.replace(path));
+  }, [redirectReady, loading, user, router]);
 
   if (!redirectError && (account || restoring || pendingRedirect || !redirectReady || loading)) {
     return <div className="min-h-screen bg-background" />;

@@ -158,10 +158,13 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "search_images",
     description:
-      "User asked to find or show photos, images, charts, graphs, or diagrams — in any language. Pass their topic as query in the original language. Never create a practice set or notes. If they only said they want photos with no topic, use clarify once instead. If search returns nothing, say so in one short line. Never invent image URLs. Do not dump URL lists in chat.",
+      "User asked to find or show photos, images, charts, graphs, or diagrams — in any language. Pass their topic as query in the original language. Optional count of photos (default 6). Never create a practice set or notes. If they only said they want photos with no topic, use clarify once instead. If search returns nothing, say so in one short line. Never invent image URLs. Do not dump URL lists in chat.",
     parameters: {
       type: "object",
-      properties: { query: { type: "string", description: "Image search query." } },
+      properties: {
+        query: { type: "string", description: "Image search query." },
+        count: { type: "integer", description: "How many photos to return (default 6)." },
+      },
       required: ["query"],
     },
   },

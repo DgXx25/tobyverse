@@ -2,10 +2,16 @@ import type { UserPlan, UserUsage } from "@/types/user";
 
 export const BETA_PLAN: UserPlan = "free";
 
+/** 1 GiB per user for materials, enforced during beta. */
+export const STORAGE_CAP_BYTES = 1024 * 1024 * 1024;
+export const STORAGE_CAP_LABEL = "1 GB";
+
 export const FREE_CAPS = {
   chatTurns: 100,
   practiceGenerated: 20,
   notesGenerated: 20,
+  memories: 40,
+  storageBytes: STORAGE_CAP_BYTES,
 } as const;
 
 export type UsageCounter = "chatTurns" | "practiceGenerated" | "notesGenerated";
@@ -59,4 +65,12 @@ export function asUserUsage(value: unknown, weekStart = utcWeekStart()): UserUsa
 export function usageRatio(used: number, cap: number): number {
   if (cap <= 0) return 0;
   return Math.min(1, Math.max(0, used / cap));
+}
+
+export function wouldExceedStorage(used: number, extra: number): boolean {
+  return Math.max(0, used) + Math.max(0, extra) > FREE_CAPS.storageBytes;
+}
+
+export function storageQuotaMessage(): string {
+  return `You've used your ${STORAGE_CAP_LABEL} of material storage. Delete files to free space.`;
 }

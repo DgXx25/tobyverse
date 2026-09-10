@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import {
   authErrorMessage,
@@ -48,6 +49,7 @@ function AppleIcon() {
 }
 
 export function AuthForm({ variant = "default" }: { variant?: "default" | "marketing" }) {
+  const router = useRouter();
   const { user, loading } = useAuth();
   const sent = useRef(false);
   const [pending, setPending] = useState<Provider | null>(null);
@@ -64,7 +66,7 @@ export function AuthForm({ variant = "default" }: { variant?: "default" | "marke
         if (isAccountUser(result.credential?.user) && result.credential) {
           persistSignedInSession(result.credential.user);
           sent.current = true;
-          enterAppAfterSignIn(true);
+          enterAppAfterSignIn(true, (path) => router.replace(path));
         }
       })
       .finally(() => {
@@ -79,8 +81,8 @@ export function AuthForm({ variant = "default" }: { variant?: "default" | "marke
     if (!redirectReady || loading || !isAccountUser(user) || sent.current) return;
     sent.current = true;
     persistSignedInSession(user);
-    enterAppAfterSignIn(true);
-  }, [redirectReady, loading, user]);
+    enterAppAfterSignIn(true, (path) => router.replace(path));
+  }, [redirectReady, loading, user, router]);
 
   async function signIn(provider: Provider) {
     setError(null);
@@ -92,7 +94,7 @@ export function AuthForm({ variant = "default" }: { variant?: "default" | "marke
 
       persistSignedInSession(credential.user);
       sent.current = true;
-      enterAppAfterSignIn(true);
+      enterAppAfterSignIn(true, (path) => router.replace(path));
     } catch (err) {
       const message = authErrorMessage(err);
       if (message) setError(message);
