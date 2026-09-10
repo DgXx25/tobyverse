@@ -9,8 +9,12 @@
  *   createdAt, updatedAt
  *
  *   memories/{memoryId}
- *     id, content (short atomic fact, max 200), createdAt, updatedAt
- *     Model-chosen durable facts only — never chat transcripts or summaries.
+ *     id, content (short standing instruction, max 200), createdAt, updatedAt
+ *     How Toby should respond — not a biography, not a learning-style dump.
+ *
+ *   profile/learning
+ *     text (one edited paragraph, max 800), updatedAt
+ *     How this student learns. Rewritten in place, never a list of facts.
  *
  * projects/{projectId}
  *   title, description, userId, goal, recipe, preferredChatMode, createdAt, updatedAt
@@ -69,6 +73,7 @@
 export const COLLECTIONS = {
   users: "users",
   memories: "memories",
+  profile: "profile",
   projects: "projects",
   lessons: "lessons",
   exercises: "exercises",
@@ -95,6 +100,7 @@ export const firestorePaths = {
   memories: (userId: string) => `${COLLECTIONS.users}/${userId}/${COLLECTIONS.memories}`,
   memory: (userId: string, memoryId: string) =>
     `${COLLECTIONS.users}/${userId}/${COLLECTIONS.memories}/${memoryId}`,
+  learningProfile: (userId: string) => `${COLLECTIONS.users}/${userId}/${COLLECTIONS.profile}/learning`,
 
   projects: () => COLLECTIONS.projects,
   project: (projectId: string) => `${COLLECTIONS.projects}/${projectId}`,

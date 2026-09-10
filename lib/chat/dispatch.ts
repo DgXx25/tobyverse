@@ -3,7 +3,6 @@ import {
   extractAppendCount,
   intentFromTool,
   isMutationIntent,
-  promptIsKa,
   wantsPractice,
   wantsSheet,
   wantsImages,
@@ -20,6 +19,7 @@ import { localImageHits } from "@/lib/images/local";
 import type { ChatArtifact, ChatArtifactKind, ChatAttachment, ChatImageHit, ChatMessage, PendingKind } from "@/types/chat";
 import type { ActiveArtifact, Project } from "@/types/project";
 import type { Material } from "@/types/material";
+import type { VisualBlock } from "@/types/visual";
 
 export type ChatDispatchContext = {
   tool: ChatToolCall;
@@ -34,6 +34,8 @@ export type ChatDispatchContext = {
   pendingKind?: PendingKind | null;
   attachments?: ChatAttachment[];
   onStatus?: (status: string) => void;
+  onNotesEvent?: (event: { status?: string | null; title?: string; block?: VisualBlock; blocks?: VisualBlock[]; sheetId?: string }) => void;
+  signal?: AbortSignal;
 };
 
 export type ChatDispatchResult = {
@@ -70,12 +72,15 @@ function pendingKindForClarify(ctx: ChatDispatchContext): PendingKind | undefine
   return undefined;
 }
 
-function imageFailLine(prompt: string): string {
-  return promptIsKa(prompt) ? "სურათი ვერ მოიძებნა" : "Couldn't find an image.";
+export const CREATING_NOTES_STATUS = "Creating notes…";
+export const ANALYSING_MATERIAL_STATUS = "Analysing material…";
+
+function imageFailLine(_prompt: string): string {
+  return "Couldn't find an image.";
 }
 
-function imageFoundLine(prompt: string): string {
-  return promptIsKa(prompt) ? "აქ არის სურათები." : "Here are some photos.";
+function imageFoundLine(_prompt: string): string {
+  return "Here are some photos.";
 }
 
 export { imageFailLine, imageFoundLine };
@@ -142,19 +147,23 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
 }
 
 async function runCreateSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
-  ctx.onStatus?.("Writing");
+  ctx.onStatus?.(CREATING_NOTES_STATUS);
+  ctx.onNotesEvent?.({ status: CREATING_NOTES_STATUS });
   const sheet = await generateStudySheetFromPrompt({
     projectId: ctx.project.id,
     userId: ctx.userId,
     projectTitle: ctx.project.title,
     materials: ctx.materials,
     prompt: generatePrompt(ctx),
+    signal: ctx.signal,
+    onEvent: ctx.onNotesEvent,
   });
   if (!sheet.id) throw new Error("Could not save notes.");
+  ctx.onNotesEvent?.({ title: sheet.title, blocks: sheet.blocks, sheetId: sheet.id, status: null });
   return {
     intent: "study",
-    content: oneChatLine(ctx.text, "კონსპექტი"),
-    artifact: { kind: "sheet", id: sheet.id, title: sheet.title },
+    content: oneChatLine(ctx.text, "Created notes."),
+    artifact: { kind: "sheet", id: sheet.id, title: sheet.title, count: sheet.blocks.length },
   };
 }
 
@@ -247,8 +256,9 @@ async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResul
   if (!active) throw new Error("Open a set or sheet first.");
   const sheet = await getStudySheet(ctx.project.id, active.id);
   if (!sheet) throw new Error("Those notes are gone.");
-  ctx.onStatus?.("Updating…");
-  await rewriteStudySheetFromPrompt({
+  ctx.onStatus?.("Updating notes…");
+  ctx.onNotesEvent?.({ status: "Updating notes…", title: sheet.title });
+  const next = await rewriteStudySheetFromPrompt({
     projectId: ctx.project.id,
     sheetId: sheet.id,
     projectTitle: ctx.project.title,
@@ -257,11 +267,14 @@ async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResul
     currentBlocks: sheet.blocks,
     currentTitle: sheet.title,
     currentContent: sheet.prose || sheet.content,
+    signal: ctx.signal,
+    onEvent: ctx.onNotesEvent,
   });
+  ctx.onNotesEvent?.({ title: next.title, blocks: next.blocks, sheetId: sheet.id, status: null });
   return {
     intent: "rewrite_sheet",
     content: "Updated notes.",
-    artifact: activeToChatArtifact({ ...active, status: "ready" }),
+    artifact: activeToChatArtifact({ ...active, title: next.title, status: "ready" }),
   };
 }
 
@@ -288,9 +301,11 @@ export function toolProducesArtifact(name: ChatToolName): boolean {
 
 export function dispatchStatus(intent: ComposerIntent, toolName?: ChatToolName): string {
   if (toolName === "search_images") return "Searching…";
-  if (intent === "study" || intent === "rewrite_sheet") return "Writing";
+  if (toolName === "clarify") return "Planning…";
+  if (intent === "study") return CREATING_NOTES_STATUS;
+  if (intent === "rewrite_sheet") return "Updating notes…";
   if (intent === "practice") return "Generating a practice set…";
-  if (intent === "plan") return "Writing";
+  if (intent === "plan") return "Planning…";
   if (isMutationIntent(intent)) return "Updating…";
   return "Thinking";
 }

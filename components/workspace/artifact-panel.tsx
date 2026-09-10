@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { subscribeChatMessages } from "@/lib/chats";
 import { subscribeMaterials } from "@/lib/materials";
 import { subscribeStudySheets } from "@/lib/study-sheets/store";
 import { formatBytes, shortDate } from "@/lib/format";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
 import { PracticeSession } from "@/components/exercises/practice-session";
-import { NoteDocument } from "@/components/visuals/note-document";
+import { NoteDocument, NoteTitle } from "@/components/visuals/note-document";
+import { VisualList } from "@/components/visuals/visual-block";
 import { QuietIconCluster } from "@/components/workspace/quiet-icon-cluster";
 import { MaterialViewer } from "@/components/workspace/material-viewer";
 import { UiIcon } from "@/components/workspace/ui-icon";
@@ -15,7 +16,8 @@ import { useAuth } from "@/components/auth-provider";
 import { isGuestUser } from "@/lib/guest";
 import type { ChatArtifact, ChatMessage } from "@/types/chat";
 import type { Material } from "@/types/material";
-import type { StudySheet } from "@/types/study-sheet";
+import type { NotesLiveState, StudySheet } from "@/types/study-sheet";
+import type { VisualBlock } from "@/types/visual";
 
 type TabId = "materials" | "sheets" | "practice";
 
@@ -32,6 +34,8 @@ export function ArtifactPanel({
   onExitSession,
   onViewChange,
   onActivate,
+  liveNote = null,
+  onLiveSettled,
 }: {
   projectId: string;
   userId: string;
@@ -43,6 +47,8 @@ export function ArtifactPanel({
   onExitSession: () => void;
   onViewChange?: (view: TabId) => void;
   onActivate?: (artifact: ChatArtifact) => void;
+  liveNote?: NotesLiveState | null;
+  onLiveSettled?: () => void;
 }) {
   const { user } = useAuth();
   const canViewFiles = Boolean(user && !isGuestUser(user));
@@ -120,6 +126,13 @@ export function ArtifactPanel({
 
   useEffect(() => {
     if (session || !focus) return;
+    if (liveNote) {
+      setTab("sheets");
+      setSheetError(null);
+      if (liveNote.sheetId) setSheetId(liveNote.sheetId);
+      else if (liveNote.status) setSheetId(null);
+      return;
+    }
     if (focus.kind === "practice") {
       setTab("practice");
       setPracticeId(focus.id);
@@ -128,17 +141,18 @@ export function ArtifactPanel({
     if (focus.kind === "sheet" || focus.kind === "plan") {
       setTab("sheets");
       setSheetError(null);
-      setSheetId(focus.id);
+      if (focus.id) setSheetId(focus.id);
       return;
     }
     if (focus.kind === "material") {
       setTab("materials");
       setMaterialId(focus.id);
     }
-  }, [focus, session]);
+  }, [focus, session, liveNote]);
 
   useEffect(() => {
     if (session) return;
+    if (liveNote) return;
     if (tab === "sheets" && sheetsReady && counts.sheets === 0) {
       setTab("materials");
       setSheetId(null);
@@ -147,7 +161,7 @@ export function ArtifactPanel({
       setTab("materials");
       setPracticeId(null);
     }
-  }, [counts.sheets, counts.practice, session, tab, sheetsReady, practiceReady]);
+  }, [counts.sheets, counts.practice, session, tab, sheetsReady, practiceReady, liveNote]);
 
   useEffect(() => {
     if (session) return;
@@ -157,8 +171,16 @@ export function ArtifactPanel({
   const selectedMaterial = materials.find((item) => item.id === materialId) ?? null;
   const selectedSheet = sheets.find((item) => item.id === sheetId) ?? null;
   const selectedSet = practiceSets.find((item) => item.id === practiceId) ?? null;
-  const showSheets = counts.sheets > 0 || (tab === "sheets" && !sheetsReady);
+  const showSheets = counts.sheets > 0 || Boolean(liveNote) || (tab === "sheets" && !sheetsReady);
   const showPractice = counts.practice > 0 || (tab === "practice" && !practiceReady);
+  const hideTopBar = tab === "sheets" && (Boolean(selectedSheet) || Boolean(liveNote));
+
+  useEffect(() => {
+    if (!liveNote || liveNote.status || !liveNote.sheetId || !onLiveSettled) return;
+    if (!selectedSheet || selectedSheet.id !== liveNote.sheetId) return;
+    if (!notesMatch(selectedSheet.blocks, liveNote.blocks)) return;
+    onLiveSettled();
+  }, [liveNote, selectedSheet, onLiveSettled]);
 
   return (
     <aside className="relative z-[1] flex h-full w-full shrink-0 flex-col bg-transparent py-2 pl-1 pr-2 max-md:!w-full">
@@ -180,6 +202,7 @@ export function ArtifactPanel({
           />
         ) : (
           <>
+            {hideTopBar ? null : (
             <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
               <nav className="flex min-w-0 flex-1 items-center">
                 <QuietIconCluster
@@ -187,7 +210,7 @@ export function ArtifactPanel({
                   actions={[
                     {
                       id: "materials",
-                      label: "მასალები",
+                      label: "Materials",
                       icon: "materials",
                       active: tab === "materials",
                       disabled: counts.materials === 0,
@@ -200,7 +223,7 @@ export function ArtifactPanel({
                       ? [
                           {
                             id: "sheets",
-                            label: "კონსპექტი",
+                            label: "Notes",
                             icon: "notes" as const,
                             active: tab === "sheets",
                             onClick: () => {
@@ -214,7 +237,7 @@ export function ArtifactPanel({
                       ? [
                           {
                             id: "practice",
-                            label: "სავარჯიშო",
+                            label: "Practice",
                             icon: "practice" as const,
                             active: tab === "practice",
                             onClick: () => {
@@ -236,6 +259,7 @@ export function ArtifactPanel({
                 <UiIcon name="close" size={18} />
               </button>
             </header>
+            )}
 
             <div className={`min-h-0 flex-1 ${tab === "materials" && materialId ? "overflow-hidden" : "overflow-y-auto"}`}>
               {tab === "materials" && (
@@ -251,6 +275,7 @@ export function ArtifactPanel({
                 <SheetsView
                   items={sheets}
                   selected={selectedSheet}
+                  liveNote={liveNote}
                   error={sheetError}
                   onSelect={(id) => {
                     setSheetError(null);
@@ -264,7 +289,10 @@ export function ArtifactPanel({
                       });
                     }
                   }}
-                  onBack={() => setSheetId(null)}
+                  onBack={() => {
+                    setSheetId(null);
+                    onLiveSettled?.();
+                  }}
                 />
               )}
               {tab === "practice" && (
@@ -298,9 +326,17 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   );
 }
 
-function ArtifactBack({ label, onBack }: { label: string; onBack: () => void }) {
+function ArtifactBack({
+  label,
+  onBack,
+  flush = false,
+}: {
+  label: string;
+  onBack: () => void;
+  flush?: boolean;
+}) {
   return (
-    <div className="flex shrink-0 items-center border-b border-border px-2 py-1.5">
+    <div className={`flex h-10 w-full shrink-0 items-center px-2 ${flush ? "" : "border-b border-border"}`}>
       <button
         type="button"
         onClick={onBack}
@@ -371,19 +407,44 @@ function MaterialsView({
   );
 }
 
+function notesMatch(a: VisualBlock[], b: VisualBlock[]): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function SheetsView({
   items,
   selected,
+  liveNote,
   error,
   onSelect,
   onBack,
 }: {
   items: StudySheet[];
   selected: StudySheet | null;
+  liveNote?: NotesLiveState | null;
   error: string | null;
   onSelect: (id: string) => void;
   onBack: () => void;
 }) {
+  const showLive =
+    Boolean(liveNote) &&
+    (Boolean(liveNote?.status) ||
+      !selected ||
+      !liveNote?.sheetId ||
+      selected.id !== liveNote.sheetId ||
+      !notesMatch(selected.blocks, liveNote.blocks));
+
+  if (showLive && liveNote) {
+    return (
+      <LiveNoteView
+        title={liveNote.title || "Notes"}
+        blocks={liveNote.blocks}
+        status={liveNote.status}
+        onBack={onBack}
+      />
+    );
+  }
+
   if (error && items.length === 0) {
     return <EmptyState title="Could not save notes" body={error} />;
   }
@@ -419,6 +480,52 @@ function SheetsView({
           <p className="mt-0.5 text-[11px] text-muted">{shortDate(item.createdAt) || "Notes"}</p>
         </button>
       ))}
+    </div>
+  );
+}
+
+function LiveNoteView({
+  title,
+  blocks,
+  status,
+  onBack,
+}: {
+  title: string;
+  blocks: VisualBlock[];
+  status: string | null;
+  onBack: () => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const busy = Boolean(status);
+
+  useLayoutEffect(() => {
+    const node = scrollerRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [blocks.length, status]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="relative h-10 shrink-0 border-b border-border">
+        <div
+          className={`absolute inset-0 flex items-center px-4 transition-opacity duration-300 ${
+            busy ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <p className="status-shimmer truncate text-[12px]">{status || "Creating notes…"}</p>
+        </div>
+        <div
+          className={`absolute inset-0 flex items-center transition-opacity duration-300 ${
+            busy ? "pointer-events-none opacity-0" : "opacity-100"
+          }`}
+        >
+          <ArtifactBack label={title} onBack={onBack} flush />
+        </div>
+      </div>
+      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <NoteTitle text={title} />
+        <VisualList blocks={blocks} appear />
+      </div>
     </div>
   );
 }

@@ -131,11 +131,7 @@ export function StudySheetsPanel({
         )}
         {active && (
           <div className="mx-auto max-w-2xl">
-            <p className="text-[11px] uppercase tracking-wide text-muted">Notes</p>
-            <h2 className="mt-1 text-xl font-medium tracking-tight text-foreground">{active.title}</h2>
-            <div className="mt-6">
-              <NoteDocument note={active} />
-            </div>
+            <NoteDocument note={active} />
           </div>
         )}
       </div>

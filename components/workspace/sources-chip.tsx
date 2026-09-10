@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { promptIsKa } from "@/lib/composer/intent";
 import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
 import { IconFile, IconPages } from "@/components/workspace/icons";
 import type { ChatImageHit, ChatMessage } from "@/types/chat";
@@ -53,12 +52,7 @@ export function sourcesForTurn(assistant: ChatMessage): SourceItem[] {
   return items;
 }
 
-function localeOf(messages: { content: string }[]): "ka" | "en" {
-  const last = [...messages].reverse().find((item) => item.content.trim());
-  return last && promptIsKa(last.content) ? "ka" : "en";
-}
-
-export function SourcesChip({ items, locale }: { items: SourceItem[]; locale: "ka" | "en" }) {
+export function SourcesChip({ items }: { items: SourceItem[] }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -80,8 +74,7 @@ export function SourcesChip({ items, locale }: { items: SourceItem[]; locale: "k
 
   if (items.length === 0) return null;
 
-  const label =
-    locale === "ka" ? `${items.length} წყარო` : items.length === 1 ? "1 source" : `${items.length} sources`;
+  const label = items.length === 1 ? "1 source" : `${items.length} sources`;
 
   return (
     <div ref={rootRef} className="relative">
@@ -183,8 +176,4 @@ export function StorageThumb({ path, className = "h-8 w-8" }: { path: string; cl
       <img src={url} alt="" className="h-full w-full object-cover" />
     </span>
   );
-}
-
-export function turnLocale(assistant: ChatMessage, previous?: ChatMessage): "ka" | "en" {
-  return localeOf([previous, assistant].filter(Boolean) as ChatMessage[]);
 }

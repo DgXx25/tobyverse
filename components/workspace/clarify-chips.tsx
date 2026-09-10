@@ -1,6 +1,6 @@
 "use client";
 
-export const CLARIFY_OTHER_LABEL = "სხვა";
+export const CLARIFY_OTHER_LABEL = "Other";
 
 export function ClarifyChips({
   options,

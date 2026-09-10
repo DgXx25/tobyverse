@@ -23,6 +23,9 @@ service cloud.firestore {
     // Subcollection: users/{uid}/memories/{memoryId}
     //   id, content (<= 200), createdAt, updatedAt
     //
+    // Document: users/{uid}/profile/learning
+    //   text (<= 800), updatedAt
+    //
     // Collection: projects — existing owner-scoped project documents
     // ===============================================================
 
@@ -103,6 +106,13 @@ service cloud.firestore {
         && (data.updatedAt is timestamp || data.updatedAt is string);
     }
 
+    function isValidLearning(data) {
+      return data.keys().hasOnly(["text", "updatedAt"])
+        && data.keys().hasAll(["text", "updatedAt"])
+        && data.text is string && data.text.size() <= 800
+        && (data.updatedAt is timestamp || data.updatedAt is string);
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
@@ -120,6 +130,12 @@ service cloud.firestore {
           && isValidMemory(memoryId, request.resource.data)
           && request.resource.data.id == resource.data.id
           && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isOwner(userId);
+      }
+
+      match /profile/{docId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && docId == "learning" && isValidLearning(request.resource.data);
         allow delete: if isOwner(userId);
       }
     }

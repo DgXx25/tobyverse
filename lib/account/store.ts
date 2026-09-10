@@ -204,10 +204,12 @@ export async function adjustStorageBytes(userId: string, delta: number): Promise
 export async function exportAccountMetadata(userId: string): Promise<Record<string, unknown>> {
   const { listProjectsForUser } = await import("@/lib/projects");
   const { listMemories } = await import("@/lib/memory/store");
-  const [profile, projects, memories] = await Promise.all([
+  const { getLearningProfile } = await import("@/lib/memory/profile");
+  const [profile, projects, memories, learningProfile] = await Promise.all([
     getUserProfile(userId),
     listProjectsForUser(userId),
     listMemories(userId).catch(() => []),
+    getLearningProfile(userId).catch(() => ""),
   ]);
   return {
     exportedAt: new Date().toISOString(),
@@ -227,6 +229,7 @@ export async function exportAccountMetadata(userId: string): Promise<Record<stri
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     })),
+    learningProfile: learningProfile || null,
     projects: projects.map((project) => ({
       id: project.id,
       title: project.title,
@@ -240,11 +243,13 @@ export async function exportAccountMetadata(userId: string): Promise<Record<stri
 export async function deleteAccountData(user: User): Promise<void> {
   const { deleteProject, listProjectsForUser } = await import("@/lib/projects");
   const { deleteAllMemories } = await import("@/lib/memory/store");
+  const { deleteLearningProfile } = await import("@/lib/memory/profile");
   const projects = await listProjectsForUser(user.uid);
   for (const project of projects) {
     await deleteProject(project.id, user.uid);
   }
   await deleteAllMemories(user.uid).catch(() => undefined);
+  await deleteLearningProfile(user.uid).catch(() => undefined);
   await deleteDoc(userRef(user.uid)).catch(() => undefined);
   await deleteUser(user);
 }

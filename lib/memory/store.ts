@@ -129,10 +129,11 @@ function oldestMemory(items: UserMemory[]): UserMemory | null {
   });
 }
 
-export async function applyMemoryOperations(userId: string, ops: MemoryOp[]): Promise<void> {
-  if (!userId || ops.length === 0) return;
+export async function applyMemoryOperations(userId: string, ops: MemoryOp[]): Promise<boolean> {
+  if (!userId || ops.length === 0) return false;
   let items = await listMemories(userId);
   const byId = () => new Map(items.map((item) => [item.id, item]));
+  let saved = false;
 
   for (const op of ops) {
     if (op.op === "delete") {
@@ -154,6 +155,7 @@ export async function applyMemoryOperations(userId: string, ops: MemoryOp[]): Pr
     }
     await updateMemory(userId, op.id, content);
     items = items.map((item) => (item.id === op.id ? { ...item, content } : item));
+    saved = true;
   }
 
   for (const op of ops) {
@@ -168,6 +170,11 @@ export async function applyMemoryOperations(userId: string, ops: MemoryOp[]): Pr
       items = items.filter((item) => item.id !== drop.id);
     }
     const created = await addMemory(userId, content);
-    if (created) items = [created, ...items].slice(0, FREE_CAPS.memories);
+    if (created) {
+      items = [created, ...items].slice(0, FREE_CAPS.memories);
+      saved = true;
+    }
   }
+
+  return saved;
 }

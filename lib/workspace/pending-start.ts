@@ -10,6 +10,7 @@ export type PendingStart = {
   prompt: string;
   materialIds: string[];
   intent?: ComposerIntent;
+  awaitingIngest?: boolean;
 };
 
 const STORAGE_PREFIX = "tv.pending.";
@@ -18,6 +19,7 @@ type StoredStart = {
   prompt: string;
   intent?: ComposerIntent;
   materialIds: string[];
+  awaitingIngest?: boolean;
 };
 
 export function stashPendingStart(projectId: string, start: PendingStart): void {
@@ -26,6 +28,7 @@ export function stashPendingStart(projectId: string, start: PendingStart): void 
     prompt: start.prompt,
     intent: start.intent,
     materialIds: start.materialIds,
+    awaitingIngest: start.awaitingIngest,
   };
   try {
     window.sessionStorage.setItem(`${STORAGE_PREFIX}${projectId}`, JSON.stringify(stored));
@@ -45,11 +48,13 @@ export function takePendingStart(projectId: string): PendingStart | null {
     const materialIds = Array.isArray(stored.materialIds)
       ? stored.materialIds.filter((id) => typeof id === "string")
       : [];
-    if (!prompt.trim() && materialIds.length === 0) return null;
+    const awaitingIngest = stored.awaitingIngest === true;
+    if (!prompt.trim() && materialIds.length === 0 && !awaitingIngest) return null;
     return {
       prompt,
       intent: stored.intent ?? DEFAULT_COMPOSER_INTENT,
       materialIds,
+      awaitingIngest,
     };
   } catch {
     return null;

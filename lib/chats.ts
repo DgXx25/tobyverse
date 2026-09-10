@@ -80,6 +80,7 @@ function mapMessage(
         ? data.pendingKind
         : undefined,
     images: asImages(data.images),
+    memorized: data.memorized === true ? true : undefined,
     createdAt: toIsoDate(data.createdAt) ?? toIsoDate(data.createdAtClient),
   };
 }
@@ -200,6 +201,7 @@ export async function addChatMessage(input: {
   options?: string[];
   pendingKind?: PendingKind;
   images?: ChatImageHit[];
+  memorized?: boolean;
 }): Promise<string> {
   const threadId = input.threadId ?? DEFAULT_CHAT_THREAD_ID;
   const createdAtClient = new Date().toISOString();
@@ -230,6 +232,7 @@ export async function addChatMessage(input: {
       ...(input.options !== undefined ? { options: input.options, clarify: true } : {}),
       ...(input.pendingKind ? { pendingKind: input.pendingKind } : {}),
       ...(images !== undefined ? { images } : {}),
+      ...(input.memorized ? { memorized: true } : {}),
     }),
   );
 
@@ -243,12 +246,19 @@ export async function addChatMessage(input: {
 export async function patchChatMessage(
   projectId: string,
   messageId: string,
-  patch: { content?: string; images?: ChatImageHit[] },
+  patch: { content?: string; images?: ChatImageHit[]; attachments?: ChatAttachment[]; memorized?: boolean },
   threadId = DEFAULT_CHAT_THREAD_ID,
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
   if (patch.content !== undefined) payload.content = patch.content;
   if (patch.images !== undefined) payload.images = patch.images.map((item) => omitUndefined(item));
+  if (patch.attachments !== undefined) {
+    payload.attachments = patch.attachments.flatMap((item) => {
+      const next = compactChatAttachment(item);
+      return next ? [next] : [];
+    });
+  }
+  if (patch.memorized) payload.memorized = true;
   if (Object.keys(payload).length === 0) return;
   await updateDoc(doc(messagesCollection(projectId, threadId), messageId), omitUndefined(payload));
 }

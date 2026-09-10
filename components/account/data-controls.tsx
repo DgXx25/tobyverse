@@ -68,7 +68,7 @@ export function AccountDataControls() {
         <div>
           <p className="text-[15px] font-medium text-foreground">Export account data</p>
           <p className="mt-1 text-[13px] leading-6 text-muted">
-            Download a JSON file of your profile, plan, usage, memories, and project metadata.
+            Download a JSON file of your profile, plan, usage, memories, learning profile, and project metadata.
           </p>
         </div>
         <button
@@ -84,7 +84,7 @@ export function AccountDataControls() {
       <div className="py-5">
         <p className="text-[15px] font-medium text-foreground">Delete account</p>
         <p className="mt-1 text-[13px] leading-6 text-muted">
-          Removes your chats, materials, notes, memories, and account. This cannot be undone.
+          Removes your chats, materials, notes, memories, learning profile, and account. This cannot be undone.
         </p>
         {error ? <p className="mt-2 text-[13px] text-red-400">{error}</p> : null}
         {confirmDelete ? (

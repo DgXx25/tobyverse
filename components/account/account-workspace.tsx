@@ -121,7 +121,7 @@ export function AccountWorkspace() {
           ) : tab === "memory" ? (
             <div>
               <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Memory</h2>
-              <p className="mt-1 text-[14px] text-muted">Facts TobyVerse remembers about you.</p>
+              <p className="mt-1 text-[14px] text-muted">How Toby should reply, and a short note on how you learn.</p>
               <div className="mt-6 max-w-lg">
                 <MemoriesPanel />
               </div>

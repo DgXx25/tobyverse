@@ -19,6 +19,8 @@ import {
 import { DEFAULT_COMPOSER_INTENT, type ComposerIntent } from "@/lib/composer/intent";
 import { PLACEHOLDER_CHAT_TITLE } from "@/lib/workspace/title";
 
+const ingestByProject = new Map<string, Promise<string[]>>();
+
 function attachmentSource(attachment: PendingAttachment) {
   if (attachment.kind === "file") {
     return { kind: "file" as const, file: attachment.file };
@@ -49,6 +51,41 @@ async function discardFailedStart(projectId: string, userId: string): Promise<vo
   }
 }
 
+async function ingestAttachments(input: {
+  projectId: string;
+  userId: string;
+  attachments: PendingAttachment[];
+  onPhase?: (phase: IngestPhase) => void;
+}): Promise<string[]> {
+  const prepared: PreparedMaterial[] = [];
+  try {
+    for (const attachment of input.attachments) {
+      prepared.push(
+        await prepareMaterialIngest({
+          projectId: input.projectId,
+          userId: input.userId,
+          source: attachmentSource(attachment),
+          onPhase: input.onPhase,
+        }),
+      );
+    }
+    const materialIds: string[] = [];
+    for (const item of prepared) {
+      materialIds.push(await commitMaterialText(item));
+    }
+    void Promise.allSettled(prepared.map((item) => finalizeMaterialImages(item)));
+    return materialIds;
+  } catch (error) {
+    await discardPreparedMaterials(prepared);
+    throw error;
+  }
+}
+
+/** In-memory ingest started from the home screen. Files cannot go in sessionStorage. */
+export function takeProjectStartIngest(projectId: string): Promise<string[]> | null {
+  return ingestByProject.get(projectId) ?? null;
+}
+
 export async function startProjectFromPrompt(input: {
   userId: string;
   prompt: string;
@@ -68,10 +105,8 @@ export async function startProjectFromPrompt(input: {
 
   let projectId: string | null = null;
   let created = false;
-  const prepared: PreparedMaterial[] = [];
 
   try {
-    const materialIds: string[] = [];
     projectId = reserveProjectId();
 
     input.onPhase?.("uploading");
@@ -83,35 +118,38 @@ export async function startProjectFromPrompt(input: {
     });
     created = true;
 
-    for (const attachment of attachments) {
-      prepared.push(
-        await prepareMaterialIngest({
-          projectId,
-          userId,
-          source: attachmentSource(attachment),
-          onPhase: input.onPhase,
-        }),
-      );
-    }
-
-    for (const item of prepared) {
-      materialIds.push(await commitMaterialText(item));
-    }
-
     stashPendingStart(projectId, {
       prompt,
-      materialIds,
+      materialIds: [],
       intent,
+      awaitingIngest: attachments.length > 0,
     });
 
-    void Promise.allSettled(prepared.map((item) => finalizeMaterialImages(item)));
+    if (attachments.length > 0) {
+      const ingest = ingestAttachments({
+        projectId,
+        userId,
+        attachments,
+        onPhase: input.onPhase,
+      });
+      ingestByProject.set(projectId, ingest);
+      void ingest.finally(() => {
+        const clear = () => {
+          if (ingestByProject.get(projectId!) === ingest) ingestByProject.delete(projectId!);
+        };
+        if (typeof window === "undefined") {
+          clear();
+          return;
+        }
+        window.setTimeout(clear, 120_000);
+      });
+    }
 
     return projectId;
   } catch (error) {
     if (created && projectId) {
       await discardFailedStart(projectId, userId);
     }
-    await discardPreparedMaterials(prepared);
     throw error;
   }
 }

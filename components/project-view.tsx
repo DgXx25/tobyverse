@@ -22,9 +22,13 @@ import type { ChatArtifact, ChatMode } from "@/types/chat";
 import type { ActiveArtifactStatus } from "@/types/project";
 import type { Material } from "@/types/material";
 import type { Project } from "@/types";
+import type { NotesLiveState } from "@/types/study-sheet";
+import type { NotesGenerateEvent } from "@/lib/study-sheets/generate-client";
+import { CREATING_NOTES_STATUS } from "@/lib/chat/dispatch";
 
 const MIN_ARTIFACT = 400;
-const MIN_NOTES = 480;
+const MIN_NOTES = 800;
+const MIN_CHAT = 240;
 const WIDTH_EASE =
   "transition-[width,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
 
@@ -59,6 +63,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const [artifactWidth, setArtifactWidth] = useState(420);
   const [resizing, setResizing] = useState(false);
   const [panelView, setPanelView] = useState<"materials" | "sheets" | "practice">("materials");
+  const [notesLive, setNotesLive] = useState<NotesLiveState | null>(null);
   const openedAt = useRef(Date.now());
   const prefsRef = useRef<WorkspacePrefs | null>(null);
   const widthRef = useRef(420);
@@ -66,9 +71,10 @@ export function ProjectView({ projectId }: { projectId: string }) {
   widthRef.current = artifactWidth;
 
   function ensureMinWidth(min: number) {
-    const cap = typeof window === "undefined" ? min : Math.round(window.innerWidth * 0.55);
-    const target = Math.min(min, cap);
-    setArtifactWidth((current) => (current < target ? target : current));
+    const max =
+      typeof window === "undefined" ? min : Math.max(min, window.innerWidth - MIN_CHAT);
+    const floor = typeof window === "undefined" ? min : Math.min(min, window.innerWidth - MIN_CHAT);
+    setArtifactWidth((current) => (current < floor ? Math.min(floor, max) : current));
   }
 
   useEffect(() => {
@@ -194,6 +200,38 @@ export function ProjectView({ projectId }: { projectId: string }) {
     rememberActive(next, "open");
   }
 
+  function handleNotesLive(event: NotesGenerateEvent | "start" | null) {
+    if (event === null) {
+      setNotesLive(null);
+      return;
+    }
+    if (event === "start") {
+      setNotesLive({ title: "Notes", blocks: [], status: CREATING_NOTES_STATUS });
+      setFocus({ kind: "sheet", id: "", title: "Notes" });
+      setPanelOpen(true);
+      ensureMinWidth(MIN_NOTES);
+      return;
+    }
+    setNotesLive((current) => {
+      const base = current ?? { title: "Notes", blocks: [], status: CREATING_NOTES_STATUS };
+      return {
+        title: event.title?.trim() || base.title,
+        blocks: event.blocks ?? (event.block ? [...base.blocks, event.block] : base.blocks),
+        status: event.status === undefined ? base.status : event.status,
+        sheetId: event.sheetId || base.sheetId,
+      };
+    });
+    setPanelOpen(true);
+    ensureMinWidth(MIN_NOTES);
+    if (event.sheetId) {
+      setFocus({
+        kind: "sheet",
+        id: event.sheetId,
+        title: event.title || "Notes",
+      });
+    }
+  }
+
   async function copyShare() {
     try {
       const url = `${window.location.origin}/project/${projectId}`;
@@ -237,11 +275,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   const onPanelViewChange = useCallback((view: "materials" | "sheets" | "practice") => {
     setPanelView(view);
-    if (view === "sheets") {
-      const cap = typeof window === "undefined" ? MIN_NOTES : Math.round(window.innerWidth * 0.55);
-      const target = Math.min(MIN_NOTES, cap);
-      setArtifactWidth((current) => (current < target ? target : current));
-    }
+    if (view === "sheets") ensureMinWidth(MIN_NOTES);
   }, []);
 
   const headerActions: QuietIconAction[] = [
@@ -274,9 +308,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
     const startX = event.clientX;
     const startW = widthRef.current;
     function move(ev: MouseEvent) {
-      const minChat = 240;
-      const max = session
-        ? Math.max(420, window.innerWidth - minChat)
+      const max = session || panelView === "sheets"
+        ? Math.max(MIN_ARTIFACT, window.innerWidth - MIN_CHAT)
         : Math.round(window.innerWidth * 0.55);
       const desiredMin = session
         ? Math.round(window.innerWidth * 0.42)
@@ -323,6 +356,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
           materials={materials}
           selectedIds={selectedIds}
           onOpenArtifact={openArtifact}
+          onNotesLive={handleNotesLive}
           onOpenMaterial={(id) => {
             setFocus({ kind: "material", id });
             setPanelOpen(true);
@@ -352,6 +386,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
             onExitSession={exitSession}
             onViewChange={onPanelViewChange}
             onActivate={(artifact) => rememberActive(artifact, "open")}
+            liveNote={notesLive}
+            onLiveSettled={() => setNotesLive(null)}
           />
         </div>
       </div>

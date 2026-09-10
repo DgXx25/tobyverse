@@ -2,54 +2,10 @@ import { createElement, type ReactNode } from "react";
 import katex from "katex";
 import { CATALOG_KINDS, type CatalogKind } from "@/types/visual";
 import { CATALOG_ICON_IDS, UiIcon, resolveUiIconName, type UiIconName } from "@/components/workspace/ui-icon";
+import { unwrapLatex } from "@/lib/visuals/math";
+import { CATALOG_ELEMENT_IDS, lookupElement } from "@/lib/visuals/elements";
 
-const ELEMENT_LIST = [
-  "H",
-  "He",
-  "Li",
-  "Be",
-  "B",
-  "C",
-  "N",
-  "O",
-  "F",
-  "Ne",
-  "Na",
-  "Mg",
-  "Al",
-  "Si",
-  "P",
-  "S",
-  "Cl",
-  "Ar",
-  "K",
-  "Ca",
-  "Fe",
-  "Cu",
-  "Zn",
-  "Ag",
-  "Au",
-  "Hg",
-  "Pb",
-  "U",
-  "H2O",
-  "CO2",
-  "O2",
-  "N2",
-  "NaCl",
-  "CH4",
-  "NH3",
-  "HCl",
-  "NaOH",
-  "H2SO4",
-  "Fe2O3",
-  "C6H12O6",
-];
-
-const ELEMENTS = new Map(ELEMENT_LIST.map((item) => [item.toUpperCase(), item]));
-
-export { CATALOG_ICON_IDS };
-export const CATALOG_ELEMENT_IDS = ELEMENT_LIST;
+export { CATALOG_ICON_IDS, CATALOG_ELEMENT_IDS };
 
 const LABEL_ICONS: Array<[RegExp, UiIconName]> = [
   [/prokaryot|პროკარიოტ|bacter|ბაქტერ/i, "bug"],
@@ -96,15 +52,18 @@ function iconClass(className?: string) {
 }
 
 export function renderFormula(source: string, display = false): ReactNode | null {
-  const latex = source.trim();
+  const latex = unwrapLatex(source);
   if (!latex) return null;
   try {
     const html = katex.renderToString(latex, {
       throwOnError: false,
       displayMode: display,
       output: "html",
+      strict: false,
     });
-    if (!html) return null;
+    if (!html || html.includes("katex-error")) {
+      return createElement("span", { className: "font-mono text-[15px] text-foreground" }, latex);
+    }
     return createElement("span", {
       className: display ? "katex-display-host" : "katex-host",
       dangerouslySetInnerHTML: { __html: html },
@@ -140,15 +99,15 @@ export function visualFromId(kind: string, id: string, className?: string): Reac
       );
     }
     if (kind === "element") {
-      const symbol = ELEMENTS.get(id.trim().toUpperCase().replace(/[^A-Z0-9]/gi, ""));
-      if (!symbol) return null;
+      const element = lookupElement(id);
+      if (!element) return null;
       return createElement(
         "span",
         {
           className:
             "inline-flex min-w-[2.4rem] items-center justify-center rounded-lg border border-border bg-surface-2 px-2 py-1 text-[13px] font-medium text-foreground",
         },
-        symbol,
+        element.symbol,
       );
     }
     if (kind === "formula") {

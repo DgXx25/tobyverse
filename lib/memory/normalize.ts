@@ -1,4 +1,4 @@
-import { MEMORY_CONTENT_MAX, MEMORY_OPS_PER_TURN } from "@/lib/memory/constants";
+import { MEMORY_CONTENT_MAX, MEMORY_OPS_PER_TURN, PERSONALIZATION_MAX } from "@/lib/memory/constants";
 import type { ChatMemoryContext, MemoryOp } from "@/types/memory";
 
 export function sanitizeMemoryContent(value: unknown): string {
@@ -10,6 +10,18 @@ export function sanitizeMemoryContent(value: unknown): string {
     .trim();
   if (!line) return "";
   return line.length <= MEMORY_CONTENT_MAX ? line : `${line.slice(0, MEMORY_CONTENT_MAX - 1).trim()}…`;
+}
+
+export function sanitizePersonalization(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!text) return "";
+  if (text.length <= PERSONALIZATION_MAX) return text;
+  return text.slice(0, PERSONALIZATION_MAX).replace(/\s+\S*$/, "").trim() || text.slice(0, PERSONALIZATION_MAX);
 }
 
 export function memoryKey(content: string): string {
@@ -34,6 +46,15 @@ export function asMemoryFacts(value: unknown, cap: number): ChatMemoryContext[] 
     facts.push({ id, content });
   }
   return facts;
+}
+
+export function parsePersonalizationPatch(value: unknown, current: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as { personalization?: unknown };
+  if (!("personalization" in row) || row.personalization == null) return undefined;
+  const next = sanitizePersonalization(row.personalization);
+  if (!next) return undefined;
+  return next === current.trim() ? undefined : next;
 }
 
 export function parseMemoryOps(value: unknown, knownIds: Set<string>): MemoryOp[] {

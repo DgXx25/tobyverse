@@ -55,6 +55,8 @@ export type ChatMessage = {
   options?: string[];
   pendingKind?: PendingKind;
   images?: ChatImageHit[];
+  /** True when this turn saved a long-term memory fact. */
+  memorized?: boolean;
   createdAt: IsoDateString | null;
 };
 
@@ -128,6 +130,7 @@ export type ChatGenerationContext = {
   figures?: ChatFigureContext[];
   knowledgeItems: ChatKnowledgeContext[];
   memories?: ChatMemoryContext[];
+  personalization?: string;
 };
 
 export type ChatTurn = {

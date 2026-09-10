@@ -9,6 +9,7 @@ import { AccountSheet } from "@/components/account-sheet";
 import { AnalyticsSession } from "@/components/analytics-session";
 import { ShellProvider, useShell } from "@/components/workspace/shell-context";
 import { SettingsModal } from "@/components/workspace/settings-modal";
+import { WhatsNewModal } from "@/components/whats-new-modal";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, configured } = useAuth();
@@ -72,6 +73,7 @@ function AppShellFrame({ userId, children }: { userId: string; children: React.R
       </main>
       <SettingsModal />
       <AccountSheet />
+      <WhatsNewModal />
     </div>
   );
 }

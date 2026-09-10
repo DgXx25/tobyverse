@@ -48,7 +48,7 @@ export async function createStudySheet(input: {
   content?: string;
 }): Promise<string> {
   const { blocks, content } = splitNotePayload(input.blocks, input.content ?? "");
-  if (blocks.length === 0 && !content.trim()) {
+  if (blocks.length === 0) {
     throw new Error("Could not save notes.");
   }
   const ref = await addDoc(
@@ -105,6 +105,9 @@ export async function updateStudySheet(
   if (patch.sourceMaterialIds !== undefined) payload.sourceMaterialIds = patch.sourceMaterialIds;
   if (patch.blocks !== undefined || patch.content !== undefined) {
     const { blocks, content } = splitNotePayload(patch.blocks ?? [], patch.content ?? "");
+    if (blocks.length === 0) {
+      throw new Error("Could not save notes.");
+    }
     payload.blocks = blocks;
     payload.content = content;
     payload.schemaVersion = NOTES_SCHEMA_VERSION;

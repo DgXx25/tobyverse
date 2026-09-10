@@ -5,8 +5,8 @@ import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { FREE_CAPS } from "@/lib/account/plan";
-import { deleteAllMemories, deleteMemory, subscribeMemories, updateMemory } from "@/lib/memory/store";
-import { sanitizeMemoryContent } from "@/lib/memory/normalize";
+import { deleteMemory, subscribeMemories } from "@/lib/memory/store";
+import { deleteLearningProfile, subscribeLearningProfile } from "@/lib/memory/profile";
 import type { UserMemory } from "@/types/memory";
 
 export function MemoriesPanel() {
@@ -14,21 +14,20 @@ export function MemoriesPanel() {
   const userId = user?.uid ?? "";
   const [items, setItems] = useState<UserMemory[]>([]);
   const [loading, setLoading] = useState(Boolean(userId));
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profile, setProfile] = useState("");
+  const [confirmClearProfile, setConfirmClearProfile] = useState(false);
+  const [clearingProfile, setClearingProfile] = useState(false);
 
   useEffect(() => {
     if (!userId) {
       setItems([]);
+      setProfile("");
       setLoading(false);
       return;
     }
     setLoading(true);
-    return subscribeMemories(
+    const stopMemories = subscribeMemories(
       userId,
       (next) => {
         setItems(next);
@@ -39,51 +38,37 @@ export function MemoriesPanel() {
         setError("Could not load memories.");
       },
     );
+    const stopProfile = subscribeLearningProfile(
+      userId,
+      (next) => setProfile(next),
+      () => setError("Could not load how you learn."),
+    );
+    return () => {
+      stopMemories();
+      stopProfile();
+    };
   }, [userId]);
-
-  async function saveEdit(memory: UserMemory) {
-    const content = sanitizeMemoryContent(draft);
-    if (!content) {
-      await remove(memory.id);
-      return;
-    }
-    if (content === memory.content) {
-      setEditingId(null);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await updateMemory(userId, memory.id, content);
-      setEditingId(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update memory.");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function remove(id: string) {
     setError(null);
     try {
       await deleteMemory(userId, id);
-      if (editingId === id) setEditingId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete memory.");
     }
   }
 
-  async function clearAll() {
-    setClearing(true);
+  async function clearProfile() {
+    setClearingProfile(true);
     setError(null);
     try {
-      await deleteAllMemories(userId);
-      setConfirmClear(false);
-      setEditingId(null);
+      await deleteLearningProfile(userId);
+      setProfile("");
+      setConfirmClearProfile(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not clear memories.");
+      setError(err instanceof Error ? err.message : "Could not clear how you learn.");
     } finally {
-      setClearing(false);
+      setClearingProfile(false);
     }
   }
 
@@ -93,115 +78,73 @@ export function MemoriesPanel() {
 
   return (
     <div>
-      <p className="text-[15px] leading-7 text-muted">
-        Short facts TobyVerse follows automatically. You can edit or delete any of them.
-      </p>
-      <p className="mt-2 text-[13px] text-muted">
-        {items.length} / {FREE_CAPS.memories} on the free plan
-      </p>
-      {error ? <p className="mt-3 text-[13px] text-red-400">{error}</p> : null}
-
-      <div className="mt-6 divide-y divide-border">
-        {loading && items.length === 0 ? (
-          <p className="py-5 text-[14px] text-muted">Loading…</p>
-        ) : items.length === 0 ? (
-          <p className="py-5 text-[14px] leading-6 text-muted">
-            Nothing stored yet. Preferences and recurring instructions you share in chat will appear here.
-          </p>
+      <section>
+        <h3 className="text-[15px] font-medium text-foreground">How you learn</h3>
+        <p className="mt-1 text-[14px] leading-6 text-muted">
+          One short note Toby uses to teach you — how you like to study, and why you ask.
+        </p>
+        {error ? <p className="mt-3 text-[13px] text-red-400">{error}</p> : null}
+        {profile ? (
+          <>
+            <p className="mt-4 whitespace-pre-wrap text-[15px] leading-6 text-foreground">{profile}</p>
+            <button
+              type="button"
+              onClick={() => setConfirmClearProfile(true)}
+              className="mt-4 rounded-full border border-border px-4 py-1.5 text-[13px] text-foreground hover:bg-surface-2"
+            >
+              Clear
+            </button>
+          </>
         ) : (
-          items.map((item) => {
-            const editing = editingId === item.id;
-            return (
-              <div key={item.id} className="flex items-start gap-3 py-4">
-                <div className="min-w-0 flex-1">
-                  {editing ? (
-                    <textarea
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") setEditingId(null);
-                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                          event.preventDefault();
-                          void saveEdit(item);
-                        }
-                      }}
-                      rows={3}
-                      className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-[14px] leading-6 text-foreground outline-none focus:border-foreground/40"
-                    />
-                  ) : (
-                    <p className="text-[15px] leading-6 text-foreground">{item.content}</p>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-1 pt-0.5">
-                  {editing ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setEditingId(null)}
-                        disabled={saving}
-                        className="rounded-full px-2.5 py-1 text-[13px] text-muted hover:text-foreground"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void saveEdit(item)}
-                        disabled={saving}
-                        className="rounded-full bg-foreground px-3 py-1 text-[13px] font-medium text-background disabled:opacity-50"
-                      >
-                        {saving ? "Saving…" : "Save"}
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingId(item.id);
-                          setDraft(item.content);
-                          setError(null);
-                        }}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-foreground"
-                        aria-label="Edit memory"
-                      >
-                        <UiIcon name="edit" size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void remove(item.id)}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-red-400"
-                        aria-label="Delete memory"
-                      >
-                        <UiIcon name="trash" size={16} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          <p className="mt-4 text-[14px] leading-6 text-muted">
+            Nothing stored yet. How you learn will appear here as you study.
+          </p>
         )}
-      </div>
+      </section>
 
-      {items.length > 0 ? (
-        <button
-          type="button"
-          onClick={() => setConfirmClear(true)}
-          className="mt-4 rounded-full border border-border px-4 py-1.5 text-[13px] text-foreground hover:bg-surface-2"
-        >
-          Clear all memories
-        </button>
-      ) : null}
+      <section className="mt-10">
+        <h3 className="text-[15px] font-medium text-foreground">Response instructions</h3>
+        <p className="mt-1 text-[15px] leading-7 text-muted">
+          How Toby should reply. Not a biography. You can delete any of them.
+        </p>
+        <p className="mt-2 text-[13px] text-muted">
+          {items.length} / {FREE_CAPS.memories} on the free plan
+        </p>
 
-      {confirmClear ? (
+        <div className="mt-6 divide-y divide-border">
+          {loading && items.length === 0 ? (
+            <p className="py-5 text-[14px] text-muted">Loading…</p>
+          ) : items.length === 0 ? (
+            <p className="py-5 text-[14px] leading-6 text-muted">
+              Nothing stored yet. Lasting reply preferences you ask Toby to keep will appear here.
+            </p>
+          ) : (
+            items.map((item) => (
+              <div key={item.id} className="flex items-start gap-3 py-4">
+                <p className="min-w-0 flex-1 text-[15px] leading-6 text-foreground">{item.content}</p>
+                <button
+                  type="button"
+                  onClick={() => void remove(item.id)}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-red-400"
+                  aria-label="Delete memory"
+                >
+                  <UiIcon name="trash" size={16} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {confirmClearProfile ? (
         <ConfirmDialog
-          title="Clear all memories?"
-          description="TobyVerse will forget these facts. This cannot be undone."
-          confirmLabel="Clear all"
-          pending={clearing}
+          title="Clear how you learn?"
+          description="TobyVerse will forget this learning note. Response instructions are kept. This cannot be undone."
+          confirmLabel="Clear"
+          pending={clearingProfile}
           error={error}
-          onConfirm={() => void clearAll()}
-          onCancel={() => setConfirmClear(false)}
+          onConfirm={() => void clearProfile()}
+          onCancel={() => setConfirmClearProfile(false)}
         />
       ) : null}
     </div>

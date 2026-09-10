@@ -1,17 +1,15 @@
 import type { ChatMode } from "@/types/chat";
 import type { ProjectGoal } from "@/types/goals";
 
-const SOCRATIC_GOALS: ProjectGoal[] = ["exam_prep", "practice", "deep_understanding"];
-
-export function preferredChatModeForGoal(goal: ProjectGoal): ChatMode {
-  return SOCRATIC_GOALS.includes(goal) ? "socratic" : "normal";
+export function preferredChatModeForGoal(_goal: ProjectGoal): ChatMode {
+  return "normal";
 }
 
 export const CHAT_MODE_INSTRUCTIONS: Record<ChatMode, string> = {
   normal:
-    "Answer clearly and completely. You may give final answers when the student asks for them.",
+    "Answer clearly. If they name a topic, teach it. Do not interview them or bounce the topic back as a question.",
   socratic:
-    "Hint mode. Never give the final answer. Ask a guiding question or give the smallest possible hint so the student can solve it themselves. Especially while solving problems, withhold the solution.",
+    "Teach by default. If they name a topic or ask what something is, explain it. Only hint — do not withhold the idea — when they are mid-problem and clearly trying to solve it themselves.",
 };
 
 export function chatSystemInstruction(mode: ChatMode, extra?: string): string {

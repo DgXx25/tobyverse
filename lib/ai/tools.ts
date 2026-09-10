@@ -56,7 +56,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "answer",
     description:
-      "Ordinary question, including short facts. Write the reply as message text in the user's language. Follow the latest topic. No chips. Do not create a set or notes.",
+      "Default. A topic name or ordinary question: write the explanation in the user's language. Never reply by asking what the topic is. No chips. Do not create a set or notes.",
     parameters: { type: "object", properties: {} },
   },
   {
@@ -133,7 +133,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "create_sheet",
     description:
-      "User asked for notes (კონსპექტი / დამიკონსპექტე), or answered a notes clarify. Create visual blocks (compare_vs, formula_card, steps, term_card). formula_card only for real math, never Georgian prose. One short chat line plus the card. Never a textbook in chat.",
+      "User asked for notes (კონსპექტი / დამიკონსპექტე), or answered a notes clarify. Always call this instead of writing the notes in chat. The generator builds visual blocks. One short chat line plus the card.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Specific sheet topic." } },
@@ -144,7 +144,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "edit_sheet",
     description:
-      "Rewrite the current notes as visual blocks (compare_vs, formula_card, steps). Keep the same id. Never dump essays into chat or into rounded article cards.",
+      "Rewrite the current notes as a conspectus of visual blocks (section, formula_card, diagram, compare_vs only for mix-ups). Keep the same id. Never dump the notes into chat.",
     parameters: {
       type: "object",
       properties: {

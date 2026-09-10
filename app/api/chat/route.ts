@@ -6,9 +6,9 @@ import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
 import { parseChatArtifact } from "@/lib/artifacts/active";
-import { fallbackChatTool, gateChatTool } from "@/lib/composer/intent";
+import { fallbackChatTool, forcedCreateTool, gateChatTool } from "@/lib/composer/intent";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
-import { asMemoryFacts } from "@/lib/memory/normalize";
+import { asMemoryFacts, sanitizePersonalization } from "@/lib/memory/normalize";
 import { CHAT_MODES, type ChatArtifact, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
 
 export const runtime = "nodejs";
@@ -101,6 +101,7 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     pendingTopic: typeof row.pendingTopic === "string" ? row.pendingTopic.trim() || undefined : undefined,
     pendingKind: row.pendingKind === "sheet" ? "sheet" : row.pendingKind === "practice" ? "practice" : row.pendingKind === "images" ? "images" : undefined,
     memories: asMemoryFacts(row.memories, FREE_CAPS.memories),
+    personalization: sanitizePersonalization(row.personalization) || undefined,
   };
 }
 
@@ -167,6 +168,7 @@ function gateFromContext(
     pendingTopic: context.pendingTopic,
     pendingKind: context.pendingKind,
     active: context.activeArtifact,
+    accepted: context.acceptedTool,
     keywordFallback,
   });
 }
@@ -226,7 +228,7 @@ export async function POST(request: Request) {
   }
   const context = asContext(body.context, mode);
   const guestContext = session.anonymous
-    ? { ...context, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [] }
+    ? { ...context, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
     : context;
   const systemInstruction = buildChatSystemPrompt(guestContext);
 
@@ -241,6 +243,34 @@ export async function POST(request: Request) {
         const supportsTools = Boolean(getAIProvider().generateToolStream) && !guestContext.acceptedTool;
         let providerReturnedTool = Boolean(raw);
         let toolSent = false;
+
+        let forced = forcedCreateTool({
+          prompt,
+          hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
+          confirmed: guestContext.confirmed,
+          priorClarify: guestContext.priorClarify,
+          pendingTopic: guestContext.pendingTopic,
+          pendingKind: guestContext.pendingKind,
+          accepted: guestContext.acceptedTool,
+        });
+        if (session.anonymous && forced) {
+          forced = gateGuestChatTool(forced);
+          if (forced.name === "answer") forced = null;
+        }
+        if (forced && (forced.name === "create_sheet" || forced.name === "create_practice")) {
+          controller.enqueue(encodeSse({ tool: forced }));
+          controller.enqueue(encodeSse({ done: true }));
+          controller.close();
+          return;
+        }
+        if (forced?.name === "clarify") {
+          const question = forced.args.question?.trim();
+          if (question) controller.enqueue(encodeSse({ delta: question }));
+          controller.enqueue(encodeSse({ tool: forced }));
+          controller.enqueue(encodeSse({ done: true }));
+          controller.close();
+          return;
+        }
 
         if (supportsTools) {
           for await (const part of generateToolStream(prompt, {

@@ -12,10 +12,10 @@ function kindIcon(kind: ChatArtifact["kind"]) {
 function subtitleFor(artifact: ChatArtifact): string | null {
   const count = artifact.count ?? artifact.ids?.length;
   if (artifact.kind === "practice") {
-    return count ? `${count} კითხვა` : null;
+    return count ? `${count} questions` : null;
   }
   if (artifact.kind === "sheet" || artifact.kind === "plan") {
-    return count ? `${count} ბლოკი` : null;
+    return count ? `${count} blocks` : null;
   }
   return count ? `${count}` : null;
 }

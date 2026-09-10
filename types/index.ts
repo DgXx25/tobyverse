@@ -54,8 +54,8 @@ export {
 } from "@/types/exercise";
 export type { Material, MaterialChunk, MaterialStatus, MaterialType } from "@/types/material";
 export { MATERIAL_TYPES } from "@/types/material";
-export type { StudySheet } from "@/types/study-sheet";
-export type { VisualBlock, VisualType, NoteBlock, CatalogKind, CatalogRef, ExerciseVisual } from "@/types/visual";
+export type { StudySheet, NotesLiveState } from "@/types/study-sheet";
+export type { VisualBlock, VisualType, NoteBlock, CatalogKind, CatalogRef, ExerciseVisual, EmbedKind } from "@/types/visual";
 export { VISUAL_TYPES } from "@/types/visual";
 export type {
   ExerciseAttempt,

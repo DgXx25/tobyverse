@@ -94,8 +94,15 @@ const TOPIC_STRIP = [
   "practice",
   "quiz",
   "შემომაჯამე",
+  "შემაჯამე",
   "study sheet",
   "summarize",
+  "შექმენი",
+  "დამიწერე",
+  "დაწერე",
+  "გააკეთე",
+  "write me",
+  "create",
   "გაამარტივე",
   "შეამოკლე",
   "simplify",
@@ -335,6 +342,63 @@ function createToolForPending(pendingKind?: PendingKind | null, askedSheet?: boo
   return askedSheet || pendingKind === "sheet" ? "create_sheet" : "create_practice";
 }
 
+export function sheetClarifyQuestion(prompt: string): string {
+  return promptIsKa(prompt) ? "რა თემის კონსპექტი გინდა?" : "What should I take notes on?";
+}
+
+export function practiceClarifyQuestion(prompt: string): string {
+  return promptIsKa(prompt) ? "რაზე გავაკეთო ვარჯიში?" : "What should we practice?";
+}
+
+export function acceptedToolFromIntent(intent?: ComposerIntent | null): "create_practice" | "create_sheet" | undefined {
+  if (intent === "study") return "create_sheet";
+  if (intent === "practice") return "create_practice";
+  return undefined;
+}
+
+/** Create notes/practice without waiting for the model. The chat LLM must not write the artifact as text. */
+export function forcedCreateTool(input: {
+  prompt: string;
+  hasMaterials?: boolean;
+  confirmed?: boolean;
+  priorClarify?: boolean;
+  pendingTopic?: string | null;
+  pendingKind?: PendingKind | null;
+  accepted?: "create_practice" | "create_sheet";
+}): ChatToolCall | null {
+  const prompt = input.prompt;
+  const askedPractice = PRACTICE_HINT.test(prompt);
+  const askedSheet = SHEET_HINT.test(prompt);
+  if (wantsImages(prompt) && !askedPractice && !askedSheet) return null;
+
+  const wantsSheetCreate =
+    askedSheet ||
+    input.accepted === "create_sheet" ||
+    (Boolean(input.priorClarify) && input.pendingKind === "sheet");
+  const wantsPracticeCreate =
+    askedPractice ||
+    input.accepted === "create_practice" ||
+    (Boolean(input.priorClarify) && input.pendingKind === "practice");
+  if (!wantsSheetCreate && !wantsPracticeCreate) return null;
+
+  const name: "create_sheet" | "create_practice" = wantsSheetCreate ? "create_sheet" : "create_practice";
+  const topic = mergePracticeTopic(extractTopic(prompt), input.pendingTopic);
+  const { ready } = assessCreateReady({
+    topic: topic ?? null,
+    prompt,
+    hasMaterials: input.hasMaterials,
+    confirmed: input.confirmed,
+    priorClarify: input.priorClarify,
+  });
+  if (!ready) {
+    return {
+      name: "clarify",
+      args: { question: name === "create_sheet" ? sheetClarifyQuestion(prompt) : practiceClarifyQuestion(prompt) },
+    };
+  }
+  return { name, args: { topic: topic ?? undefined } };
+}
+
 /** Tiny keyword fallback if the provider returned no tool. Not the main router. */
 export function fallbackChatTool(input: {
   prompt: string;
@@ -393,21 +457,14 @@ export function fallbackChatTool(input: {
     }
     return { name: "search_images", args: { query: prompt.trim() } };
   }
-  const createFlow = Boolean(
-    input.pendingKind !== "images" && (input.priorClarify || input.pendingKind || askedPractice || askedSheet),
-  );
-  if (input.priorClarify && !looksLikeQuestion(prompt) && input.pendingKind !== "images") {
-    return {
-      name: createToolForPending(input.pendingKind, askedSheet),
-      args: { topic: mergePracticeTopic(extractTopic(prompt), input.pendingTopic) },
-    };
-  }
-  if (wantsImmediateCreate(prompt) && createFlow) {
-    return {
-      name: createToolForPending(input.pendingKind, askedSheet),
-      args: { topic: mergePracticeTopic(extractTopic(prompt), input.pendingTopic) },
-    };
-  }
+  const forced = forcedCreateTool({
+    prompt,
+    priorClarify: input.priorClarify,
+    pendingTopic: input.pendingTopic,
+    pendingKind: input.pendingKind,
+    accepted: input.accepted,
+  });
+  if (forced) return forced;
   return { name: "answer", args: {} };
 }
 
@@ -425,6 +482,7 @@ export function gateChatTool(input: {
   pendingTopic?: string | null;
   pendingKind?: PendingKind | null;
   active?: { kind: string; id: string } | null;
+  accepted?: "create_practice" | "create_sheet";
   /** Keywords may create only when the provider returned plain text (no tool). */
   keywordFallback?: boolean;
 }): ChatToolCall {
@@ -443,7 +501,13 @@ export function gateChatTool(input: {
   const askedPractice = PRACTICE_HINT.test(prompt);
   const askedSheet = SHEET_HINT.test(prompt);
   const askedImages = wantsImages(prompt) && !askedPractice && !askedSheet;
-  const factQuestion = looksLikeQuestion(prompt) && !askedPractice && !askedSheet && !askedImages && !input.confirmed;
+  const factQuestion =
+    looksLikeQuestion(prompt) &&
+    !askedPractice &&
+    !askedSheet &&
+    !askedImages &&
+    !input.confirmed &&
+    !input.priorClarify;
 
   if (input.priorClarify && pendingKind === "images") {
     return {
@@ -480,7 +544,29 @@ export function gateChatTool(input: {
     return { name: "search_images", args: { query, count: tool.args.count } };
   }
 
+  const forced = forcedCreateTool({
+    prompt,
+    hasMaterials: input.hasMaterials,
+    confirmed: input.confirmed,
+    priorClarify: input.priorClarify,
+    pendingTopic: input.pendingTopic,
+    pendingKind,
+    accepted: input.accepted,
+  });
+  if (forced) return forced;
+
   if (factQuestion && (isCreateTool(tool.name) || tool.name === "clarify")) {
+    return { name: "answer", args: {} };
+  }
+
+  if (
+    tool.name === "clarify" &&
+    !askedPractice &&
+    !askedSheet &&
+    !askedImages &&
+    !input.priorClarify &&
+    !input.confirmed
+  ) {
     return { name: "answer", args: {} };
   }
 

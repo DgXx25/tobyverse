@@ -1,10 +1,12 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import "katex/dist/katex.min.css";
 import { parseVisualBlock } from "@/lib/visuals/validate";
 import { VisualBlockView } from "@/components/visuals/visual-block";
+import { MixedText, withInlineRich } from "@/components/visuals/mixed-text";
 import type { VisualBlock } from "@/types/visual";
 
 type Segment =
@@ -50,24 +52,52 @@ function mdChunks(text: string): string[] {
   return parts.length ? parts : [text];
 }
 
+function RichChildren({ children }: { children: ReactNode }) {
+  return <>{withInlineRich(children)}</>;
+}
+
 const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        p: ({ children }) => <p>{children}</p>,
-        h1: ({ children }) => <h1>{children}</h1>,
-        h2: ({ children }) => <h2>{children}</h2>,
-        h3: ({ children }) => <h3>{children}</h3>,
+        p: ({ children }) => (
+          <p>
+            <RichChildren>{children}</RichChildren>
+          </p>
+        ),
+        h1: ({ children }) => (
+          <h1>
+            <RichChildren>{children}</RichChildren>
+          </h1>
+        ),
+        h2: ({ children }) => (
+          <h2>
+            <RichChildren>{children}</RichChildren>
+          </h2>
+        ),
+        h3: ({ children }) => (
+          <h3>
+            <RichChildren>{children}</RichChildren>
+          </h3>
+        ),
         ul: ({ children }) => <ul>{children}</ul>,
         ol: ({ children }) => <ol>{children}</ol>,
-        li: ({ children }) => <li>{children}</li>,
+        li: ({ children }) => (
+          <li>
+            <RichChildren>{children}</RichChildren>
+          </li>
+        ),
         blockquote: ({ children }) => (
-          <blockquote className="my-3 border-l border-border pl-3 text-muted">{children}</blockquote>
+          <blockquote className="note-highlight my-3 px-3.5 py-2.5">{children}</blockquote>
         ),
         code: ({ className, children }) => {
           const inline = !className;
+          const raw = String(children);
           if (inline) {
+            if (raw.startsWith("$") || /[=\\^_]/.test(raw)) {
+              return <MixedText text={raw.includes("$") ? raw : `$${raw}$`} />;
+            }
             return <code>{children}</code>;
           }
           return <code className="block overflow-x-auto font-mono text-[12px] leading-5">{children}</code>;
@@ -81,14 +111,31 @@ const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
           </div>
         ),
         thead: ({ children }) => <thead className="text-muted">{children}</thead>,
-        th: ({ children }) => <th className="border-b border-border font-medium">{children}</th>,
-        td: ({ children }) => <td className="border-b border-border/70">{children}</td>,
+        th: ({ children }) => (
+          <th className="border-b border-border font-medium">
+            <RichChildren>{children}</RichChildren>
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="border-b border-border/70">
+            <RichChildren>{children}</RichChildren>
+          </td>
+        ),
         a: ({ href, children }) => (
           <a href={href} className="underline decoration-border underline-offset-2 hover:text-foreground">
             {children}
           </a>
         ),
-        strong: ({ children }) => <strong>{children}</strong>,
+        strong: ({ children }) => (
+          <strong>
+            <RichChildren>{children}</RichChildren>
+          </strong>
+        ),
+        em: ({ children }) => (
+          <em>
+            <RichChildren>{children}</RichChildren>
+          </em>
+        ),
       }}
     >
       {text}

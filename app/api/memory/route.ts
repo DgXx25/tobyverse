@@ -2,8 +2,8 @@ import { z } from "zod";
 import { generateJson } from "@/lib/ai/json";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { FREE_CAPS } from "@/lib/account/plan";
-import { MEMORY_OPS_PER_TURN } from "@/lib/memory/constants";
-import { asMemoryFacts, parseMemoryOps } from "@/lib/memory/normalize";
+import { PERSONALIZATION_MAX } from "@/lib/memory/constants";
+import { asMemoryFacts, parseMemoryOps, parsePersonalizationPatch, sanitizePersonalization } from "@/lib/memory/normalize";
 import { MEMORY_EXTRACT_SYSTEM, memoryExtractPrompt } from "@/lib/memory/prompt";
 import type { ChatTurn } from "@/types/chat";
 
@@ -19,7 +19,8 @@ const extractSchema = z.object({
         content: z.string().optional(),
       }),
     )
-    .max(MEMORY_OPS_PER_TURN),
+    .max(4),
+  personalization: z.string().max(PERSONALIZATION_MAX).nullable().optional(),
 });
 
 function asHistory(value: unknown): ChatTurn[] {
@@ -43,10 +44,10 @@ export async function POST(request: Request) {
   }
 
   if (session.anonymous) {
-    return Response.json({ operations: [] });
+    return Response.json({ operations: [], personalization: null });
   }
 
-  let body: { prompt?: unknown; memories?: unknown; history?: unknown };
+  let body: { prompt?: unknown; memories?: unknown; history?: unknown; personalization?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -55,20 +56,24 @@ export async function POST(request: Request) {
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) {
-    return Response.json({ operations: [] });
+    return Response.json({ operations: [], personalization: null });
   }
 
   const memories = asMemoryFacts(body.memories, FREE_CAPS.memories);
+  const personalization = sanitizePersonalization(body.personalization);
   const result = await generateJson(
-    memoryExtractPrompt({ prompt, memories, history: asHistory(body.history) }),
+    memoryExtractPrompt({ prompt, memories, personalization, history: asHistory(body.history) }),
     extractSchema,
     { systemInstruction: MEMORY_EXTRACT_SYSTEM },
   );
 
   if (!result.ok) {
-    return Response.json({ operations: [] });
+    return Response.json({ operations: [], personalization: null });
   }
 
   const known = new Set(memories.map((item) => item.id));
-  return Response.json({ operations: parseMemoryOps(result.data, known) });
+  return Response.json({
+    operations: parseMemoryOps(result.data, known),
+    personalization: parsePersonalizationPatch(result.data, personalization) ?? null,
+  });
 }

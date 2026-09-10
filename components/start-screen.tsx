@@ -189,7 +189,6 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
         prompt,
         attachments: guest ? [] : attachments,
         intent: guest ? undefined : activeMode?.intent,
-        onPhase: (phase) => setIngestPhase(phase === "uploading" ? "uploading" : null),
       });
       if (!id) throw new Error("Could not start.");
       setDraft("");

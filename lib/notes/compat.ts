@@ -50,6 +50,14 @@ export function collectNoteProse(data: Record<string, unknown>): { content: stri
 }
 
 export function readNoteSchemaVersion(raw: unknown, hasBlocks: boolean): NoteSchemaVersion {
+  if (raw === 10 || raw === "10") return 10;
+  if (raw === 9 || raw === "9") return 9;
+  if (raw === 8 || raw === "8") return 8;
+  if (raw === 7 || raw === "7") return 7;
+  if (raw === 6 || raw === "6") return 6;
+  if (raw === 5 || raw === "5") return 5;
+  if (raw === 4 || raw === "4") return 4;
+  if (raw === 3 || raw === "3") return 3;
   if (raw === 2 || raw === "2") return 2;
   if (raw === 1 || raw === "1") return 1;
   return hasBlocks ? 2 : 1;

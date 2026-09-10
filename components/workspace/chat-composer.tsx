@@ -347,7 +347,7 @@ export const ChatComposer = forwardRef<
                 </span>
                 <span className="min-w-0 truncate text-foreground">{chip.title}</span>
                 {chip.status === "uploading" ? (
-                  <span className="shrink-0 whitespace-nowrap text-muted">იტვირთება…</span>
+                  <span className="shrink-0 whitespace-nowrap text-muted">Uploading…</span>
                 ) : chip.size ? (
                   <span className="shrink-0 whitespace-nowrap text-muted">{formatBytes(chip.size)}</span>
                 ) : null}
