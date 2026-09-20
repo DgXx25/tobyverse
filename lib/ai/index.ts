@@ -17,6 +17,7 @@ export {
 export {
   CHAT_TOOL_DEFINITIONS,
   CHAT_TOOLS,
+  INTERCEPT_ONLY_CHAT_TOOLS,
   toAnthropicTools,
   toOpenAITools,
   type ChatToolCall,

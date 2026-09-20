@@ -57,6 +57,47 @@ export function parsePersonalizationPatch(value: unknown, current: string): stri
   return next === current.trim() ? undefined : next;
 }
 
+const LEARNING_OR_MEMORY_SIGNAL =
+  /remember|never forget|from now on|\balways\b|never (do|use|say|write)|დამიმახსოვრ|დაიმახსოვრ|ყოველთვის|არასდროს|დავიბენ|ვიბენ|მიჭირს|გაამარტივე|confused|overwhelmed|too (hard|abstract|long|fast)|simpler|slower|მაგალით|\bexamples?\b|ცხრილ|\btables?\b|ისტორი|\bstor(y|ies)\b|დამილისტ|don't just list|how I learn|როგორ ვსწავლ|clicked|helped me/i;
+
+const DURABLE_FACT =
+  /მე მქვია|my name is|ვმუშაობ|i work as|i(?:['’]m| am) an?\b|ფინალ.{0,48}(\d|რიცხვ)|exam.{0,24}(\d|on |date)|always (answer|write|reply) in|წერე? ქართულ|preferred language|B[12]\b|C[12]\b|A[12]\b|დონე/i;
+
+function looksLikeQuestionOnly(prompt: string): boolean {
+  const text = prompt.trim();
+  if (/[?؟]\s*$/.test(text)) return true;
+  return /^(რა |როდის |რითი |როგორ |რომელ |why |what |when |how |which )/i.test(text);
+}
+
+/** Notes / practice / path requests have no signal — skip extract so they never show Memorized. */
+export function shouldExtractMemory(prompt: string): boolean {
+  const text = prompt.replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  if (LEARNING_OR_MEMORY_SIGNAL.test(text)) return true;
+  if (looksLikeQuestionOnly(text)) return false;
+  return DURABLE_FACT.test(text);
+}
+
+/** Study-method prefs belong in How you learn, not standing reply instructions. */
+export function isStudyMethodMemory(content: string): boolean {
+  const t = content.trim();
+  if (!t) return false;
+  if (/\b(always|never|from now on)\b/i.test(t) && /\b(answer|reply|respond|language|georgian|english|jargon)\b/i.test(t)) {
+    return false;
+  }
+  return /\b(prefers?|likes?|tables?|examples?|stories|storytelling|confused|simpler|listing|how (they|the student) learn|study style|too (hard|abstract|long)|overwhelmed)\b/i.test(t)
+    || /ცხრილ|მაგალით|ვიბენ|დავიბენ|მიჭირს|როგორ ვსწავლ/.test(t);
+}
+
+export function foldLearningSignal(current: string, signal: string): string {
+  const next = signal.trim();
+  if (!next) return sanitizePersonalization(current);
+  const base = current.trim();
+  if (!base) return sanitizePersonalization(next);
+  if (base.toLowerCase().includes(next.toLowerCase())) return sanitizePersonalization(base);
+  return sanitizePersonalization(`${base} ${next}`);
+}
+
 export function parseMemoryOps(value: unknown, knownIds: Set<string>): MemoryOp[] {
   if (!value || typeof value !== "object") return [];
   const row = value as { operations?: unknown };

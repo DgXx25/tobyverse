@@ -94,6 +94,8 @@ export type CompareVsVisual = {
 export type FormulaCardVisual = {
   type: "formula_card";
   title?: string;
+  /** What the formula is saying, in ordinary words. */
+  text?: string;
   formula: string;
 };
 

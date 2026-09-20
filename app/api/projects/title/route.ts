@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       `User message:\n${prompt.slice(0, 800)}`,
       {
         systemInstruction:
-          "Write a short chat title for a learning app. 3 to 7 words. Same language as the user. No quotes, no period, no emoji. Title only.",
+          "Name what they are learning, not the request. 2 to 5 words. Same language as the user. A full course → the subject. One skill → the skill. One topic → the topic. Never copy the first sentence of the prompt. No quotes, no period, no emoji. Title only.",
       },
     );
     const title = sanitizeChatTitle(raw);

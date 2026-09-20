@@ -8,17 +8,20 @@ import {
   type Part,
 } from "@google/generative-ai";
 import type { ChatTurn } from "@/types/chat";
+import { historyWithoutCurrentPrompt } from "@/lib/composer/memory";
 import type { AIProvider, GenerateOptions } from "@/lib/ai/types";
 import {
   CHAT_TOOL_DEFINITIONS,
+  INTERCEPT_ONLY_CHAT_TOOLS,
   parseToolCall,
   type ChatStreamPart,
+  type ChatToolName,
 } from "@/lib/ai/tools";
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 
 function toContents(prompt: string, history: ChatTurn[] = [], images: GenerateOptions["images"] = []): Content[] {
-  const contents: Content[] = history
+  const contents: Content[] = historyWithoutCurrentPrompt(history, prompt)
     .filter((turn) => turn.content.trim().length > 0)
     .map((turn) => ({
       role: turn.role === "assistant" ? "model" : "user",
@@ -35,8 +38,19 @@ function toContents(prompt: string, history: ChatTurn[] = [], images: GenerateOp
   return contents;
 }
 
-function toGeminiDeclarations(): FunctionDeclaration[] {
-  return CHAT_TOOL_DEFINITIONS.map((def) => {
+const INTERCEPT_ONLY = new Set<ChatToolName>(INTERCEPT_ONLY_CHAT_TOOLS);
+
+function allowedToolNames(tools: GenerateOptions["tools"]): ChatToolName[] | null {
+  if (!tools) return null;
+  if (tools === true) {
+    return CHAT_TOOL_DEFINITIONS.map((def) => def.name).filter((name) => !INTERCEPT_ONLY.has(name));
+  }
+  const names = tools.filter((name) => name !== "answer" && !INTERCEPT_ONLY.has(name));
+  return names.length > 0 ? [...names] : null;
+}
+
+function toGeminiDeclarations(allowed: readonly ChatToolName[]): FunctionDeclaration[] {
+  return CHAT_TOOL_DEFINITIONS.filter((def) => allowed.includes(def.name)).map((def) => {
     const properties: Record<string, FunctionDeclarationSchemaProperty> = {};
     for (const [key, spec] of Object.entries(def.parameters.properties)) {
       if (spec.type === "integer") {
@@ -92,11 +106,14 @@ export class GeminiProvider implements AIProvider {
       throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is not set.");
     }
 
+    const allowed = allowedToolNames(options.tools);
+    const declarations = allowed ? toGeminiDeclarations(allowed) : [];
+    const useTools = declarations.length > 0;
     return new GoogleGenerativeAI(apiKey).getGenerativeModel({
       model: options.model ?? DEFAULT_GEMINI_MODEL,
       systemInstruction: options.systemInstruction,
-      tools: options.tools ? [{ functionDeclarations: toGeminiDeclarations() }] : undefined,
-      toolConfig: options.tools
+      tools: useTools ? [{ functionDeclarations: declarations }] : undefined,
+      toolConfig: useTools
         ? { functionCallingConfig: { mode: FunctionCallingMode.AUTO } }
         : undefined,
       generationConfig: options.json ? { responseMimeType: "application/json" } : undefined,
@@ -130,7 +147,7 @@ export class GeminiProvider implements AIProvider {
   }
 
   async *generateToolStream(prompt: string, options: GenerateOptions = {}): AsyncIterable<ChatStreamPart> {
-    const result = await this.getModel({ ...options, tools: true }).generateContentStream({
+    const result = await this.getModel(options).generateContentStream({
       contents: toContents(prompt, options.history, options.images),
     });
 

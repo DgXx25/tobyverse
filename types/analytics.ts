@@ -12,6 +12,7 @@ export const ANALYTICS_EVENT_TYPES = [
   "study_sheet_opened",
   "material_uploaded",
   "study_sheet_generated",
+  "path_generated",
   "returned_same_day",
   "returned_next_day",
   "time_spent_seconds",

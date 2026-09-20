@@ -9,14 +9,16 @@ import {
   updateDoc,
   type Unsubscribe,
 } from "firebase/firestore";
+import { asChatMode } from "@/lib/core/chat-modes";
 import { DEFAULT_CHAT_THREAD_ID } from "@/lib/core/constants";
 import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { compactChatAttachment } from "@/lib/composer/attach";
+import { stripArtifactMarkup } from "@/lib/composer/memory";
 import { parseChatArtifact, compactChatArtifact } from "@/lib/artifacts/active";
 import { getFirebaseDb } from "@/lib/firebase";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { isComposerIntent } from "@/lib/composer/intent";
-import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole, PendingKind } from "@/types/chat";
+import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole, ChatThread, ChatThreadKind, PendingKind } from "@/types/chat";
 import type { ExerciseType } from "@/types/exercise";
 
 function chatRef(projectId: string, threadId = DEFAULT_CHAT_THREAD_ID) {
@@ -41,7 +43,7 @@ function messagesCollection(projectId: string, threadId = DEFAULT_CHAT_THREAD_ID
 }
 
 function asMode(value: unknown, fallback: ChatMode): ChatMode {
-  return value === "socratic" || value === "normal" ? value : fallback;
+  return asChatMode(value, fallback);
 }
 
 function asRole(value: unknown): ChatRole {
@@ -65,8 +67,11 @@ function mapMessage(
     lessonId: typeof data.lessonId === "string" ? data.lessonId : null,
     exerciseId: typeof data.exerciseId === "string" ? data.exerciseId : null,
     role: asRole(data.role),
-    mode: asMode(data.mode, "normal"),
-    content: asString(data.content),
+    mode: asMode(data.mode, "auto"),
+    content:
+      asRole(data.role) === "user"
+        ? asString(data.content)
+        : stripArtifactMarkup(asString(data.content)),
     attachments: asAttachments(data.attachments),
     relatedExerciseType:
       typeof data.relatedExerciseType === "string"
@@ -74,9 +79,13 @@ function mapMessage(
         : null,
     intent: isComposerIntent(data.intent) ? data.intent : null,
     artifact: asArtifact(data.artifact),
+    promptAsk: asPromptAsk(data.promptAsk),
     options: asOptions(data.options, data.clarify),
     pendingKind:
-      data.pendingKind === "sheet" || data.pendingKind === "practice" || data.pendingKind === "images"
+      data.pendingKind === "sheet" ||
+      data.pendingKind === "practice" ||
+      data.pendingKind === "images" ||
+      data.pendingKind === "path"
         ? data.pendingKind
         : undefined,
     images: asImages(data.images),
@@ -106,6 +115,17 @@ function asOptions(value: unknown, clarify: unknown): string[] | undefined {
   }
   if (clarify === true) return [];
   return undefined;
+}
+
+function asPromptAsk(value: unknown): ChatMessage["promptAsk"] {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const question = typeof row.question === "string" ? row.question.trim() : "";
+  if (!question) return undefined;
+  const options = Array.isArray(row.options)
+    ? row.options.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+    : undefined;
+  return { question, options: options?.length ? options : undefined };
 }
 
 function asImages(value: unknown): ChatImageHit[] | undefined {
@@ -147,23 +167,104 @@ function asArtifact(value: unknown): ChatArtifact | null {
   return parseChatArtifact(value);
 }
 
+export function pathThreadId(pathId: string): string {
+  return `path-${pathId}`;
+}
+
+export function pathThreadTitle(path: { title?: string; kind?: string }): string {
+  const title = (path.title || "").trim() || "გეგმა";
+  return path.kind === "review" ? `გამეორება: ${title}` : `გეგმა: ${title}`;
+}
+
+function asThreadKind(value: unknown): ChatThreadKind {
+  return value === "path" || value === "practice" ? value : "main";
+}
+
+function mapThread(id: string, projectId: string, data: Record<string, unknown>): ChatThread {
+  return {
+    id,
+    projectId,
+    userId: asString(data.userId),
+    lessonId: typeof data.lessonId === "string" ? data.lessonId : null,
+    exerciseId: typeof data.exerciseId === "string" ? data.exerciseId : null,
+    mode: asMode(data.mode, "auto"),
+    kind: asThreadKind(data.kind ?? (id === DEFAULT_CHAT_THREAD_ID ? "main" : undefined)),
+    title: typeof data.title === "string" ? data.title : undefined,
+    pathId: typeof data.pathId === "string" ? data.pathId : null,
+    createdAt: toIsoDate(data.createdAt),
+    updatedAt: toIsoDate(data.updatedAt) ?? toIsoDate(data.createdAt),
+  };
+}
+
+function threadsCollection(projectId: string) {
+  return collection(getFirebaseDb(), COLLECTIONS.projects, projectId, COLLECTIONS.chats);
+}
+
 export async function ensureChatThread(input: {
   projectId: string;
   userId: string;
   mode: ChatMode;
+  threadId?: string;
+  kind?: ChatThreadKind;
+  title?: string;
+  pathId?: string | null;
 }): Promise<void> {
+  const threadId = input.threadId ?? DEFAULT_CHAT_THREAD_ID;
+  const kind = input.kind ?? (threadId === DEFAULT_CHAT_THREAD_ID ? "main" : "path");
   await setDoc(
-    chatRef(input.projectId),
-    {
+    chatRef(input.projectId, threadId),
+    omitUndefined({
       projectId: input.projectId,
       userId: input.userId,
       lessonId: null,
       exerciseId: null,
       mode: input.mode,
+      kind,
+      title: input.title,
+      pathId: input.pathId ?? null,
       updatedAt: serverTimestamp(),
-    },
+    }),
     { merge: true },
   );
+}
+
+export async function listChatThreads(projectId: string): Promise<ChatThread[]> {
+  const snapshot = await getDocs(threadsCollection(projectId));
+  return snapshot.docs
+    .map((item) => mapThread(item.id, projectId, item.data()))
+    .sort((a, b) => {
+      if (a.id === DEFAULT_CHAT_THREAD_ID) return -1;
+      if (b.id === DEFAULT_CHAT_THREAD_ID) return 1;
+      return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
+    });
+}
+
+export function subscribeChatThreads(
+  projectId: string,
+  onChange: (threads: ChatThread[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    threadsCollection(projectId),
+    (snapshot) => {
+      const threads = snapshot.docs
+        .map((item) => mapThread(item.id, projectId, item.data()))
+        .sort((a, b) => {
+          if (a.id === DEFAULT_CHAT_THREAD_ID) return -1;
+          if (b.id === DEFAULT_CHAT_THREAD_ID) return 1;
+          return (a.createdAt ?? a.updatedAt ?? "").localeCompare(b.createdAt ?? b.updatedAt ?? "");
+        });
+      onChange(threads);
+    },
+    (error) => onError?.(error),
+  );
+}
+
+export async function deleteAllChatThreads(projectId: string): Promise<void> {
+  const threads = await listChatThreads(projectId);
+  const ids = new Set(threads.map((item) => item.id));
+  ids.add(DEFAULT_CHAT_THREAD_ID);
+  await Promise.all([...ids].map((id) => deleteChatMessages(projectId, id)));
 }
 
 export async function setChatThreadMode(
@@ -199,6 +300,7 @@ export async function addChatMessage(input: {
   artifact?: ChatArtifact | null;
   attachments?: ChatAttachment[];
   options?: string[];
+  promptAsk?: ChatMessage["promptAsk"];
   pendingKind?: PendingKind;
   images?: ChatImageHit[];
   memorized?: boolean;
@@ -222,7 +324,8 @@ export async function addChatMessage(input: {
       exerciseId: null,
       role: input.role,
       mode: input.mode,
-      content: input.content,
+      content:
+        input.role === "assistant" ? stripArtifactMarkup(input.content) : input.content,
       attachments,
       intent: input.intent ?? null,
       artifact: compactChatArtifact(input.artifact),
@@ -230,6 +333,7 @@ export async function addChatMessage(input: {
       createdAt: createdAtClient,
       createdAtClient,
       ...(input.options !== undefined ? { options: input.options, clarify: true } : {}),
+      ...(input.promptAsk ? { promptAsk: input.promptAsk } : {}),
       ...(input.pendingKind ? { pendingKind: input.pendingKind } : {}),
       ...(images !== undefined ? { images } : {}),
       ...(input.memorized ? { memorized: true } : {}),
@@ -250,7 +354,7 @@ export async function patchChatMessage(
   threadId = DEFAULT_CHAT_THREAD_ID,
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
-  if (patch.content !== undefined) payload.content = patch.content;
+  if (patch.content !== undefined) payload.content = stripArtifactMarkup(patch.content);
   if (patch.images !== undefined) payload.images = patch.images.map((item) => omitUndefined(item));
   if (patch.attachments !== undefined) {
     payload.attachments = patch.attachments.flatMap((item) => {

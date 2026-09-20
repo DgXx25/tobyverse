@@ -1,5 +1,12 @@
-import { englishImageQuery, expandEnglishImageQuery } from "@/lib/images/query";
-import { IMAGE_SEARCH_DEFAULT, IMAGE_SEARCH_MAX, type ImageSearchHit } from "@/lib/images/types";
+import { expandEnglishImageQuery, pickImageHits, planImageSearch, type ImageSearchPlan } from "@/lib/images/query";
+import {
+  IMAGE_PREVIEW_WIDTH,
+  IMAGE_SEARCH_DEFAULT,
+  IMAGE_SEARCH_MAX,
+  IMAGE_THUMB_WIDTH,
+  snapWikiThumbUrl,
+  type ImageSearchHit,
+} from "@/lib/images/types";
 
 export type { ImageSearchHit } from "@/lib/images/types";
 export { IMAGE_SEARCH_DEFAULT, IMAGE_SEARCH_MAX } from "@/lib/images/types";
@@ -82,13 +89,40 @@ function cleanUrl(url: string): string {
   }
 }
 
+function wikiFileName(title: string, url: string): string {
+  const fromTitle = title.replace(/^File:/i, "").trim();
+  if (fromTitle) return fromTitle.replace(/ /g, "_");
+  try {
+    const file = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+    return file.replace(/ /g, "_");
+  } catch {
+    return "";
+  }
+}
+
+function wikiThumbUrl(file: string, width: number): string {
+  return `https://commons.wikimedia.org/w/thumb.php?f=${encodeURIComponent(file)}&width=${width}`;
+}
+
+function sizedWikiThumb(apiThumb: string, width: number): string {
+  const snapped = snapWikiThumbUrl(`/${width}px-`);
+  const step = snapped.match(/\/(\d+)px-/)?.[1] ?? String(width);
+  const resized = apiThumb.replace(/\/\d+px-/, `/${step}px-`);
+  return isHttps(resized) ? resized : "";
+}
+
 function asHit(input: { url?: string; thumbnail?: string; alt?: string; source: string; fallbackAlt: string }): ImageSearchHit | null {
-  const url = cleanUrl((input.url || "").trim());
-  const thumbnail = cleanUrl((input.thumbnail || "").trim() || url);
+  const original = cleanUrl((input.url || "").trim());
+  const rawThumb = cleanUrl((input.thumbnail || "").trim() || original);
+  if (!isHttps(original) && !isHttps(rawThumb)) return null;
+  const raster = (url: string, fallback: string) => (/\.svg(\?|#|$)/i.test(url) ? fallback || url : url);
+  const thumbnail = raster(isHttps(rawThumb) ? rawThumb : original, original);
+  const url = raster(isHttps(original) ? original : thumbnail, thumbnail);
   if (!isHttps(url) || !isHttps(thumbnail)) return null;
+  if (/\.svg(\?|#|$)/i.test(url) || /\.svg(\?|#|$)/i.test(thumbnail)) return null;
   return {
-    url,
-    thumbnail,
+    url: snapWikiThumbUrl(url),
+    thumbnail: snapWikiThumbUrl(thumbnail),
     alt: (input.alt || "").trim() || input.fallbackAlt,
     source: input.source,
   };
@@ -171,7 +205,7 @@ async function searchWikimedia(query: string, count: number): Promise<ProviderHi
   url.searchParams.set("gsrlimit", String(count));
   url.searchParams.set("prop", "imageinfo");
   url.searchParams.set("iiprop", "url|mime");
-  url.searchParams.set("iiurlwidth", "400");
+  url.searchParams.set("iiurlwidth", String(IMAGE_PREVIEW_WIDTH));
   const fetched = await fetchJson(url.toString());
   if (!fetched.ok) return { hits: [], ok: false };
   const data = fetched.data as {
@@ -190,9 +224,16 @@ async function searchWikimedia(query: string, count: number): Promise<ProviderHi
       const mime = typeof info?.mime === "string" ? info.mime : "";
       if (mime && !mime.startsWith("image/")) return [];
       const title = typeof page.title === "string" ? page.title.replace(/^File:/i, "") : "";
+      const original = typeof info?.url === "string" ? info.url : "";
+      const apiThumb = typeof info?.thumburl === "string" ? info.thumburl : "";
+      const file = wikiFileName(title, original);
+      if (!file) return [];
+      const preview = apiThumb || wikiThumbUrl(file, IMAGE_PREVIEW_WIDTH);
+      const thumbnail =
+        sizedWikiThumb(apiThumb, IMAGE_THUMB_WIDTH) || wikiThumbUrl(file, IMAGE_THUMB_WIDTH);
       const hit = asHit({
-        url: typeof info?.url === "string" ? info.url : "",
-        thumbnail: typeof info?.thumburl === "string" ? info.thumburl : "",
+        url: preview || thumbnail,
+        thumbnail: thumbnail || preview,
         alt: title,
         source: "wikimedia",
         fallbackAlt: query,
@@ -219,8 +260,8 @@ async function searchOpenverse(query: string, count: number): Promise<ProviderHi
       const imageUrl = typeof item.url === "string" ? item.url : "";
       const thumb = typeof item.thumbnail === "string" ? item.thumbnail : "";
       const hit = asHit({
-        url: imageUrl,
-        thumbnail: imageUrl || thumb,
+        url: thumb || imageUrl,
+        thumbnail: thumb || imageUrl,
         alt: typeof item.title === "string" ? item.title : "",
         source: "openverse",
         fallbackAlt: query,
@@ -289,11 +330,10 @@ async function searchPexels(query: string, count: number): Promise<ProviderHits>
     ok: true,
     hits: data.photos.flatMap((photo) => {
       const large = typeof photo.src?.large === "string" ? photo.src.large : "";
-      const original = typeof photo.src?.original === "string" ? photo.src.original : "";
       const medium = typeof photo.src?.medium === "string" ? photo.src.medium : "";
       const tiny = typeof photo.src?.tiny === "string" ? photo.src.tiny : "";
       const hit = asHit({
-        url: large || original || medium,
+        url: medium || large,
         thumbnail: medium || tiny || large,
         alt: typeof photo.alt === "string" ? photo.alt : "",
         source: "pexels",
@@ -331,7 +371,7 @@ async function searchPixabay(query: string, count: number): Promise<ProviderHits
       const web = typeof item.webformatURL === "string" ? item.webformatURL : "";
       const preview = typeof item.previewURL === "string" ? item.previewURL : "";
       const hit = asHit({
-        url: large || web,
+        url: web || large,
         thumbnail: web || preview || large,
         alt: typeof item.tags === "string" ? item.tags : "",
         source: "pixabay",
@@ -342,61 +382,69 @@ async function searchPixabay(query: string, count: number): Promise<ProviderHits
   };
 }
 
-async function searchProviders(query: string, count: number): Promise<ImageSearchHit[]> {
+async function searchProviders(plan: ImageSearchPlan, keep: number): Promise<ImageSearchHit[]> {
+  const fetchCount = Math.min(20, Math.max(12, keep * 2));
   let hits: ImageSearchHit[] = [];
   let anyOk = false;
 
-  const wiki = await searchWikimedia(query, count);
+  const wiki = await searchWikimedia(plan.query, fetchCount);
   anyOk = anyOk || wiki.ok;
-  hits = mergeHits(hits, wiki.hits, count);
+  hits = pickImageHits(wiki.hits, plan, keep);
+  if (hits.length >= 3) return hits;
 
-  if (hits.length < count) {
-    const openverse = await searchOpenverse(query, count);
-    anyOk = anyOk || openverse.ok;
-    hits = mergeHits(hits, openverse.hits, count);
+  const simple = plan.must.filter((word) => word.length > 3).slice(0, 3).join(" ");
+  if (simple && simple !== plan.query) {
+    const wikiSimple = await searchWikimedia(simple, fetchCount);
+    anyOk = anyOk || wikiSimple.ok;
+    hits = mergeHits(hits, pickImageHits(wikiSimple.hits, plan, keep), keep);
+    if (hits.length >= 3) return hits;
   }
 
-  if (hits.length < count) {
-    const google = await searchGoogleImages(query, count);
+  const openverse = await searchOpenverse(plan.query, fetchCount);
+  anyOk = anyOk || openverse.ok;
+  hits = pickImageHits(mergeHits(hits, openverse.hits, fetchCount), plan, keep);
+  if (hits.length >= 2) return hits;
+
+  if (hits.length === 0) {
+    const google = await searchGoogleImages(plan.query, fetchCount);
     anyOk = anyOk || google.ok;
-    hits = mergeHits(hits, google.hits, count);
+    hits = pickImageHits(google.hits, plan, keep);
   }
 
-  if (hits.length < count) {
-    const pexels = await searchPexels(query, count);
+  if (hits.length === 0) {
+    const pexels = await searchPexels(plan.query, fetchCount);
     anyOk = anyOk || pexels.ok;
-    hits = mergeHits(hits, pexels.hits, count);
+    hits = pickImageHits(pexels.hits, plan, keep);
   }
 
-  if (hits.length < count) {
-    const pixabay = await searchPixabay(query, count);
+  if (hits.length === 0) {
+    const pixabay = await searchPixabay(plan.query, fetchCount);
     anyOk = anyOk || pixabay.ok;
-    hits = mergeHits(hits, pixabay.hits, count);
+    hits = pickImageHits(pixabay.hits, plan, keep);
   }
 
   if (!anyOk && hits.length === 0) {
     throw new ImageSearchError("Image search failed.");
   }
-  return hits.slice(0, count);
+  return hits;
 }
 
 export async function searchWebImages(query: string, count?: number): Promise<ImageSearchHit[]> {
   const q = query.trim();
   if (!q) throw new ImageSearchError("Missing search query.");
   const limit = clampImageCount(count);
-  const english = await englishImageQuery(q);
-  const key = `${normalizeImageQuery(english)}:${limit}`;
+  const plan = await planImageSearch(q);
+  const key = `rel7:${normalizeImageQuery(plan.query)}:${plan.must.join("-")}:${limit}`;
   const cached = readCache(key);
   if (cached && cached.length > 0) return cached.slice(0, limit);
 
-  let hits = await searchProviders(english, limit);
+  let hits = await searchProviders(plan, limit);
   if (hits.length === 0) {
-    const expanded = expandEnglishImageQuery(english);
-    if (expanded && expanded !== english) {
-      hits = await searchProviders(expanded, limit);
+    const expanded = expandEnglishImageQuery(plan.query);
+    if (expanded && expanded !== plan.query) {
+      hits = await searchProviders({ ...plan, query: expanded }, limit);
     }
   }
-  hits = hits.slice(0, limit);
   if (hits.length > 0) writeCache(key, hits);
   return hits;
 }

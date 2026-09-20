@@ -18,6 +18,7 @@ const TABS: { id: LibraryTab; label: string }[] = [
   { id: "media", label: "Media" },
   { id: "files", label: "Files" },
   { id: "sheet", label: "Notes" },
+  { id: "path", label: "Path" },
   { id: "practice", label: "Practice" },
 ];
 
@@ -92,7 +93,16 @@ export function LibraryPage() {
     }
     setPendingPanel({
       projectId: item.projectId,
-      kind: item.artifact?.kind === "plan" ? "plan" : item.kind === "material" ? "material" : item.kind === "practice" ? "practice" : "sheet",
+      kind:
+        item.artifact?.kind === "path"
+          ? "path"
+          : item.artifact?.kind === "plan"
+            ? "plan"
+            : item.kind === "material"
+              ? "material"
+              : item.kind === "practice"
+                ? "practice"
+                : "sheet",
       id: item.id,
       title: item.title,
     });
@@ -102,7 +112,7 @@ export function LibraryPage() {
   if (user?.isAnonymous) return null;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-10 md:py-5">
+    <div className="px-4 py-4 md:px-10 md:py-5">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2 max-md:border-0">
           <LayoutGroup id="library-tabs">

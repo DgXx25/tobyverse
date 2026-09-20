@@ -9,7 +9,12 @@ export { recipeForGoal, recipeTotals } from "@/lib/core/recipes";
 export {
   preferredChatModeForGoal,
   CHAT_MODE_INSTRUCTIONS,
+  CHAT_MODE_TOOLS,
+  chatModeTools,
+  chatModeSendsToolDeclarations,
   chatSystemInstruction,
+  asChatMode,
+  isChatMode,
 } from "@/lib/core/chat-modes";
 export {
   userProgressDocId,

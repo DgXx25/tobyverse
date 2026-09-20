@@ -1,5 +1,3 @@
-import { deleteObject, ref } from "firebase/storage";
-import { getFirebaseStorage } from "@/lib/firebase";
 import { requireSignedInUser } from "@/lib/auth";
 import { materialStoragePath } from "@/lib/firestore";
 import { extForMime } from "@/lib/materials/types";
@@ -42,28 +40,41 @@ function asBlob(data: Blob | Uint8Array, contentType: string): Blob {
 
 async function postStorageUpload(path: string, data: Blob | Uint8Array | string, contentType: string): Promise<void> {
   const user = await requireSignedInUser();
-  const token = await user.getIdToken();
-  const hasToken = typeof token === "string" && token.length > 0;
-
   if (!user.uid) {
     throw new Error("Sign in required.");
-  }
-  if (!hasToken) {
-    throw new Error("Storage upload failed: signed in, but getIdToken() returned no token.");
   }
   if (!path.startsWith(`users/${user.uid}/`)) {
     throw new Error(`Storage path must be users/${user.uid}/projects/.../materials/... (got ${path}).`);
   }
 
+  const blob =
+    typeof data === "string" ? new Blob([data], { type: contentType }) : asBlob(data, contentType);
+
+  try {
+    const { ref, uploadBytesResumable } = await import("firebase/storage");
+    const { getFirebaseStorage } = await import("@/lib/firebase");
+    const objectRef = ref(getFirebaseStorage(), path);
+    const task = uploadBytesResumable(objectRef, blob, { contentType });
+    await new Promise<void>((resolve, reject) => {
+      task.on("state_changed", undefined, reject, () => resolve());
+    });
+    return;
+  } catch {
+    // Next upload still works locally; production large files need the SDK path above.
+  }
+
+  const token = await user.getIdToken();
+  if (!token) {
+    throw new Error("Storage upload failed: signed in, but getIdToken() returned no token.");
+  }
   const form = new FormData();
   form.set("path", path);
   form.set("contentType", contentType);
   if (typeof data === "string") {
     form.set("text", data);
   } else {
-    form.set("file", asBlob(data, contentType), path.split("/").pop() || "file");
+    form.set("file", blob, path.split("/").pop() || "file");
   }
-
   let response: Response;
   try {
     response = await fetch("/api/materials/upload", {
@@ -165,5 +176,19 @@ export async function loadMaterialText(material: {
 
 export async function deleteStoragePath(path: string): Promise<void> {
   if (!path) return;
-  await deleteObject(ref(getFirebaseStorage(), path)).catch(() => undefined);
+  try {
+    const user = await requireSignedInUser();
+    if (!path.startsWith(`users/${user.uid}/`)) return;
+    const token = await user.getIdToken();
+    await fetch("/api/materials/upload", {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ path }),
+    });
+  } catch {
+    // Best-effort cleanup after a failed ingest.
+  }
 }

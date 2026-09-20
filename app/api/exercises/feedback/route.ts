@@ -54,13 +54,16 @@ export async function POST(request: Request) {
   const answer = typeof body.answer === "string" ? body.answer : JSON.stringify(body.answer ?? "");
 
   const socratic = mode === "socratic" && !reveal;
+  const paper = type === "paper";
   const result = await generateJson(
-    `Exercise type: ${type}\nItem: ${clipText(prompt, 1500)}\nStudent: ${clipText(answer, 1500)}\nMode: ${socratic ? "socratic" : "normal"}`,
+    `Exercise type: ${type}\nItem: ${clipText(prompt, 1500)}\nStudent: ${clipText(answer, paper ? 3500 : 1500)}\nMode: ${socratic ? "socratic" : "normal"}`,
     feedbackSchema,
     {
-      systemInstruction: socratic
-        ? "JSON only. Give a short hint. Never reveal the final answer."
-        : "JSON only. Give concise feedback. You may confirm the answer.",
+      systemInstruction: paper
+        ? "JSON only. Grade a Georgian official application (განცხადება): addressee top-right, centered title implied, body with a clear polite request, date, name. Say what to rewrite. verdict correct only if layout and tone work; partial if salvageable; incorrect if the form is wrong. Feedback in the student's language. Short."
+        : socratic
+          ? "JSON only. Give a short hint. Never reveal the final answer."
+          : "JSON only. Give concise feedback. You may confirm the answer.",
     },
   );
 

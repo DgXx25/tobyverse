@@ -1,5 +1,5 @@
-import { assertSignedInRequest, authErrorResponse, readIdToken } from "@/lib/api/assert";
-import { downloadGcsObject, hasGcsWriteCredentials, listGcsPrefix, storageBucketName } from "@/lib/storage-gcs";
+import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
+import { downloadGcsObject, listGcsPrefix } from "@/lib/storage-gcs";
 import { parseMaterialStoragePath, storedObjectName } from "@/lib/materials/storage-path";
 
 export const runtime = "nodejs";
@@ -34,60 +34,6 @@ function objectNamesFromList(paths: string[], prefix: string): string[] {
   return names;
 }
 
-async function downloadViaUserToken(
-  objectPath: string,
-  idToken: string,
-): Promise<{ buffer: Buffer; contentType: string }> {
-  const bucket = storageBucketName();
-  if (!bucket) throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set.");
-  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(objectPath)}?alt=media`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { Authorization: `Firebase ${idToken}` },
-    });
-  } catch {
-    throw new Error("Could not read file from Storage.");
-  }
-  if (!response.ok) {
-    throw new Error(`Storage read failed (${response.status}).`);
-  }
-  return {
-    buffer: Buffer.from(await response.arrayBuffer()),
-    contentType: response.headers.get("content-type") || guessContentType(objectPath),
-  };
-}
-
-async function listViaUserToken(prefix: string, idToken: string): Promise<string[]> {
-  const bucket = storageBucketName();
-  if (!bucket) throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set.");
-  const names: string[] = [];
-  let pageToken = "";
-  do {
-    const params = new URLSearchParams({ prefix });
-    if (pageToken) params.set("pageToken", pageToken);
-    const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?${params.toString()}`;
-    let response: Response;
-    try {
-      response = await fetch(url, { headers: { Authorization: `Firebase ${idToken}` } });
-    } catch {
-      throw new Error("Could not list files from Storage.");
-    }
-    if (!response.ok) {
-      throw new Error(`Storage list failed (${response.status}).`);
-    }
-    const data = (await response.json()) as {
-      items?: { name?: string }[];
-      nextPageToken?: string;
-    };
-    for (const item of data.items ?? []) {
-      if (typeof item.name === "string" && item.name) names.push(item.name);
-    }
-    pageToken = typeof data.nextPageToken === "string" ? data.nextPageToken : "";
-  } while (pageToken);
-  return names;
-}
-
 export async function GET(request: Request) {
   try {
     const session = await assertSignedInRequest(request);
@@ -116,9 +62,7 @@ export async function GET(request: Request) {
     if (list) {
       let paths: string[];
       try {
-        paths = hasGcsWriteCredentials()
-          ? await listGcsPrefix(prefix)
-          : await listViaUserToken(prefix, await readIdToken(request));
+        paths = await listGcsPrefix(prefix);
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         if (/\b401\b|\b403\b|unauthorized|forbidden|app check/i.test(message)) {
@@ -145,9 +89,7 @@ export async function GET(request: Request) {
 
     let file: { buffer: Buffer; contentType: string };
     try {
-      file = hasGcsWriteCredentials()
-        ? await downloadGcsObject(objectPath)
-        : await downloadViaUserToken(objectPath, await readIdToken(request));
+      file = await downloadGcsObject(objectPath);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (/\b404\b|not found|No such object/i.test(message)) {

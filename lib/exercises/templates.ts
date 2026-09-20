@@ -166,6 +166,25 @@ export const ANALYSIS_TEMPLATE: ExerciseTemplate<"analysis"> = {
   },
 };
 
+export const PAPER_TEMPLATE: ExerciseTemplate<"paper"> = {
+  type: "paper",
+  category: "problems",
+  version: 1,
+  label: "Form paper",
+  description: "A real-layout writing sheet. form picks the template; only brief/given change.",
+  example: {
+    form: "ganckhadeba",
+    brief: "დაწერე განცხადება სკოლის დირექტორის სახელზე: ოჯახური მიზეზით 3 დღე გააცდინე.",
+    given: { to: "სსიპ მე-12 საჯარო სკოლის დირექტორს" },
+    rubric: [
+      { criterion: "მიმართვა ზედა მარჯვნივ", weight: 0.2 },
+      { criterion: "თხოვნა ნათელი და თავაზიანი", weight: 0.4 },
+      { criterion: "თარიღი და სახელი", weight: 0.2 },
+      { criterion: "ოფიციალური ქართული", weight: 0.2 },
+    ],
+  },
+};
+
 const BASE_TEMPLATES = {
   mcq: MCQ_TEMPLATE,
   connect: CONNECT_TEMPLATE,
@@ -176,6 +195,7 @@ const BASE_TEMPLATES = {
   case_tree: CASE_TREE_TEMPLATE,
   essay: ESSAY_TEMPLATE,
   analysis: ANALYSIS_TEMPLATE,
+  paper: PAPER_TEMPLATE,
 } as const satisfies { [K in ExerciseType]: ExerciseTemplate<K> };
 
 const extraTemplates = new Map<string, ExerciseTemplate>();

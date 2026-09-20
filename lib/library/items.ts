@@ -3,12 +3,14 @@ import { formatBytes } from "@/lib/format";
 import { listMaterials } from "@/lib/materials";
 import { listProjectsForUser } from "@/lib/projects";
 import { listStudySheets } from "@/lib/study-sheets";
+import { listStudyPaths } from "@/lib/paths/store";
+import { pathSubtitle, progressCounts } from "@/lib/paths/model";
 import { displayProjectTitle } from "@/lib/workspace/title";
 import { blockPreviewText } from "@/lib/visuals/validate";
 import type { ChatArtifact } from "@/types/chat";
 import type { MaterialImage, MaterialType } from "@/types/material";
 
-export type LibraryKind = "material" | "sheet" | "practice";
+export type LibraryKind = "material" | "sheet" | "practice" | "path";
 
 export type LibraryItem = {
   key: string;
@@ -33,10 +35,11 @@ export async function listLibraryItems(userId: string): Promise<LibraryItem[]> {
   const projects = await listProjectsForUser(userId);
   const groups = await Promise.all(
     projects.map(async (project) => {
-      const [materials, sheets, messages] = await Promise.all([
+      const [materials, sheets, messages, paths] = await Promise.all([
         listMaterials(project.id),
         listStudySheets(project.id),
         listChatMessages(project.id),
+        listStudyPaths(project.id),
       ]);
       const projectTitle = displayProjectTitle(project.title);
       const items: LibraryItem[] = [];
@@ -80,6 +83,22 @@ export async function listLibraryItems(userId: string): Promise<LibraryItem[]> {
           meta: "Notes",
           createdAt: item.createdAt,
           artifact: { kind: item.title === "Study plan" ? "plan" : "sheet", id: item.id, title: item.title },
+        });
+      }
+
+      for (const item of paths) {
+        const { done, total } = progressCounts(item.courses);
+        items.push({
+          key: `path:${project.id}:${item.id}`,
+          kind: "path",
+          id: item.id,
+          projectId: project.id,
+          projectTitle,
+          title: item.title,
+          preview: pathSubtitle(item),
+          meta: `${done}/${total} topics`,
+          createdAt: item.updatedAt ?? item.createdAt,
+          artifact: { kind: "path", id: item.id, title: item.title, count: total },
         });
       }
 

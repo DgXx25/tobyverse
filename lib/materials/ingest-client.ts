@@ -21,6 +21,8 @@ export type ExtractResponse = {
   type?: MaterialType;
   title?: string;
   pageCount?: number;
+  textChars?: number;
+  textStored?: boolean;
   images?: { page?: number; mime?: string; data?: string }[];
   error?: string;
 };
@@ -53,6 +55,20 @@ function bytesFromBase64(data: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+async function deriveFromStorage(
+  stored: { path: string; textPath: string },
+  phase: "text" | "images" | "all" = "text",
+): Promise<ExtractResponse> {
+  const response = await fetch("/api/materials/extract", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ path: stored.path, textPath: stored.textPath, phase }),
+  });
+  const data = (await response.json()) as ExtractResponse;
+  if (!response.ok) data.error = data.error ?? "Extraction failed.";
+  return data;
 }
 
 async function deriveFromApi(
@@ -158,8 +174,11 @@ export async function prepareMaterialIngest(input: {
     await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime);
 
     input.onPhase?.("reading");
-    const data = await deriveFromApi(source, input.includeImages ? "all" : "text");
-    if (!data.text || !data.type) {
+    const data =
+      source.kind === "file"
+        ? await deriveFromStorage({ path: storagePath, textPath }, input.includeImages ? "all" : "text")
+        : await deriveFromApi(source, input.includeImages ? "all" : "text");
+    if ((!data.text && !data.textStored) || !data.type) {
       throw new Error(data.error ?? "Extraction failed.");
     }
     return {
@@ -246,11 +265,14 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
   prepared.storageHeld = false;
 
   try {
-    if (!data.text || !data.type) {
+    if (!data.type || (!data.text && !data.textStored)) {
       throw new Error(data.error ?? "Extraction failed.");
     }
 
-    await uploadExtractedText(textPath, data.text);
+    if (!data.textStored) {
+      if (!data.text) throw new Error("Extraction failed.");
+      await uploadExtractedText(textPath, data.text);
+    }
 
     const images: MaterialImage[] =
       type === "image"
@@ -267,7 +289,7 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
       sizeBytes: prepared.sizeBytes,
       pageCount: data.pageCount ?? 1,
       hasImages: images.length > 0,
-      textChars: data.text.length,
+      textChars: data.textChars ?? data.text?.length ?? 0,
       images,
       status: needsSlideImages ? "processing" : "ready",
     });
@@ -305,15 +327,15 @@ export async function finalizeMaterialImages(prepared: PreparedMaterial): Promis
   const { projectId, userId, materialId, storagePath, textPath, data } = prepared;
   const title = data.title?.trim() || prepared.title;
   const preview = previewFromPrepared(prepared);
-  const text = data.text ?? "";
+  const textChars = data.textChars ?? data.text?.length ?? 0;
 
   try {
     let images: MaterialImage[] = [];
     const cached = (prepared.data.images ?? []).filter((item) => typeof item.data === "string" && item.data);
     if (cached.length > 0) {
       images = await slideImagesFromExtract(prepared, cached);
-    } else if (prepared.sourceFile) {
-      const extracted = await deriveFromApi({ kind: "file", file: prepared.sourceFile }, "images");
+    } else {
+      const extracted = await deriveFromStorage({ path: prepared.storagePath, textPath: prepared.textPath }, "images");
       images = await slideImagesFromExtract(prepared, extracted.images);
     }
 
@@ -327,7 +349,7 @@ export async function finalizeMaterialImages(prepared: PreparedMaterial): Promis
       sizeBytes: prepared.sizeBytes,
       pageCount: data.pageCount ?? 1,
       hasImages: images.length > 0,
-      textChars: text.length,
+      textChars,
       images,
       status: "ready",
     });
@@ -350,7 +372,7 @@ export async function finalizeMaterialImages(prepared: PreparedMaterial): Promis
       sizeBytes: prepared.sizeBytes,
       pageCount: data.pageCount ?? 1,
       hasImages: false,
-      textChars: text.length,
+      textChars,
       images: [],
       status: "ready",
     });
@@ -415,6 +437,19 @@ export async function ingestMaterialUrl(input: {
 
 export function looksLikeUrl(value: string): boolean {
   return /^https?:\/\/\S+$/i.test(value.trim());
+}
+
+export function urlsInText(text: string): string[] {
+  const found = text.match(/https?:\/\/[^\s<]+/gi) ?? [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of found) {
+    const url = raw.replace(/[),.;!?]+$/g, "");
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
 }
 
 export const LARGE_PASTE_CHARS = 500;

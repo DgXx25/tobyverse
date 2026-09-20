@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
   type TransitionEvent,
 } from "react";
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
@@ -17,6 +18,16 @@ import { LARGE_PASTE_CHARS, looksLikeUrl } from "@/lib/materials/ingest-client";
 import { COMPOSER_FILE_ACCEPT } from "@/lib/materials/types";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { ComposerParameters } from "@/components/workspace/composer-parameters";
+import { LinkifiedText } from "@/components/workspace/linkified-text";
+import { SlashMenu } from "@/components/workspace/slash-menu";
+import {
+  COMPOSER_SKILL_META,
+  filterSlashItems,
+  parseSlashQuery,
+  type ComposerSkill,
+  type SlashItem,
+} from "@/lib/composer/slash";
+import type { ChatMode } from "@/types/chat";
 
 export type ComposerChip = {
   id: string;
@@ -51,6 +62,7 @@ export const ChatComposer = forwardRef<
     onUrl: (url: string) => void;
     placeholder?: string;
     fieldStart?: ReactNode;
+    notice?: ReactNode;
     pad?: boolean;
     className?: string;
     allowAttach?: boolean;
@@ -59,6 +71,13 @@ export const ChatComposer = forwardRef<
     onEscape?: () => void;
     onArrowDown?: () => void;
     fadePlaceholder?: boolean;
+    dropActive?: boolean;
+    locked?: boolean;
+    chatMode?: ChatMode;
+    onChatMode?: (mode: ChatMode) => void;
+    skill?: ComposerSkill | null;
+    onSkill?: (skill: ComposerSkill | null) => void;
+    slashSkills?: boolean;
   }
 >(function ChatComposer(
   {
@@ -72,9 +91,9 @@ export const ChatComposer = forwardRef<
     onStop,
     onFile,
     onPasteText,
-    onUrl,
     placeholder = "Ask anything",
     fieldStart,
+    notice,
     pad = true,
     className = "",
     allowAttach = true,
@@ -83,6 +102,13 @@ export const ChatComposer = forwardRef<
     onEscape,
     onArrowDown,
     fadePlaceholder = false,
+    dropActive = false,
+    locked = false,
+    chatMode,
+    onChatMode,
+    skill,
+    onSkill,
+    slashSkills = true,
   },
   ref,
 ) {
@@ -90,6 +116,9 @@ export const ChatComposer = forwardRef<
   const fileRef = useRef<HTMLInputElement>(null);
   const lastDropRef = useRef<{ at: number; keys: Set<string> }>({ at: 0, keys: new Set() });
   const [dropOver, setDropOver] = useState(false);
+  const [slashActive, setSlashActive] = useState(0);
+  const hint = skill ? COMPOSER_SKILL_META[skill].placeholder : placeholder;
+  const slashQuery = parseSlashQuery(draft);
   const [shownPlaceholder, setShownPlaceholder] = useState(placeholder);
   const [prevPlaceholder, setPrevPlaceholder] = useState<string | null>(null);
   const shownPlaceholderRef = useRef(placeholder);
@@ -97,29 +126,29 @@ export const ChatComposer = forwardRef<
 
   useEffect(() => {
     if (!fadePlaceholder) {
-      shownPlaceholderRef.current = placeholder;
-      setShownPlaceholder(placeholder);
+      shownPlaceholderRef.current = hint;
+      setShownPlaceholder(hint);
       setPrevPlaceholder(null);
       return;
     }
-    if (shownPlaceholderRef.current === placeholder) return;
+    if (shownPlaceholderRef.current === hint) return;
     const from = shownPlaceholderRef.current;
-    shownPlaceholderRef.current = placeholder;
+    shownPlaceholderRef.current = hint;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduced) {
       setPrevPlaceholder(null);
-      setShownPlaceholder(placeholder);
+      setShownPlaceholder(hint);
       return;
     }
     setPrevPlaceholder(from);
-    setShownPlaceholder(placeholder);
+    setShownPlaceholder(hint);
     const timer = window.setTimeout(() => setPrevPlaceholder(null), 200);
     return () => window.clearTimeout(timer);
-  }, [fadePlaceholder, placeholder]);
+  }, [fadePlaceholder, hint]);
 
   useImperativeHandle(ref, () => ({
     focus() {
-      areaRef.current?.focus();
+      areaRef.current?.focus({ preventScroll: true });
     },
     openFile() {
       if (!allowAttach) return;
@@ -134,10 +163,17 @@ export const ChatComposer = forwardRef<
     node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
   }, [draft]);
 
-  const hasPrefix = Boolean(fieldStart);
+  const hasPrefix = Boolean(fieldStart) || Boolean(skill);
   const prefixHoldRef = useRef<ReactNode>(null);
   const prefixInnerRef = useRef<HTMLDivElement>(null);
-  if (fieldStart) prefixHoldRef.current = fieldStart;
+  const skillPrefix = skill ? (
+    <span className="start-action-prefix pointer-events-none inline-flex shrink-0 select-none items-center gap-1.5 whitespace-nowrap pt-3 text-[15px] leading-6 text-foreground">
+      <UiIcon name={COMPOSER_SKILL_META[skill].icon} size={18} className="accent-symbol" />
+      <span>{COMPOSER_SKILL_META[skill].label}</span>
+    </span>
+  ) : null;
+  const prefixNode = fieldStart ?? skillPrefix;
+  if (prefixNode) prefixHoldRef.current = prefixNode;
   const [prefixVisible, setPrefixVisible] = useState(hasPrefix);
   const [prefixOpen, setPrefixOpen] = useState(hasPrefix);
   const [prefixWidth, setPrefixWidth] = useState(0);
@@ -185,6 +221,10 @@ export const ChatComposer = forwardRef<
     return () => window.clearTimeout(timer);
   }, [hasPrefix, prefixVisible]);
 
+  useEffect(() => {
+    setSlashActive(0);
+  }, [slashQuery]);
+
   useEffect(() => () => cancelAnimationFrame(prefixFrame.current), []);
 
   function onPrefixTransitionEnd(event: TransitionEvent) {
@@ -194,23 +234,51 @@ export const ChatComposer = forwardRef<
   }
 
   const busyChip = chips.some((chip) => chip.status === "uploading");
-  const canSend = !sending && !busyChip && Boolean(draft.trim() || chips.some((chip) => chip.status === "ready"));
+  const canSend =
+    !locked && !sending && !busyChip && Boolean(draft.trim() || chips.some((chip) => chip.status === "ready"));
+  const isDrop = dropOver || dropActive;
+  const slashOpen = slashQuery != null && Boolean(onChatMode || onSkill);
+  const slashItems = slashOpen ? filterSlashItems(slashQuery, slashSkills && Boolean(onSkill)) : [];
+  const slashIndex = slashItems.length ? Math.min(slashActive, slashItems.length - 1) : 0;
+
+  function applySlash(item: SlashItem) {
+    if (item.kind === "mode") onChatMode?.(item.id as ChatMode);
+    else onSkill?.(item.id as ComposerSkill);
+    onDraft("");
+    requestAnimationFrame(() => areaRef.current?.focus({ preventScroll: true }));
+  }
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    if (!canSend) return;
+    if (slashOpen && slashItems[slashIndex]) {
+      applySlash(slashItems[slashIndex]);
+      return;
+    }
+    if (locked || !canSend) return;
     onSend();
-    requestAnimationFrame(() => areaRef.current?.focus());
+    requestAnimationFrame(() => areaRef.current?.focus({ preventScroll: true }));
   }
 
   function onKey(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
+    if (slashOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      if (slashItems.length === 0) return;
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      setSlashActive((current) => (current + delta + slashItems.length) % slashItems.length);
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
       return;
     }
     if (event.key === "Escape") {
+      if (slashOpen) {
+        event.preventDefault();
+        onDraft("");
+        return;
+      }
       if (!onEscape) return;
       event.preventDefault();
       onEscape();
@@ -219,6 +287,11 @@ export const ChatComposer = forwardRef<
     if (event.key === "Backspace" && !event.altKey && !event.ctrlKey && !event.metaKey) {
       const node = event.currentTarget;
       if (node.selectionStart !== 0 || node.selectionEnd !== 0) return;
+      if (skill && onSkill) {
+        event.preventDefault();
+        onSkill(null);
+        return;
+      }
       if (onBackspaceEmpty) {
         event.preventDefault();
         onBackspaceEmpty();
@@ -240,7 +313,7 @@ export const ChatComposer = forwardRef<
   }
 
   function takeFiles(list: FileList | File[] | null, source: "drop" | "picker" | "paste") {
-    if (!allowAttach || !list) return;
+    if (locked || !allowAttach || !list) return;
     const seen = new Set<string>();
     const unique: File[] = [];
     for (const file of Array.from(list)) {
@@ -288,12 +361,7 @@ export const ChatComposer = forwardRef<
     }
     const text = event.clipboardData.getData("text");
     if (!text) return;
-    if (looksLikeUrl(text)) {
-      event.preventDefault();
-      onUrl(text.trim());
-      return;
-    }
-    if (text.trim().length >= LARGE_PASTE_CHARS) {
+    if (text.trim().length >= LARGE_PASTE_CHARS && !looksLikeUrl(text.trim())) {
       event.preventDefault();
       onPasteText(text);
     }
@@ -311,20 +379,26 @@ export const ChatComposer = forwardRef<
     <form
       onSubmit={submit}
       onDragOver={(event) => {
-        if (!allowAttach) return;
+        if (locked || !allowAttach) return;
         event.preventDefault();
         event.stopPropagation();
         setDropOver(true);
       }}
       onDragLeave={() => setDropOver(false)}
       onDrop={onDrop}
-      className={`${pad ? "composer-pad px-4 pt-2" : "pt-2"} ${className}`.trim()}
+      className={`${pad ? "composer-pad px-4 pt-2" : "pt-2"} ${locked ? "pointer-events-none opacity-40" : ""} ${className}`.trim()}
     >
       <div
-        className={`rounded-[28px] border bg-surface-2 px-3 py-2 ${
-          dropOver ? "border-accent" : "border-border"
+        className={`relative rounded-[28px] border bg-surface-2 px-3 py-2 transition-[border-color,background-color] ${
+          isDrop ? "border-accent bg-foreground/[0.04]" : "border-border"
         }`}
       >
+        <div
+          className={`pointer-events-none absolute inset-0 z-[1] rounded-[inherit] bg-foreground/[0.06] transition-opacity ${
+            isDrop ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        {notice}
         {chips.length > 0 && (
           <div className="mb-1 flex flex-wrap gap-1.5 px-1 pt-1">
             {chips.map((chip) => (
@@ -345,9 +419,25 @@ export const ChatComposer = forwardRef<
                     </span>
                   )}
                 </span>
-                <span className="min-w-0 truncate text-foreground">{chip.title}</span>
+                <span className="min-w-0 truncate">
+                  {looksLikeUrl(chip.title) ? (
+                    <a
+                      href={chip.title}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="chat-link block truncate"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {chip.title}
+                    </a>
+                  ) : (
+                    <span className="text-foreground">{chip.title}</span>
+                  )}
+                </span>
                 {chip.status === "uploading" ? (
-                  <span className="shrink-0 whitespace-nowrap text-muted">Uploading…</span>
+                  <span className="shrink-0 whitespace-nowrap text-muted">
+                    {chip.type === "url" || looksLikeUrl(chip.title) ? "Reading…" : "Uploading…"}
+                  </span>
                 ) : chip.size ? (
                   <span className="shrink-0 whitespace-nowrap text-muted">{formatBytes(chip.size)}</span>
                 ) : null}
@@ -372,7 +462,7 @@ export const ChatComposer = forwardRef<
             if (event.target === areaRef.current) return;
             if ((event.target as HTMLElement).closest("button, a, input, textarea")) return;
             event.preventDefault();
-            areaRef.current?.focus();
+            areaRef.current?.focus({ preventScroll: true });
           }}
         >
           {showPrefix ? (
@@ -382,7 +472,7 @@ export const ChatComposer = forwardRef<
               onTransitionEnd={onPrefixTransitionEnd}
             >
               <div ref={prefixInnerRef} className="start-action-clip-inner">
-                {fieldStart ?? prefixHoldRef.current}
+                {prefixNode ?? prefixHoldRef.current}
               </div>
             </div>
           ) : null}
@@ -409,27 +499,27 @@ export const ChatComposer = forwardRef<
                   </span>
                 </>
               ) : null}
-              <textarea
-                ref={areaRef}
-                value={draft}
-                onChange={(event) => onDraft(event.target.value)}
-                onKeyDown={onKey}
+              <DraftArea
+                areaRef={areaRef}
+                draft={draft}
+                padClass={`pt-3 pb-2 ${showPrefix ? "" : "px-1"}`}
+                placeholder={fadePlaceholder ? undefined : hint}
+                locked={locked}
+                onDraft={onDraft}
+                onKey={onKey}
                 onPaste={onPaste}
-                placeholder={fadePlaceholder ? undefined : placeholder}
-                rows={1}
-                className={`max-h-[160px] min-h-[40px] w-full resize-none bg-transparent pt-3 pb-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted ${showPrefix ? "" : "px-1"}`}
               />
             </div>
           ) : (
-            <textarea
-              ref={areaRef}
-              value={draft}
-              onChange={(event) => onDraft(event.target.value)}
-              onKeyDown={onKey}
+            <DraftArea
+              areaRef={areaRef}
+              draft={draft}
+              padClass="px-1 py-2"
+              placeholder={hint}
+              locked={locked}
+              onDraft={onDraft}
+              onKey={onKey}
               onPaste={onPaste}
-              placeholder={placeholder}
-              rows={1}
-              className="max-h-[160px] min-h-[40px] min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-foreground outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted"
             />
           )}
         </div>
@@ -449,8 +539,9 @@ export const ChatComposer = forwardRef<
               />
               <button
                 type="button"
+                disabled={locked}
                 onClick={() => fileRef.current?.click()}
-                className="composer-attach flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-foreground"
+                className="composer-attach flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface hover:text-foreground disabled:hover:bg-transparent"
                 aria-label="Attach file"
               >
                 <UiIcon name="plus" size={18} />
@@ -458,7 +549,7 @@ export const ChatComposer = forwardRef<
             </>
           ) : null}
           <div className="ml-auto flex items-center gap-1">
-            {showParameters ? <ComposerParameters /> : null}
+            {showParameters ? <ComposerParameters mode={chatMode} onMode={onChatMode} /> : null}
             <button
               type={sending && onStop ? "button" : "submit"}
               disabled={sending ? !onStop : !canSend}
@@ -485,6 +576,17 @@ export const ChatComposer = forwardRef<
             </button>
           </div>
         </div>
+        {slashOpen ? (
+          <div className="absolute bottom-[calc(100%+8px)] left-2 z-50 w-[min(calc(100%-16px),320px)] rounded-2xl bg-surface-2 shadow-2xl ring-1 ring-border">
+            <SlashMenu
+              items={slashItems}
+              active={slashIndex}
+              allowSkills={slashSkills && Boolean(onSkill)}
+              onPick={applySlash}
+              onActive={setSlashActive}
+            />
+          </div>
+        ) : null}
       </div>
       {error ? <p className="mt-2 px-1 text-xs text-red-400">{error}</p> : null}
     </form>
@@ -492,3 +594,58 @@ export const ChatComposer = forwardRef<
 });
 
 ChatComposer.displayName = "ChatComposer";
+
+function DraftArea({
+  areaRef,
+  draft,
+  padClass,
+  placeholder,
+  locked = false,
+  onDraft,
+  onKey,
+  onPaste,
+}: {
+  areaRef: RefObject<HTMLTextAreaElement | null>;
+  draft: string;
+  padClass: string;
+  placeholder?: string;
+  locked?: boolean;
+  onDraft: (value: string) => void;
+  onKey: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+}) {
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  const hasLink = /https?:\/\//i.test(draft);
+  const shared = `max-h-[160px] min-h-[40px] w-full text-[15px] leading-6 ${padClass}`;
+  const mirrorText = draft.endsWith("\n") ? `${draft}\u00a0` : draft;
+
+  return (
+    <div className="relative min-w-0 flex-1">
+      {hasLink ? (
+        <div
+          ref={mirrorRef}
+          aria-hidden
+          className={`composer-url-mirror pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-foreground ${shared}`}
+        >
+          <LinkifiedText text={mirrorText} />
+        </div>
+      ) : null}
+      <textarea
+        ref={areaRef}
+        value={draft}
+        disabled={locked}
+        onChange={(event) => onDraft(event.target.value)}
+        onKeyDown={onKey}
+        onPaste={onPaste}
+        onScroll={(event) => {
+          if (mirrorRef.current) mirrorRef.current.scrollTop = event.currentTarget.scrollTop;
+        }}
+        placeholder={hasLink ? undefined : placeholder}
+        rows={1}
+        className={`composer-draft relative z-[1] resize-none bg-transparent outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 placeholder:text-muted ${shared} ${
+          hasLink ? "composer-draft-links text-transparent caret-foreground" : "text-foreground"
+        }`}
+      />
+    </div>
+  );
+}

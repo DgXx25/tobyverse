@@ -13,6 +13,7 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
 import { ensureUserProfile } from "@/lib/account/store";
 import {
+  consumeGoogleIdTokenFromUrl,
   consumeRedirectResult,
   enterAppAfterSignIn,
   persistSignedInSession,
@@ -43,40 +44,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const auth = getFirebaseAuth();
-    let unsub: (() => void) | undefined;
-    let cancelled = false;
     const go = (path: string) => router.replace(path);
 
-    void (async () => {
-      try {
-        const result = await consumeRedirectResult();
-        if (cancelled) return;
-        if (result.credential?.user) {
-          persistSignedInSession(result.credential.user);
-          setUser(result.credential.user);
-          void ensureUserProfile(result.credential.user).catch(() => undefined);
-          if (!result.credential.user.isAnonymous) enterAppAfterSignIn(true, go);
-        }
-      } catch {
-        /* consumeRedirectResult maps errors onto the result */
+    const unsub = onAuthStateChanged(auth, (nextUser) => {
+      setUser(nextUser);
+      setLoading(false);
+      if (nextUser) {
+        persistSignedInSession(nextUser);
+        void ensureUserProfile(nextUser).catch(() => undefined);
+        if (!nextUser.isAnonymous) enterAppAfterSignIn(true, go);
       }
+    });
 
-      if (cancelled) return;
-      unsub = onAuthStateChanged(auth, (nextUser) => {
-        setUser(nextUser);
-        setLoading(false);
-        if (nextUser) {
-          persistSignedInSession(nextUser);
-          void ensureUserProfile(nextUser).catch(() => undefined);
-          if (!nextUser.isAnonymous) enterAppAfterSignIn(true, go);
-        }
-      });
+    void (async () => {
+      const google = await consumeGoogleIdTokenFromUrl();
+      if (google.credential?.user) {
+        persistSignedInSession(google.credential.user);
+        setUser(google.credential.user);
+        void ensureUserProfile(google.credential.user).catch(() => undefined);
+        if (!google.credential.user.isAnonymous) enterAppAfterSignIn(true, go);
+        return;
+      }
+      const result = await consumeRedirectResult();
+      if (result.credential?.user) {
+        persistSignedInSession(result.credential.user);
+        setUser(result.credential.user);
+        void ensureUserProfile(result.credential.user).catch(() => undefined);
+        if (!result.credential.user.isAnonymous) enterAppAfterSignIn(true, go);
+      }
     })();
 
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
+    return () => unsub();
   }, [configured, router]);
 
   const value = useMemo(

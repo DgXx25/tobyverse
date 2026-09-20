@@ -1,5 +1,5 @@
 import { authHeaders } from "@/lib/api/client";
-import { IMAGE_SEARCH_DEFAULT, type ImageSearchHit } from "@/lib/images/types";
+import { IMAGE_SEARCH_DEFAULT, type ImageSearchHit, snapWikiThumbUrl } from "@/lib/images/types";
 import type { ChatImageHit } from "@/types/chat";
 
 export class ImageSearchRequestError extends Error {
@@ -13,10 +13,12 @@ export class ImageSearchRequestError extends Error {
 }
 
 export function toChatImageHit(hit: ImageSearchHit): ChatImageHit {
+  const url = snapWikiThumbUrl(hit.url);
+  const thumbnail = snapWikiThumbUrl(hit.thumbnail || hit.url);
   return {
-    url: hit.url,
-    thumb: hit.thumbnail || hit.url,
-    thumbnail: hit.thumbnail || hit.url,
+    url,
+    thumb: thumbnail || url,
+    thumbnail: thumbnail || url,
     title: hit.alt,
     alt: hit.alt,
     source: hit.source,

@@ -4,8 +4,12 @@ export const CHAT_EXCERPT_CHARS = 420;
 export const CHAT_MATERIAL_LIMIT = 3;
 export const SHEET_EXCERPT_CHARS = 2_000;
 export const SHEET_TOTAL_CHARS = 6_000;
-export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
-export const MAX_UPLOAD_LABEL = "15 MB";
+/** Path map only — week windows, never a textbook dump. */
+export const PATH_EXCERPT_CHARS = 3_500;
+export const PATH_TOTAL_CHARS = 16_000;
+export const PATH_SOURCE_LIMIT = 5;
+export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+export const MAX_UPLOAD_LABEL = "200 MB";
 /** Multipart form overhead on top of the file cap. */
 export const MAX_UPLOAD_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
 

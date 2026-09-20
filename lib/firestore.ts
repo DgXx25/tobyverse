@@ -38,6 +38,11 @@
  *   studySheets/{sheetId}
  *     title, blocks (JSON visual blocks), content (legacy), sourceMaterialIds, userId, createdAt
  *
+ *   paths/{pathId}
+ *     title, courses[{id,title,units[{id,title,nodes[{id,title,teach,outcome,status,practiceSetId?,sheetId?}]}]}],
+ *     currentCourseId, currentNodeId, started, sourceMaterialIds, userId, createdAt, updatedAt
+ *     Titles + a short tutor brief per node — not a lesson. Chat sees the current node only.
+ *
  *   exercises/{exerciseId}
  *     type, category, data (typed JSON), sourceMaterialIds, knowledgeItemId, userId, createdAt
  *
@@ -82,6 +87,7 @@ export const COLLECTIONS = {
   materials: "materials",
   chunks: "chunks",
   studySheets: "studySheets",
+  paths: "paths",
   attempts: "attempts",
   progress: "progress",
   knowledgeItems: "knowledgeItems",
@@ -133,6 +139,10 @@ export const firestorePaths = {
     `${COLLECTIONS.projects}/${projectId}/${COLLECTIONS.studySheets}`,
   studySheet: (projectId: string, sheetId: string) =>
     `${COLLECTIONS.projects}/${projectId}/${COLLECTIONS.studySheets}/${sheetId}`,
+
+  paths: (projectId: string) => `${COLLECTIONS.projects}/${projectId}/${COLLECTIONS.paths}`,
+  path: (projectId: string, pathId: string) =>
+    `${COLLECTIONS.projects}/${projectId}/${COLLECTIONS.paths}/${pathId}`,
 
   attempts: (projectId: string) =>
     `${COLLECTIONS.projects}/${projectId}/${COLLECTIONS.attempts}`,

@@ -29,7 +29,7 @@ const CORE_CASES: EvalCaseSpec[] = [
   {
     id: "2",
     prompt: "მინდა ვივარჯიშო დედაქალაქებზე",
-    expected: "clarify | create_practice",
+    expected: "clarify | suggest_practice",
     judge: "core-2",
   },
   {
@@ -193,8 +193,8 @@ export function judgeEvalCase(judge: EvalJudgeId, ctx: EvalJudgeContext): Pick<E
   }
 
   if (judge === "core-2") {
-    const ok = ctx.tool.name === "clarify" || ctx.tool.name === "create_practice";
-    const essay = ctx.tool.name === "answer" || ctx.tool.name === "suggest_practice" || ctx.tool.name === "suggest_sheet";
+    const ok = ctx.tool.name === "clarify" || ctx.tool.name === "suggest_practice";
+    const essay = ctx.tool.name === "answer" || ctx.tool.name === "suggest_sheet";
     return {
       actual: toolLabel(ctx.tool, ctx.card ? "card" : undefined),
       pass: ok,
@@ -202,7 +202,7 @@ export function judgeEvalCase(judge: EvalJudgeId, ctx: EvalJudgeContext): Pick<E
         ? lineNote(ctx.tool.name, ctx.card && "card ready")
         : lineNote(
             essay && looksLikeLongEssay(ctx.text) && "long essay only",
-            !ok && `${ctx.tool.name} instead of clarify/create_practice`,
+            !ok && `${ctx.tool.name} instead of clarify/suggest_practice`,
           ),
     };
   }

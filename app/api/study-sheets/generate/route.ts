@@ -67,6 +67,7 @@ export async function POST(request: Request) {
 
   const userPrompt = [
     `Project: ${projectTitle}`,
+    "Write for a student who knows nothing yet. Meaning first. Never a jargon label or a formula without saying what it is.",
     instruction ? `Instruction: ${instruction}` : null,
     currentTitle ? `Current title: ${currentTitle}` : null,
     currentBlocks.length

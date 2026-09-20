@@ -60,8 +60,13 @@ export function gateGuestChatTool(tool: ChatToolCall): ChatToolCall {
     tool.name === "append_practice" ||
     tool.name === "create_sheet" ||
     tool.name === "edit_sheet" ||
+    tool.name === "create_path" ||
+    tool.name === "advance_path" ||
+    tool.name === "restart_path" ||
+    tool.name === "start_path" ||
     tool.name === "suggest_practice" ||
-    tool.name === "suggest_sheet"
+    tool.name === "suggest_sheet" ||
+    tool.name === "suggest_path"
   ) {
     return { name: "answer", args: {} };
   }

@@ -18,6 +18,7 @@ export const PROBLEM_EXERCISE_TYPES = [
   "case_tree",
   "essay",
   "analysis",
+  "paper",
 ] as const;
 
 export type TheoryExerciseType = (typeof THEORY_EXERCISE_TYPES)[number];
@@ -25,7 +26,7 @@ export type ProblemExerciseType = (typeof PROBLEM_EXERCISE_TYPES)[number];
 export type ExerciseType = TheoryExerciseType | ProblemExerciseType;
 
 /** Add a type + renderer. Do not delete old fields. Bump schemaVersion. */
-export const EXERCISE_SCHEMA_VERSION = 1 as const;
+export const EXERCISE_SCHEMA_VERSION = 2 as const;
 
 export type McqOption = {
   id: string;
@@ -135,6 +136,19 @@ export type AnalysisPayload = {
   sampleAnalysis?: string;
 };
 
+export const PAPER_FORMS = ["ganckhadeba"] as const;
+export type PaperFormId = (typeof PAPER_FORMS)[number];
+
+export type PaperPayload = {
+  /** Layout id. Renderer + defaults live in code; the model only fills the brief. */
+  form: PaperFormId;
+  brief: string;
+  given?: { to?: string };
+  /** Filled example on the sheet. Chat-only; practice items strip this. */
+  sample?: { to?: string; body?: string; sign?: string; date?: string };
+  rubric?: EssayRubricItem[];
+};
+
 export type ExercisePayloadMap = {
   mcq: McqPayload;
   connect: ConnectPayload;
@@ -145,6 +159,7 @@ export type ExercisePayloadMap = {
   case_tree: CaseTreePayload;
   essay: EssayPayload;
   analysis: AnalysisPayload;
+  paper: PaperPayload;
 };
 
 /**
@@ -183,6 +198,7 @@ export type ProblemExercise =
   | (ExerciseBase & { category: "problems"; type: "problem_steps"; payload: ProblemStepsPayload })
   | (ExerciseBase & { category: "problems"; type: "case_tree"; payload: CaseTreePayload })
   | (ExerciseBase & { category: "problems"; type: "essay"; payload: EssayPayload })
-  | (ExerciseBase & { category: "problems"; type: "analysis"; payload: AnalysisPayload });
+  | (ExerciseBase & { category: "problems"; type: "analysis"; payload: AnalysisPayload })
+  | (ExerciseBase & { category: "problems"; type: "paper"; payload: PaperPayload });
 
 export type Exercise = TheoryExercise | ProblemExercise;

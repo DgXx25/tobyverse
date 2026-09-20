@@ -4,8 +4,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent 
 import { subscribeChatMessages } from "@/lib/chats";
 import { subscribeMaterials } from "@/lib/materials";
 import { subscribeStudySheets } from "@/lib/study-sheets/store";
+import { subscribeStudyPaths } from "@/lib/paths/store";
+import { liveStudyPath } from "@/lib/paths/model";
+import { PathView } from "@/components/workspace/path-view";
+import { StatusWait } from "@/components/workspace/status-wait";
 import { formatBytes, shortDate } from "@/lib/format";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
+import type { SetResult } from "@/lib/exercises/session";
 import { PracticeSession } from "@/components/exercises/practice-session";
 import { NoteDocument, NoteTitle } from "@/components/visuals/note-document";
 import { VisualList } from "@/components/visuals/visual-block";
@@ -16,10 +21,11 @@ import { useAuth } from "@/components/auth-provider";
 import { isGuestUser } from "@/lib/guest";
 import type { ChatArtifact, ChatMessage } from "@/types/chat";
 import type { Material } from "@/types/material";
+import type { PathLiveState, StudyPath } from "@/types/path";
 import type { NotesLiveState, StudySheet } from "@/types/study-sheet";
 import type { VisualBlock } from "@/types/visual";
 
-type TabId = "materials" | "sheets" | "practice";
+type TabId = "materials" | "sheets" | "practice" | "path";
 
 export type ArtifactFocus = ChatArtifact | { kind: "material"; id: string };
 
@@ -32,29 +38,36 @@ export function ArtifactPanel({
   onClose,
   onStartPractice,
   onExitSession,
+  onPracticeComplete,
   onViewChange,
   onActivate,
   liveNote = null,
+  livePath = null,
   onLiveSettled,
+  onLivePathSettled,
 }: {
   projectId: string;
   userId: string;
   focus: ArtifactFocus | null;
-  session: { setId: string; ids: string[] } | null;
+  session: { setId: string; ids: string[]; mode?: "practice" | "exam" } | null;
   onResizeStart: (event: MouseEvent) => void;
   onClose: () => void;
   onStartPractice: (artifact: ChatArtifact) => void;
   onExitSession: () => void;
+  onPracticeComplete?: (result: SetResult) => void;
   onViewChange?: (view: TabId) => void;
   onActivate?: (artifact: ChatArtifact) => void;
   liveNote?: NotesLiveState | null;
+  livePath?: PathLiveState | null;
   onLiveSettled?: () => void;
+  onLivePathSettled?: () => void;
 }) {
   const { user } = useAuth();
   const canViewFiles = Boolean(user && !isGuestUser(user));
   const [materials, setMaterials] = useState<Material[]>([]);
   const [sheets, setSheets] = useState<StudySheet[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [paths, setPaths] = useState<StudyPath[]>([]);
   const [tab, setTab] = useState<TabId>("materials");
   const [materialId, setMaterialId] = useState<string | null>(null);
   const [sheetId, setSheetId] = useState<string | null>(null);
@@ -63,10 +76,12 @@ export function ArtifactPanel({
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [sheetsReady, setSheetsReady] = useState(false);
   const [practiceReady, setPracticeReady] = useState(false);
+  const [pathsReady, setPathsReady] = useState(false);
 
   useEffect(() => {
     setSheetsReady(false);
     setPracticeReady(false);
+    setPathsReady(false);
     setTab("materials");
     setMaterialId(null);
     setSheetId(null);
@@ -101,6 +116,10 @@ export function ArtifactPanel({
       ),
     [projectId],
   );
+  useEffect(() => subscribeStudyPaths(projectId, (items) => {
+    setPaths(items);
+    setPathsReady(true);
+  }), [projectId]);
   useEffect(() => {
     setProgress(loadPracticeProgress(projectId));
   }, [projectId, session]);
@@ -118,24 +137,35 @@ export function ArtifactPanel({
     return sets;
   }, [messages]);
 
+  const selectedPath = paths[0] ?? null;
   const counts = {
     materials: materials.length,
     sheets: sheets.length,
     practice: practiceSets.length,
+    path: paths.length,
   };
 
   useEffect(() => {
     if (session || !focus) return;
     if (liveNote) {
+      if (tab === "path") return;
       setTab("sheets");
       setSheetError(null);
       if (liveNote.sheetId) setSheetId(liveNote.sheetId);
       else if (liveNote.status) setSheetId(null);
       return;
     }
+    if (livePath) {
+      setTab("path");
+      return;
+    }
     if (focus.kind === "practice") {
       setTab("practice");
       setPracticeId(focus.id);
+      return;
+    }
+    if (focus.kind === "path") {
+      setTab("path");
       return;
     }
     if (focus.kind === "sheet" || focus.kind === "plan") {
@@ -148,7 +178,7 @@ export function ArtifactPanel({
       setTab("materials");
       setMaterialId(focus.id);
     }
-  }, [focus, session, liveNote]);
+  }, [focus, session, liveNote, livePath, tab]);
 
   useEffect(() => {
     if (session) return;
@@ -173,14 +203,22 @@ export function ArtifactPanel({
   const selectedSet = practiceSets.find((item) => item.id === practiceId) ?? null;
   const showSheets = counts.sheets > 0 || Boolean(liveNote) || (tab === "sheets" && !sheetsReady);
   const showPractice = counts.practice > 0 || (tab === "practice" && !practiceReady);
+  const showPath = counts.path > 0 || tab === "path" || Boolean(livePath);
   const hideTopBar = tab === "sheets" && (Boolean(selectedSheet) || Boolean(liveNote));
 
   useEffect(() => {
     if (!liveNote || liveNote.status || !liveNote.sheetId || !onLiveSettled) return;
-    if (!selectedSheet || selectedSheet.id !== liveNote.sheetId) return;
-    if (!notesMatch(selectedSheet.blocks, liveNote.blocks)) return;
+    const saved = sheets.find((item) => item.id === liveNote.sheetId) ?? selectedSheet;
+    if (!saved || saved.id !== liveNote.sheetId) return;
+    if (!notesMatch(saved.blocks, liveNote.blocks)) return;
     onLiveSettled();
-  }, [liveNote, selectedSheet, onLiveSettled]);
+  }, [liveNote, selectedSheet, sheets, onLiveSettled]);
+
+  useEffect(() => {
+    if (!livePath || livePath.status || !livePath.pathId || !onLivePathSettled) return;
+    if (!selectedPath || selectedPath.id !== livePath.pathId) return;
+    onLivePathSettled();
+  }, [livePath, selectedPath, onLivePathSettled]);
 
   return (
     <aside className="relative z-[1] flex h-full w-full shrink-0 flex-col bg-transparent py-2 pl-1 pr-2 max-md:!w-full">
@@ -198,7 +236,11 @@ export function ArtifactPanel({
             setId={session.setId}
             ids={session.ids}
             startIndex={progress[session.setId] ?? 0}
+            mode={session.mode === "exam" ? "exam" : "practice"}
             onExit={onExitSession}
+            onComplete={(result) => {
+              onPracticeComplete?.(result);
+            }}
           />
         ) : (
           <>
@@ -219,6 +261,17 @@ export function ArtifactPanel({
                         setMaterialId(null);
                       },
                     },
+                    ...(showPath
+                      ? [
+                          {
+                            id: "path",
+                            label: "Path",
+                            icon: "plan" as const,
+                            active: tab === "path",
+                            onClick: () => setTab("path"),
+                          },
+                        ]
+                      : []),
                     ...(showSheets
                       ? [
                           {
@@ -261,7 +314,25 @@ export function ArtifactPanel({
             </header>
             )}
 
-            <div className={`min-h-0 flex-1 ${tab === "materials" && materialId ? "overflow-hidden" : "overflow-y-auto"}`}>
+            <div className={`min-h-0 flex-1 ${tab === "materials" && materialId ? "overflow-hidden" : tab === "path" ? "overflow-hidden" : "overflow-y-auto"}`}>
+              {tab === "path" && (livePath || selectedPath) ? (
+                <PathView
+                  path={
+                    livePath
+                      ? liveStudyPath({
+                          title: livePath.title,
+                          courses: livePath.courses,
+                          id: livePath.pathId,
+                        })
+                      : selectedPath!
+                  }
+                  status={livePath?.status}
+                  sheets={sheets}
+                  liveNote={tab === "path" ? liveNote : null}
+                />
+              ) : tab === "path" && !pathsReady ? null : tab === "path" ? (
+                <EmptyState title="No path yet" body="Ask for a course path from a syllabus. It will open here." />
+              ) : null}
               {tab === "materials" && (
                 <MaterialsView
                   items={materials}
@@ -512,7 +583,7 @@ function LiveNoteView({
             busy ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
-          <p className="status-shimmer truncate text-[12px]">{status || "Creating notes…"}</p>
+          <StatusWait label={status || "Creating notes…"} className="text-[12px]" />
         </div>
         <div
           className={`absolute inset-0 flex items-center transition-opacity duration-300 ${
@@ -556,11 +627,17 @@ function PracticeView({
     const saved = progress[selected.id] ?? 0;
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <ArtifactBack label={`Practice set · ${count}`} onBack={onBack} />
+        <ArtifactBack label={`${selected.mode === "exam" ? "Exam" : "Practice set"} · ${count}`} onBack={onBack} />
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 py-10 text-center">
-          <p className="text-[15px] font-medium tracking-tight text-foreground">Practice set · {count} items</p>
+          <p className="text-[15px] font-medium tracking-tight text-foreground">
+            {selected.mode === "exam" ? "Exam" : "Practice set"} · {count} items
+          </p>
           <p className="mt-2 max-w-[240px] text-[13px] leading-5 text-muted">
-            {saved > 0 ? `Resume from item ${saved + 1}.` : "Start when you want. Chat stays on the left."}
+            {saved > 0
+              ? `Resume from item ${saved + 1}.`
+              : selected.mode === "exam"
+                ? "One check each. About 50% counts as a pass."
+                : "Work through mistakes until you finish."}
           </p>
           <button
             type="button"

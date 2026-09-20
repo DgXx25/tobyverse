@@ -3,7 +3,7 @@ import type { ChatMode } from "@/types/chat";
 import type { ProjectGoal } from "@/types/goals";
 import type { LessonRecipe } from "@/types/lesson";
 
-export const ACTIVE_ARTIFACT_KINDS = ["practice_set", "study_sheet"] as const;
+export const ACTIVE_ARTIFACT_KINDS = ["practice_set", "study_sheet", "study_path"] as const;
 export type KnownActiveArtifactKind = (typeof ACTIVE_ARTIFACT_KINDS)[number];
 /** Known kinds plus a generic { kind, id, title } for future tools. */
 export type ActiveArtifactKind = KnownActiveArtifactKind | (string & {});
@@ -39,4 +39,5 @@ export type CreateProjectInput = {
   description?: string;
   userId: EntityId;
   goal?: ProjectGoal;
+  preferredChatMode?: ChatMode;
 };

@@ -29,8 +29,20 @@ function readJsonFile(filePath: string): Record<string, unknown> | null {
   }
 }
 
+function runningOnGcp(): boolean {
+  return Boolean(
+    process.env.K_SERVICE ||
+      process.env.K_REVISION ||
+      process.env.FUNCTION_TARGET ||
+      process.env.FUNCTION_NAME ||
+      process.env.CLOUD_RUN_JOB ||
+      process.env.GCE_METADATA_HOST ||
+      process.env.GCE_METADATA_IP,
+  );
+}
+
 function firebaseCliRefreshToken(): string | null {
-  if (process.env.NODE_ENV === "production") return null;
+  if (runningOnGcp()) return null;
   const candidates = [
     path.join(os.homedir(), ".config", "configstore", "firebase-tools.json"),
     path.join(process.env.APPDATA || "", "configstore", "firebase-tools.json"),
@@ -135,6 +147,7 @@ async function tokenFromServiceAccount(sa: Record<string, unknown>): Promise<str
 export function hasGcsWriteCredentials(): boolean {
   try {
     if (serviceAccountJson()) return true;
+    if (runningOnGcp()) return true;
     if (firebaseCliRefreshToken()) return true;
     const file = credentialFile();
     if (!file) return false;
@@ -144,11 +157,40 @@ export function hasGcsWriteCredentials(): boolean {
   }
 }
 
+async function tokenFromMetadata(): Promise<string> {
+  const host = process.env.GCE_METADATA_HOST || process.env.GCE_METADATA_IP || "metadata.google.internal";
+  const url = `http://${host}/computeMetadata/v1/instance/service-accounts/default/token?scopes=${encodeURIComponent(STORAGE_SCOPE)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { "Metadata-Flavor": "Google" },
+      signal: controller.signal,
+    });
+  } catch {
+    throw new Error("Could not get a Google access token for Storage.");
+  } finally {
+    clearTimeout(timer);
+  }
+  const data = (await response.json().catch(() => ({}))) as { access_token?: string; expires_in?: number };
+  if (!response.ok || !data.access_token) {
+    throw new Error("Could not get a Google access token for Storage.");
+  }
+  cached = {
+    token: data.access_token,
+    expiresAt: Date.now() + Math.max(30, (data.expires_in ?? 3600) - 60) * 1000,
+  };
+  return data.access_token;
+}
+
 async function googleAccessToken(): Promise<string> {
   if (cached && cached.expiresAt > Date.now()) return cached.token;
 
   const sa = serviceAccountJson();
   if (sa) return tokenFromServiceAccount(sa);
+
+  if (runningOnGcp()) return tokenFromMetadata();
 
   const cliRefresh = firebaseCliRefreshToken();
   if (cliRefresh) {
@@ -191,6 +233,27 @@ export async function uploadGcsObject(objectPath: string, buffer: Buffer, conten
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(text.slice(0, 240) || `Storage upload failed (${response.status}).`);
+  }
+}
+
+export async function deleteGcsObject(objectPath: string): Promise<void> {
+  const bucket = bucketName();
+  if (!bucket) throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set.");
+  const token = await googleAccessToken();
+  const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    throw new Error("Storage delete failed. Could not reach Google Cloud Storage.");
+  }
+  if (response.status === 404) return;
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text.slice(0, 240) || `Storage delete failed (${response.status}).`);
   }
 }
 

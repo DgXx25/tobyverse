@@ -1,4 +1,5 @@
 import type { ChatMode } from "@/types/chat";
+import { asChatMode } from "@/lib/core/chat-modes";
 import type { ProjectTabId } from "@/lib/core/constants";
 import { DEFAULT_AI_PROVIDER, isEnabledProvider, type AiProviderId } from "@/lib/ai/catalog";
 import {
@@ -24,7 +25,7 @@ function key(projectId: string) {
   return `tv.workspace.${projectId}`;
 }
 
-export function defaultWorkspacePrefs(mode: ChatMode = "normal"): WorkspacePrefs {
+export function defaultWorkspacePrefs(mode: ChatMode = "auto"): WorkspacePrefs {
   return {
     tab: "chat",
     mode,
@@ -47,7 +48,7 @@ export function loadWorkspacePrefs(projectId: string, mode: ChatMode): Workspace
     const width = typeof parsed.artifactWidth === "number" ? parsed.artifactWidth : 420;
     return {
       tab: TABS.includes(parsed.tab as ProjectTabId) ? (parsed.tab as ProjectTabId) : "chat",
-      mode: parsed.mode === "socratic" ? "socratic" : parsed.mode === "normal" ? "normal" : mode,
+      mode: asChatMode(parsed.mode, mode),
       intent: isComposerIntent(parsed.intent) ? parsed.intent : DEFAULT_COMPOSER_INTENT,
       model: isEnabledProvider(String(parsed.model)) ? (parsed.model as AiProviderId) : DEFAULT_AI_PROVIDER,
       useMaterials: parsed.useMaterials !== false,

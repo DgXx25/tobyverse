@@ -16,6 +16,8 @@
         "authorizedRedirectUris": [
           "http://localhost",
           "http://localhost:3000",
+          "http://localhost:3000/__/auth/handler",
+          "http://127.0.0.1:3000/__/auth/handler",
           "https://tobyverse.web.app",
           "https://tobyverse.web.app/__/auth/handler",
           "https://tobyverse.ge",

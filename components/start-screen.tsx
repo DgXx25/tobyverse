@@ -10,7 +10,15 @@ import { newChipId } from "@/lib/composer/attach";
 import { ensureSessionUser } from "@/lib/auth";
 import { guestCapReached, GuestCapError, isGuestUser } from "@/lib/guest";
 import { startProjectFromPrompt } from "@/lib/workspace/start-project";
-import type { ComposerIntent } from "@/lib/composer/intent";
+import { urlsInText } from "@/lib/materials/ingest-client";
+import { type ComposerIntent } from "@/lib/composer/intent";
+import {
+  COMPOSER_SKILL_META,
+  consumeSlashCommand,
+  type ComposerSkill,
+} from "@/lib/composer/slash";
+import { loadSavedChatMode, saveChatMode } from "@/lib/workspace/chat-mode";
+import type { ChatMode } from "@/types/chat";
 import type { PendingAttachment } from "@/lib/workspace/pending-start";
 
 type StartMode = "practice" | "sheet" | "materials" | "explain";
@@ -88,9 +96,19 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [mode, setMode] = useState<StartMode | null>(null);
+  const [skill, setSkill] = useState<ComposerSkill | null>(null);
+  const [chatMode, setChatMode] = useState<ChatMode>("auto");
   const [needGoogle, setNeedGoogle] = useState(false);
   const guest = publicHome || isGuestUser(user);
   const reducedMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
+    setChatMode(loadSavedChatMode());
+  }, []);
+
+  useEffect(() => {
+    router.prefetch("/project/_");
+  }, [router]);
 
   useEffect(() => {
     if (!guest) {
@@ -155,6 +173,7 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
 
   function pickMode(next: StartMode) {
     setMode(next);
+    setSkill(next === "practice" ? "practice" : next === "sheet" ? "notes" : null);
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -166,7 +185,16 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   async function start() {
     if (sending) return;
     const prompt = draft.trim();
-    if (!prompt && attachments.length === 0) return;
+    const promptUrls = urlsInText(prompt);
+    const packed = guest
+      ? []
+      : [
+          ...attachments,
+          ...promptUrls
+            .filter((url) => !attachments.some((item) => item.kind === "url" && item.url === url))
+            .map((url) => ({ id: newChipId(), kind: "url" as const, url })),
+        ];
+    if (!prompt && packed.length === 0) return;
     if (guest && (mode === "practice" || mode === "sheet" || mode === "materials")) return;
     if (guest && guestCapReached()) {
       setNeedGoogle(true);
@@ -174,26 +202,34 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
     }
 
     setSending(true);
-    setIngestPhase(attachments.length > 0 ? "uploading" : null);
+    setIngestPhase(packed.length > 0 ? "uploading" : null);
     setError(null);
     try {
-      const signedIn = await ensureSessionUser();
+      const signedIn = user ?? (await ensureSessionUser());
       if (isGuestUser(signedIn) && guestCapReached()) {
         setNeedGoogle(true);
         setSending(false);
         setIngestPhase(null);
         return;
       }
+      const slash = consumeSlashCommand(prompt);
+      if (slash.mode) {
+        setChatMode(slash.mode);
+        saveChatMode(slash.mode);
+      }
+      const nextSkill = slash.skill ?? skill;
+      const nextMode = slash.mode ?? chatMode;
+      const nextPrompt = slash.skill || slash.mode ? slash.prompt.trim() : prompt;
       const id = await startProjectFromPrompt({
         userId: signedIn.uid,
-        prompt,
-        attachments: guest ? [] : attachments,
-        intent: guest ? undefined : activeMode?.intent,
+        prompt: nextPrompt || prompt,
+        attachments: packed,
+        intent: guest ? undefined : nextSkill ? COMPOSER_SKILL_META[nextSkill].intent : activeMode?.intent,
+        skill: guest ? undefined : nextSkill ?? undefined,
+        mode: nextMode,
       });
       if (!id) throw new Error("Could not start.");
-      setDraft("");
-      setMode(null);
-      router.push(`/project/${id}`);
+      router.replace(`/project/${id}`);
     } catch (err) {
       if (err instanceof GuestCapError) {
         setNeedGoogle(true);
@@ -209,6 +245,18 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
 
   function clearMode() {
     setMode(null);
+    setSkill(null);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function onChatMode(next: ChatMode) {
+    setChatMode(next);
+    saveChatMode(next);
+  }
+
+  function onSkill(next: ComposerSkill | null) {
+    setSkill(next);
+    setMode(next === "practice" ? "practice" : next === "notes" ? "sheet" : null);
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -255,11 +303,17 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
         placeholder={guest ? "Ask anything" : (activeMode?.placeholder ?? "Ask anything")}
         fieldStart={fieldStart}
         fadePlaceholder={!guest}
+        dropActive={dragging}
         pad={false}
         allowAttach={!guest}
         showParameters
-        onBackspaceEmpty={!guest && mode ? clearMode : undefined}
-        onEscape={!guest && mode ? clearMode : undefined}
+        chatMode={chatMode}
+        onChatMode={onChatMode}
+        skill={guest ? null : skill}
+        onSkill={guest ? undefined : onSkill}
+        slashSkills={!guest}
+        onBackspaceEmpty={!guest && (mode || skill) ? clearMode : undefined}
+        onEscape={!guest && (mode || skill) ? clearMode : undefined}
         onArrowDown={guest ? undefined : () => firstActionRef.current?.focus()}
         onRemoveChip={(id) => {
           setAttachments((current) => current.filter((item) => item.id !== id));
@@ -285,10 +339,14 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
     </>
   );
 
+  const heading = (
+    <h1 className="text-center text-[32px] font-medium tracking-tight text-foreground">What should we learn?</h1>
+  );
+
   if (publicHome || guest) {
     return (
       <div className="relative flex h-full min-h-0 flex-col items-center justify-center px-6 pb-16">
-        <h1 className="mb-8 text-center text-[32px] font-medium tracking-tight text-foreground">What should we learn?</h1>
+        <div className="mb-8">{heading}</div>
         <div className="mx-auto w-full max-w-[850px] composer-pad">{composer}</div>
       </div>
     );
@@ -320,35 +378,31 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col md:items-center md:justify-center">
-        <div className="flex min-h-0 flex-1 items-center justify-center px-6 md:flex-none md:pb-8">
-          <h1 className="text-center text-[32px] font-medium tracking-tight text-foreground">What should we learn?</h1>
-        </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6 md:hidden">{heading}</div>
 
-        <div className="mx-auto w-[min(850px,calc(100%-32px))] composer-pad max-md:mt-auto md:pb-8">
-          {composer}
-
-          <div className="start-suggest-list mt-6" aria-live="polite">
-            {shownRows.map((item, index) => (
-              <button
-                key={item.id}
-                ref={index === 0 ? firstActionRef : undefined}
-                type="button"
-                onClick={() => {
-                  if (item.action === "mode" && item.mode) pickMode(item.mode);
-                  else fillTopic(item.label);
-                }}
-                onKeyDown={(event) => onListKey(event, index, shownRows.length)}
-                className={`start-suggest-row ${rowPhase === "out" ? "start-suggest-out" : "start-suggest-in"}`}
-                style={rowPhase === "in" && !reducedMotion ? { animationDelay: `${index * 20}ms` } : undefined}
-              >
-                <span className="start-suggest-icon">
-                  <UiIcon name={item.icon} size={20} />
-                </span>
-                <span className="start-suggest-label">{item.label}</span>
-              </button>
-            ))}
-          </div>
+      <div className="start-stage-pin mx-auto w-[min(850px,calc(100%-32px))] composer-pad max-md:mt-auto">
+        <div className="start-stage-title hidden md:block">{heading}</div>
+        {composer}
+        <div className="start-suggest-list mt-6" aria-live="polite">
+          {shownRows.map((item, index) => (
+            <button
+              key={item.id}
+              ref={index === 0 ? firstActionRef : undefined}
+              type="button"
+              onClick={() => {
+                if (item.action === "mode" && item.mode) pickMode(item.mode);
+                else fillTopic(item.label);
+              }}
+              onKeyDown={(event) => onListKey(event, index, shownRows.length)}
+              className={`start-suggest-row ${rowPhase === "out" ? "start-suggest-out" : "start-suggest-in"}`}
+              style={rowPhase === "in" && !reducedMotion ? { animationDelay: `${index * 20}ms` } : undefined}
+            >
+              <span className="start-suggest-icon">
+                <UiIcon name={item.icon} size={20} />
+              </span>
+              <span className="start-suggest-label">{item.label}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>

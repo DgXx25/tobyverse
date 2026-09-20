@@ -9,7 +9,7 @@ export type AccountSheetPage = "root" | "appearance" | "parameters" | "billing" 
 
 export type PendingPanel = {
   projectId: string;
-  kind: "material" | "sheet" | "plan" | "practice";
+  kind: "material" | "sheet" | "plan" | "practice" | "path";
   id: string;
   title?: string;
 };
@@ -22,8 +22,6 @@ export type ProjectSettingsBridge = {
 };
 
 type ShellContextValue = {
-  collapsed: boolean;
-  setCollapsed: (value: boolean) => void;
   sidebarHidden: boolean;
   setSidebarHidden: (value: boolean) => void;
   mobileNavOpen: boolean;
@@ -47,7 +45,10 @@ type ShellContextValue = {
 
 const ShellContext = createContext<ShellContextValue | null>(null);
 
-const COLLAPSE_KEY = "tv.sidebar.collapsed";
+function blurActive() {
+  if (typeof document === "undefined") return;
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+}
 
 function sectionToSheetPage(section?: SettingsSection): AccountSheetPage {
   if (
@@ -65,10 +66,6 @@ function sectionToSheetPage(section?: SettingsSection): AccountSheetPage {
 
 export function ShellProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [collapsed, setCollapsedState] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(COLLAPSE_KEY) === "1";
-  });
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpenState] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -79,20 +76,14 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   const [pendingPanel, setPendingPanel] = useState<PendingPanel | null>(null);
   const [mobileTopActions, setMobileTopActions] = useState<ReactNode>(null);
 
-  const setCollapsed = useCallback((value: boolean) => {
-    setCollapsedState(value);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
-    }
-  }, []);
-
   const setMobileNavOpen = useCallback((value: boolean) => {
+    if (!value) blurActive();
     setMobileNavOpenState(value);
   }, []);
 
   const closeAccountSheet = useCallback(() => {
+    blurActive();
     setAccountSheetOpen(false);
-    setAccountSheetPage("root");
   }, []);
 
   useEffect(() => {
@@ -111,6 +102,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openAccountSheet = useCallback((page: AccountSheetPage = "root") => {
+    blurActive();
     setMobileNavOpenState(false);
     setAccountSheetPage(page);
     setAccountSheetOpen(true);
@@ -125,6 +117,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (isMobileWidth()) {
+      blurActive();
       setMobileNavOpenState(false);
       setAccountSheetPage(sectionToSheetPage(section));
       setAccountSheetOpen(true);
@@ -138,8 +131,6 @@ export function ShellProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({
-      collapsed,
-      setCollapsed,
       sidebarHidden,
       setSidebarHidden,
       mobileNavOpen,
@@ -161,8 +152,6 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       setMobileTopActions,
     }),
     [
-      collapsed,
-      setCollapsed,
       sidebarHidden,
       mobileNavOpen,
       setMobileNavOpen,

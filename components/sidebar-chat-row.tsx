@@ -198,7 +198,7 @@ export function SidebarChatRow({
       {gone ? null : (
         <div
           ref={rowRef}
-          className={`group/chat relative flex h-9 items-center gap-1.5 rounded-xl px-[13px] py-1.5 text-foreground transition-colors ${
+          className={`group/chat relative flex h-9 items-center gap-1.5 rounded-xl px-[13px] py-1.5 text-foreground ${
             open ? "sidebar-chat-open bg-surface-2" : active ? "bg-surface-2" : "hover:bg-surface-2"
           }`}
         >
@@ -245,7 +245,7 @@ export function SidebarChatRow({
                   onMenuOpen(menuOpen ? null : project.id);
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
-                className={`absolute right-[6px] flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-foreground/70 transition-opacity hover:bg-foreground/10 hover:text-foreground ${
+                className={`absolute right-[6px] flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-foreground/70 hover:bg-foreground/10 hover:text-foreground ${
                   open
                     ? "opacity-100"
                     : "pointer-events-none opacity-0 group-hover/chat:pointer-events-auto group-hover/chat:opacity-100"

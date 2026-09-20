@@ -13,7 +13,8 @@ function useFirstObjectUrl(paths: string[]) {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (paths.length === 0) {
+    const list = key ? key.split("|") : [];
+    if (list.length === 0) {
       setUrl(null);
       return;
     }
@@ -22,7 +23,7 @@ function useFirstObjectUrl(paths: string[]) {
 
     (async () => {
       setUrl(null);
-      for (const path of paths) {
+      for (const path of list) {
         if (isMissingMaterialFile(path)) continue;
         try {
           const next = await storageDownloadUrl(path);
@@ -74,9 +75,11 @@ function IconFallback({ item }: { item: LibraryItem }) {
       ? "practice"
       : item.kind === "sheet"
         ? "notes"
-        : isLibraryPptx(item)
-          ? "deck"
-          : "file";
+        : item.kind === "path"
+          ? "plan"
+          : isLibraryPptx(item)
+            ? "deck"
+            : "file";
   return <UiIcon name={icon} size={40} className="accent-symbol text-muted" />;
 }
 

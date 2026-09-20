@@ -148,7 +148,7 @@ export async function deleteExercise(projectId: string, exerciseId: string): Pro
 
 export function exerciseStem(item: ProjectExercise): string {
   const data = item.data as Record<string, unknown>;
-  const stem = [data.question, data.statement, data.prompt, data.problem, data.scenario]
+  const stem = [data.question, data.statement, data.prompt, data.problem, data.scenario, data.brief]
     .find((value) => typeof value === "string") as string | undefined;
   return (stem ?? item.type).slice(0, 80);
 }

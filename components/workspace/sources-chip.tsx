@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
-import { IconFile, IconPages } from "@/components/workspace/icons";
-import type { ChatImageHit, ChatMessage } from "@/types/chat";
+import { UiIcon } from "@/components/workspace/ui-icon";
+import type { ChatMessage } from "@/types/chat";
 
 export type SourceItem = {
   title: string;
@@ -13,43 +13,9 @@ export type SourceItem = {
   url: string;
 };
 
-function hostOf(value: string): string {
-  try {
-    return new URL(value).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
-function webSourceUrl(hit: ChatImageHit): string | null {
-  if (hit.kind === "upload" || hit.storagePath) return null;
-  const url = (hit.pageUrl || hit.url || "").trim();
-  if (!/^https?:\/\//i.test(url)) return null;
-  const title = hit.title?.trim() || hit.alt?.trim();
-  if (!title) return null;
-  return url;
-}
-
-/** Web results the model actually used. Never counts uploaded files / project materials. */
-export function sourcesForTurn(assistant: ChatMessage): SourceItem[] {
-  const items: SourceItem[] = [];
-  const seen = new Set<string>();
-
-  for (const hit of assistant.images ?? []) {
-    const url = webSourceUrl(hit);
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
-    const thumb = (hit.thumb || hit.thumbnail || "").trim();
-    items.push({
-      title: (hit.title || hit.alt || "").trim(),
-      host: hostOf(url) || hit.source,
-      license: hit.license,
-      thumb: thumb && !thumb.startsWith("users/") ? thumb : undefined,
-      url,
-    });
-  }
-
-  return items;
+/** Link-search citations. Photo hits are not sources. */
+export function sourcesForTurn(_assistant: ChatMessage): SourceItem[] {
+  return [];
 }
 
 export function SourcesChip({ items }: { items: SourceItem[] }) {
@@ -84,7 +50,7 @@ export function SourcesChip({ items }: { items: SourceItem[] }) {
         className="inline-flex h-[22px] items-center gap-1.5 rounded-full border border-white/12 bg-[#1c1c1c] px-2 text-[13px] leading-none text-white/90 shadow-none"
         aria-expanded={open}
       >
-        <IconPages className="h-3 w-3 text-white/80" />
+        <UiIcon name="pages" size={12} className="text-white/80" />
         {label}
       </button>
       {open ? (
@@ -116,7 +82,7 @@ function SourceRow({ item, onOpen }: { item: SourceItem; onOpen: () => void }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[12px] text-foreground">{item.title}</span>
         <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted">
-          <IconFile className="h-3 w-3 shrink-0" />
+          <UiIcon name="file" size={12} className="shrink-0" />
           <span className="truncate">{item.host}</span>
           {item.license ? <span className="shrink-0">· {item.license}</span> : null}
         </span>
@@ -135,7 +101,7 @@ function SourceThumb({ item }: { item: SourceItem }) {
   }
   return (
     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-2 text-muted">
-      <IconFile className="h-3.5 w-3.5" />
+      <UiIcon name="file" size={14} />
     </span>
   );
 }
@@ -167,7 +133,7 @@ export function StorageThumb({ path, className = "h-8 w-8" }: { path: string; cl
   if (!url) {
     return (
       <span className={`flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-2 text-muted ${className}`}>
-        <IconFile className="h-3.5 w-3.5" />
+        <UiIcon name="file" size={14} />
       </span>
     );
   }

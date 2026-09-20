@@ -2,7 +2,9 @@ import {
   type ChatToolCall,
   type ChatToolName,
 } from "@/lib/ai/tools";
-import type { PendingKind } from "@/types/chat";
+import { isFormWriteTopic } from "@/lib/exercises/plan";
+import { isSimpleChatTask } from "@/lib/blocks/match";
+import type { AcceptedChatTool, PendingKind } from "@/types/chat";
 
 export const COMPOSER_INTENTS = [
   "ask",
@@ -87,8 +89,10 @@ const FILLERS = new Set([
 const TOPIC_STRIP = [
   "დამავარჯიშე",
   "გამომცადე",
+  "გამოცდა",
   "ვივარჯიშო",
   "ვარჯიში",
+  "exam",
   "quiz me",
   "test me",
   "practice",
@@ -97,6 +101,11 @@ const TOPIC_STRIP = [
   "შემაჯამე",
   "study sheet",
   "summarize",
+  "study path",
+  "course path",
+  "syllabus",
+  "სილაბუსი",
+  "კურსის გზა",
   "შექმენი",
   "დამიწერე",
   "დაწერე",
@@ -113,10 +122,14 @@ const TOPIC_STRIP = [
 
 const GENERATE_NOW =
   /რაც გინდა|რაც მოგივა|დააგენერირე|გენერირება|\bსულ\b|just generate|generate (it|now|anyway)|whatever|random\b|any(thing)? (is )?fine|don't care|dont care|up to you|i don't mind/i;
+const ACCEPT_OFFER = /^(დიახ|კი|ხო|კარგი|ოკ|ok|okay|yes|yep|sure)\.?!?$/i;
+
+const DO_IT_NOW = /დამიწერე|გააკეთე/i;
 
 export function wantsImmediateCreate(prompt: string, confirmed?: boolean): boolean {
   if (confirmed) return true;
-  return GENERATE_NOW.test(prompt.trim());
+  const text = prompt.trim();
+  return GENERATE_NOW.test(text) || DO_IT_NOW.test(text);
 }
 
 export function looksLikeQuestion(prompt: string): boolean {
@@ -200,28 +213,100 @@ export function assessCreateReady(input: {
 export function intentFromTool(name: ChatToolName): ComposerIntent {
   if (name === "create_practice" || name === "suggest_practice") return "practice";
   if (name === "create_sheet" || name === "suggest_sheet") return "study";
+  if (
+    name === "create_path" ||
+    name === "suggest_path" ||
+    name === "advance_path" ||
+    name === "restart_path" ||
+    name === "start_path"
+  ) {
+    return "plan";
+  }
   if (name === "edit_practice") return "edit";
   if (name === "append_practice") return "append";
   if (name === "edit_sheet") return "rewrite_sheet";
   return "ask";
 }
 
-const PRACTICE_HINT =
-  /დამავარჯიშე|გამომცადე|ვივარჯიშო|ვარჯიში|quiz me|test me|\bpractice\b|\bquiz\b/i;
+const EXAM_HINT = /გამომცადე|გამოცდა|\bexam\b|quiz me|test me|\bquiz\b/i;
+const PRACTICE_HINT = /დამავარჯიშე|ვივარჯიშო|ვარჯიში|\bpractice\b/i;
 /** One stem covers კონსპექტი / დავაკონსპექტო / დამიკონსპექტე. */
 const SHEET_HINT = /კონსპექტ|შემომაჯამე|შემაჯამე|study sheet|\bnotes\b|summarize/i;
+/** Course map — not a notes dump. */
+const PATH_HINT =
+  /სილაბუს|syllabus|study path|course path|კურსის გზა|სასწავლო გზა|დაგეგმე კურსი|დამიგეგმე|map this course|map the course|ეს კურსი მასწავლე|მასწავლე ეს კურსი|გზა დამიკეთე/i;
+/** Exam review track — not "quiz me now". */
+const EXAM_PREP_HINT =
+  /ფინალურ|გამეორება|გამიმეორე|exam prep|final exam|revise for|review for (the )?(exam|final)|study for (the )?(exam|final)/i;
+const ADVANCE_HINT =
+  /გავიარე|გავიარეთ|შემდეგი თემა|შემდეგი ნაბიჯი|next topic|next step|mark (this )?done|i(?:['’]m| am) done with this/i;
+const RESTART_PATH_HINT =
+  /პირველიდან|თავიდან\s*(დაიწყ|დავიწყ)|დაიწყე?\s*თავიდან|start from (the )?(beginning|first|start)|from the (beginning|start)|reset (the )?(path|progress)|დაბრუნდი\s*თავ|თავში\s*დავყენო/i;
+const START_PATH_HINT =
+  /დავიწყოთ|დავიწყო|მზად ვარ|let'?s start|start (the )?(path|course)|i'?m ready|\bcontinue\b|გავაგრძელოთ|go ahead/i;
 /** Safety-net only. The model owns image intent in any language. */
 const IMAGE_HINT =
   /მომიძებნე|გრაფიკ|ფოტო|სურათ|\bphotos?\b|\bimages?\b|\bpictures?\b|\bcharts?\b|\bgraphs?\b|\bdiagrams?\b/i;
 const EDIT_HINT = /გაამარტივე|შეამოკლე|simplify|shorten|rewrite|easier/i;
 const APPEND_HINT = /დაამატე|add more|more questions|more items/i;
 
+/** Hidden tutor turns. Keyword routers must not treat "notes"/"practice" in these strings as a user request. */
+function isInternalTutorPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  return (
+    text.startsWith("Tutor-lead (not a user request):") ||
+    text.startsWith("Move-on (not a user request):") ||
+    text.startsWith("The student just looked at ") ||
+    text.startsWith("Hint-only (not a user request):") ||
+    text.startsWith("Exam-only (not a user request):") ||
+    text.startsWith("Work-finished (not a user request):")
+  );
+}
+
+export function wantsExam(prompt: string): boolean {
+  if (isInternalTutorPrompt(prompt)) return false;
+  return EXAM_HINT.test(prompt);
+}
+
 export function wantsPractice(prompt: string): boolean {
-  return PRACTICE_HINT.test(prompt);
+  if (isInternalTutorPrompt(prompt)) return false;
+  return PRACTICE_HINT.test(prompt) || EXAM_HINT.test(prompt);
+}
+
+export function practiceModeOf(prompt: string, mode?: string | null): "practice" | "exam" {
+  if (mode === "exam" || mode === "practice") return mode;
+  return wantsExam(prompt) ? "exam" : "practice";
 }
 
 export function wantsSheet(prompt: string): boolean {
+  if (isInternalTutorPrompt(prompt)) return false;
   return SHEET_HINT.test(prompt);
+}
+
+export function wantsExamPrep(prompt: string): boolean {
+  if (isInternalTutorPrompt(prompt)) return false;
+  return EXAM_PREP_HINT.test(prompt);
+}
+
+export function wantsPath(prompt: string): boolean {
+  if (isInternalTutorPrompt(prompt)) return false;
+  return PATH_HINT.test(prompt) || EXAM_PREP_HINT.test(prompt);
+}
+
+export function pathKindOf(prompt: string): "course" | "review" {
+  return wantsExamPrep(prompt) ? "review" : "course";
+}
+
+export function wantsAdvancePath(prompt: string): boolean {
+  return ADVANCE_HINT.test(prompt);
+}
+
+export function wantsRestartPath(prompt: string): boolean {
+  return RESTART_PATH_HINT.test(prompt);
+}
+
+export function wantsStartPath(prompt: string): boolean {
+  return START_PATH_HINT.test(prompt);
 }
 
 export function wantsImages(prompt: string): boolean {
@@ -293,6 +378,7 @@ export function resolvePendingKind(
 ): PendingKind | null {
   if (wantsSheet(prompt)) return "sheet";
   if (wantsPractice(prompt)) return "practice";
+  if (wantsPath(prompt)) return "path";
   if (wantsImages(prompt)) return "images";
   return pending?.pendingKind ?? null;
 }
@@ -311,13 +397,19 @@ export function pendingCreateFromMessages(
   const storedKind =
     lastAssistant?.pendingKind === "sheet" ||
     lastAssistant?.pendingKind === "practice" ||
-    lastAssistant?.pendingKind === "images"
+    lastAssistant?.pendingKind === "images" ||
+    lastAssistant?.pendingKind === "path"
       ? lastAssistant.pendingKind
       : null;
   const lastHint = [...messages].reverse().find(
     (item) =>
       item.role === "user" &&
-      (PRACTICE_HINT.test(item.content) || SHEET_HINT.test(item.content) || IMAGE_HINT.test(item.content)),
+      (PRACTICE_HINT.test(item.content) ||
+        EXAM_HINT.test(item.content) ||
+        SHEET_HINT.test(item.content) ||
+        PATH_HINT.test(item.content) ||
+        EXAM_PREP_HINT.test(item.content) ||
+        IMAGE_HINT.test(item.content)),
   );
   const pendingKind: PendingKind | null =
     storedKind ??
@@ -325,11 +417,13 @@ export function pendingCreateFromMessages(
       ? null
       : SHEET_HINT.test(lastHint.content)
         ? "sheet"
-        : PRACTICE_HINT.test(lastHint.content)
+        : PRACTICE_HINT.test(lastHint.content) || EXAM_HINT.test(lastHint.content)
           ? "practice"
-          : IMAGE_HINT.test(lastHint.content)
-            ? "images"
-            : null);
+          : PATH_HINT.test(lastHint.content) || EXAM_PREP_HINT.test(lastHint.content)
+            ? "path"
+            : IMAGE_HINT.test(lastHint.content)
+              ? "images"
+              : null);
   const pendingTopic = lastHint
     ? pendingKind === "images"
       ? extractImageQuery(lastHint.content)
@@ -350,10 +444,83 @@ export function practiceClarifyQuestion(prompt: string): string {
   return promptIsKa(prompt) ? "რაზე გავაკეთო ვარჯიში?" : "What should we practice?";
 }
 
-export function acceptedToolFromIntent(intent?: ComposerIntent | null): "create_practice" | "create_sheet" | undefined {
+export function acceptedToolFromIntent(
+  intent?: ComposerIntent | null,
+): AcceptedChatTool | undefined {
   if (intent === "study") return "create_sheet";
   if (intent === "practice") return "create_practice";
+  if (intent === "plan") return "create_path";
   return undefined;
+}
+
+export function pathClarifyQuestion(prompt: string): string {
+  return promptIsKa(prompt) ? "რომელი კურსის გზა გინდა?" : "Which course should I map?";
+}
+
+export function forcedPathTool(input: {
+  prompt: string;
+  hasMaterials?: boolean;
+  confirmed?: boolean;
+  accepted?: AcceptedChatTool;
+  pathTopic?: string;
+  hasPath?: boolean;
+  pathStarted?: boolean;
+}): ChatToolCall | null {
+  if (input.accepted === "start_path" && input.hasPath && !input.pathStarted) {
+    return { name: "start_path", args: {} };
+  }
+  if (
+    input.hasPath &&
+    !input.pathStarted &&
+    wantsStartPath(input.prompt) &&
+    !wantsSheet(input.prompt) &&
+    !wantsPractice(input.prompt) &&
+    !wantsImages(input.prompt) &&
+    !wantsPath(input.prompt)
+  ) {
+    return { name: "start_path", args: {} };
+  }
+  if (
+    input.hasPath &&
+    !input.pathStarted &&
+    wantsRestartPath(input.prompt) &&
+    !wantsSheet(input.prompt) &&
+    !wantsPractice(input.prompt) &&
+    !wantsImages(input.prompt)
+  ) {
+    return { name: "restart_path", args: {} };
+  }
+  const asked = wantsPath(input.prompt) || input.accepted === "create_path";
+  if (!asked) return null;
+  if (input.hasPath && input.pathStarted && input.accepted !== "create_path") {
+    return null;
+  }
+  const topic = extractTopic(input.prompt) || input.pathTopic || null;
+  const ready =
+    Boolean(topic) ||
+    Boolean(input.hasMaterials) ||
+    Boolean(input.confirmed) ||
+    wantsImmediateCreate(input.prompt, input.confirmed);
+  if (!ready) {
+    return { name: "clarify", args: { question: pathClarifyQuestion(input.prompt) } };
+  }
+  const mapNow =
+    input.accepted === "create_path" ||
+    wantsImmediateCreate(input.prompt, input.confirmed) ||
+    Boolean(input.hasMaterials);
+  if (!mapNow) {
+    return { name: "suggest_path", args: { topic: topic ?? undefined } };
+  }
+  return { name: "create_path", args: { topic: topic ?? undefined } };
+}
+
+export function forcedAdvancePath(input: { prompt: string; hasPath?: boolean; pathStarted?: boolean }): ChatToolCall | null {
+  if (!input.hasPath || !input.pathStarted) return null;
+  if (!wantsAdvancePath(input.prompt)) return null;
+  if (wantsPath(input.prompt) || wantsPractice(input.prompt) || wantsSheet(input.prompt) || wantsImages(input.prompt)) {
+    return null;
+  }
+  return { name: "advance_path", args: {} };
 }
 
 /** Create notes/practice without waiting for the model. The chat LLM must not write the artifact as text. */
@@ -364,25 +531,34 @@ export function forcedCreateTool(input: {
   priorClarify?: boolean;
   pendingTopic?: string | null;
   pendingKind?: PendingKind | null;
-  accepted?: "create_practice" | "create_sheet";
+  accepted?: AcceptedChatTool;
+  pathTopic?: string;
+  projectTitle?: string;
 }): ChatToolCall | null {
   const prompt = input.prompt;
-  const askedPractice = PRACTICE_HINT.test(prompt);
-  const askedSheet = SHEET_HINT.test(prompt);
+  if (input.accepted === "create_path" || wantsPath(prompt)) return null;
+  if (
+    isFormWriteTopic(prompt, input.pendingTopic, input.pathTopic, input.projectTitle) &&
+    input.accepted !== "create_sheet"
+  ) {
+    return null;
+  }
+  const askedPractice = wantsPractice(prompt);
+  const askedSheet = wantsSheet(prompt);
   if (wantsImages(prompt) && !askedPractice && !askedSheet) return null;
 
   const wantsSheetCreate =
-    askedSheet ||
     input.accepted === "create_sheet" ||
-    (Boolean(input.priorClarify) && input.pendingKind === "sheet");
+    (askedSheet && wantsImmediateCreate(prompt, input.confirmed)) ||
+    (input.pendingKind === "sheet" && ACCEPT_OFFER.test(prompt.trim()));
   const wantsPracticeCreate =
-    askedPractice ||
     input.accepted === "create_practice" ||
-    (Boolean(input.priorClarify) && input.pendingKind === "practice");
+    (askedPractice && wantsImmediateCreate(prompt, input.confirmed)) ||
+    (input.pendingKind === "practice" && ACCEPT_OFFER.test(prompt.trim()));
   if (!wantsSheetCreate && !wantsPracticeCreate) return null;
 
   const name: "create_sheet" | "create_practice" = wantsSheetCreate ? "create_sheet" : "create_practice";
-  const topic = mergePracticeTopic(extractTopic(prompt), input.pendingTopic);
+  const topic = mergePracticeTopic(extractTopic(prompt), input.pendingTopic) ?? input.pathTopic ?? undefined;
   const { ready } = assessCreateReady({
     topic: topic ?? null,
     prompt,
@@ -396,6 +572,9 @@ export function forcedCreateTool(input: {
       args: { question: name === "create_sheet" ? sheetClarifyQuestion(prompt) : practiceClarifyQuestion(prompt) },
     };
   }
+  if (name === "create_practice") {
+    return { name, args: { topic: topic ?? undefined, mode: practiceModeOf(prompt) } };
+  }
   return { name, args: { topic: topic ?? undefined } };
 }
 
@@ -403,11 +582,24 @@ export function forcedCreateTool(input: {
 export function fallbackChatTool(input: {
   prompt: string;
   active?: { kind: string; id: string } | null;
-  accepted?: "create_practice" | "create_sheet";
+  accepted?: AcceptedChatTool;
   priorClarify?: boolean;
   pendingTopic?: string | null;
   pendingKind?: PendingKind | null;
+  pathTopic?: string;
+  projectTitle?: string;
+  hasPath?: boolean;
+  pathStarted?: boolean;
 }): ChatToolCall {
+  if (input.accepted === "search_images") {
+    return { name: "search_images", args: { query: input.prompt.trim() } };
+  }
+  if (input.accepted === "start_path") {
+    return { name: "start_path", args: {} };
+  }
+  if (input.accepted === "create_path") {
+    return { name: "create_path", args: { topic: extractTopic(input.prompt) ?? input.pathTopic ?? undefined } };
+  }
   if (input.accepted) {
     return { name: input.accepted, args: { topic: extractTopic(input.prompt) ?? input.pendingTopic ?? undefined } };
   }
@@ -439,11 +631,11 @@ export function fallbackChatTool(input: {
       };
     }
   }
-  if (looksLikeQuestion(prompt) && !PRACTICE_HINT.test(prompt) && !SHEET_HINT.test(prompt) && !IMAGE_HINT.test(prompt)) {
+  if (looksLikeQuestion(prompt) && !wantsPractice(prompt) && !wantsSheet(prompt) && !IMAGE_HINT.test(prompt) && !PATH_HINT.test(prompt) && !ADVANCE_HINT.test(prompt) && !RESTART_PATH_HINT.test(prompt) && !START_PATH_HINT.test(prompt)) {
     return { name: "answer", args: {} };
   }
-  const askedPractice = PRACTICE_HINT.test(prompt);
-  const askedSheet = SHEET_HINT.test(prompt);
+  const askedPractice = wantsPractice(prompt);
+  const askedSheet = wantsSheet(prompt);
   if (input.priorClarify && input.pendingKind === "images") {
     return {
       name: "search_images",
@@ -457,12 +649,25 @@ export function fallbackChatTool(input: {
     }
     return { name: "search_images", args: { query: prompt.trim() } };
   }
+  const pathTool = forcedPathTool({
+    prompt,
+    confirmed: false,
+    accepted: input.accepted,
+    pathTopic: input.pathTopic,
+    hasPath: input.hasPath,
+    pathStarted: input.pathStarted,
+  });
+  if (pathTool) return pathTool;
+  const advanced = forcedAdvancePath({ prompt, hasPath: input.hasPath, pathStarted: input.pathStarted });
+  if (advanced) return advanced;
   const forced = forcedCreateTool({
     prompt,
     priorClarify: input.priorClarify,
     pendingTopic: input.pendingTopic,
     pendingKind: input.pendingKind,
     accepted: input.accepted,
+    pathTopic: input.pathTopic,
+    projectTitle: input.projectTitle,
   });
   if (forced) return forced;
   return { name: "answer", args: {} };
@@ -482,14 +687,53 @@ export function gateChatTool(input: {
   pendingTopic?: string | null;
   pendingKind?: PendingKind | null;
   active?: { kind: string; id: string } | null;
-  accepted?: "create_practice" | "create_sheet";
+  accepted?: AcceptedChatTool;
+  pathTopic?: string;
+  projectTitle?: string;
+  hasPath?: boolean;
+  pathStarted?: boolean;
   /** Keywords may create only when the provider returned plain text (no tool). */
   keywordFallback?: boolean;
+  mode?: "auto" | "fast" | "teacher";
 }): ChatToolCall {
   const prompt = input.prompt;
   const active = input.active ?? null;
   const pendingKind = input.pendingKind ?? null;
   let tool = input.tool ?? { name: "answer" as const, args: {} };
+
+  const formWrite = isFormWriteTopic(
+    prompt,
+    tool.args.topic,
+    input.pendingTopic,
+    input.pathTopic,
+    input.projectTitle,
+  );
+  if (
+    formWrite &&
+    (tool.name === "suggest_practice" ||
+      tool.name === "create_practice" ||
+      tool.name === "edit_practice" ||
+      tool.name === "append_practice")
+  ) {
+    tool = { name: "answer", args: {} };
+  }
+
+  if (
+    (input.mode === "fast" || isSimpleChatTask(prompt)) &&
+    (tool.name === "suggest_practice" || tool.name === "suggest_sheet" || tool.name === "suggest_path")
+  ) {
+    tool = { name: "answer", args: {} };
+  }
+
+  if (input.accepted === "search_images") {
+    return {
+      name: "search_images",
+      args: {
+        query: tool.args.query?.trim() || prompt.trim(),
+        count: tool.args.count,
+      },
+    };
+  }
 
   if ((tool.name === "edit_practice" || tool.name === "append_practice") && active?.kind !== "practice_set") {
     tool = { name: "create_practice", args: { topic: tool.args.topic ?? extractTopic(prompt) ?? undefined } };
@@ -498,14 +742,27 @@ export function gateChatTool(input: {
     tool = { name: "create_sheet", args: { topic: tool.args.topic ?? extractTopic(prompt) ?? undefined } };
   }
 
-  const askedPractice = PRACTICE_HINT.test(prompt);
-  const askedSheet = SHEET_HINT.test(prompt);
-  const askedImages = wantsImages(prompt) && !askedPractice && !askedSheet;
+  const askedPractice = wantsPractice(prompt);
+  const askedSheet = wantsSheet(prompt);
+  const askedPath = wantsPath(prompt) || input.accepted === "create_path" || pendingKind === "path";
+  const askedAdvance = wantsAdvancePath(prompt);
+  const askedForSheet = askedSheet || input.accepted === "create_sheet" || input.pendingKind === "sheet";
+  const askedForPractice =
+    askedPractice || input.accepted === "create_practice" || input.pendingKind === "practice";
+  const askedImages = wantsImages(prompt) && !askedPractice && !askedSheet && !askedPath;
+  if (tool.name === "suggest_practice" && !askedForPractice) {
+    tool = { name: "answer", args: {} };
+  }
+  if (tool.name === "suggest_sheet" && !askedForSheet && input.mode !== "teacher") {
+    tool = { name: "answer", args: {} };
+  }
   const factQuestion =
     looksLikeQuestion(prompt) &&
     !askedPractice &&
     !askedSheet &&
     !askedImages &&
+    !askedPath &&
+    !askedAdvance &&
     !input.confirmed &&
     !input.priorClarify;
 
@@ -534,15 +791,29 @@ export function gateChatTool(input: {
   }
 
   if (tool.name === "search_images") {
-    const query = tool.args.query?.trim() || prompt.trim();
-    if (!extractImageQuery(prompt) && !tool.args.query?.trim() && !input.priorClarify && wantsImages(prompt)) {
-      return {
-        name: "clarify",
-        args: { question: tool.args.question || imageClarifyQuestion(prompt), options: tool.args.options },
-      };
-    }
-    return { name: "search_images", args: { query, count: tool.args.count } };
+    return { name: "answer", args: {} };
   }
+
+  const pathTool = forcedPathTool({
+    prompt,
+    hasMaterials: input.hasMaterials,
+    confirmed: input.confirmed,
+    accepted: input.accepted,
+    pathTopic: input.pathTopic,
+    hasPath: input.hasPath,
+    pathStarted: input.pathStarted,
+  });
+  if (pathTool) {
+    if (
+      input.mode === "fast" &&
+      (pathTool.name === "suggest_path" || pathTool.name === "suggest_practice" || pathTool.name === "suggest_sheet")
+    ) {
+      return { name: "answer", args: {} };
+    }
+    return pathTool;
+  }
+  const advanced = forcedAdvancePath({ prompt, hasPath: input.hasPath, pathStarted: input.pathStarted });
+  if (advanced) return advanced;
 
   const forced = forcedCreateTool({
     prompt,
@@ -552,6 +823,8 @@ export function gateChatTool(input: {
     pendingTopic: input.pendingTopic,
     pendingKind,
     accepted: input.accepted,
+    pathTopic: input.pathTopic,
+    projectTitle: input.projectTitle,
   });
   if (forced) return forced;
 
@@ -564,6 +837,7 @@ export function gateChatTool(input: {
     !askedPractice &&
     !askedSheet &&
     !askedImages &&
+    !askedPath &&
     !input.priorClarify &&
     !input.confirmed
   ) {
@@ -573,15 +847,16 @@ export function gateChatTool(input: {
   const generateNow = wantsImmediateCreate(prompt, input.confirmed);
   const createFlow =
     pendingKind !== "images" &&
-    (askedPractice || askedSheet || pendingKind === "practice" || pendingKind === "sheet" || Boolean(input.priorClarify));
+    (askedForPractice || askedForSheet || Boolean(input.priorClarify));
   const mutating = EDIT_HINT.test(prompt) || APPEND_HINT.test(prompt);
 
   if (
     input.keywordFallback &&
-    (generateNow || input.priorClarify) &&
+    generateNow &&
     createFlow &&
     !factQuestion &&
-    !mutating
+    !mutating &&
+    !formWrite
   ) {
     if (
       tool.name === "clarify" ||
@@ -599,7 +874,10 @@ export function gateChatTool(input: {
         priorClarify: input.priorClarify,
       });
       if (ready) {
-        tool = { name, args: { topic } };
+        tool =
+          name === "create_practice"
+            ? { name, args: { topic, mode: practiceModeOf(prompt) } }
+            : { name, args: { topic } };
       }
     }
   }
@@ -614,8 +892,41 @@ export function gateChatTool(input: {
     };
   }
 
+  if (tool.name === "create_sheet" && !askedForSheet) {
+    return { name: "answer", args: {} };
+  }
+  if (tool.name === "suggest_path" && !askedPath && input.accepted !== "create_path") {
+    return { name: "answer", args: {} };
+  }
+  if (input.hasPath && tool.name === "create_practice" && !askedForPractice) {
+    return { name: "answer", args: {} };
+  }
+  if (input.hasPath && tool.name === "suggest_practice" && !askedForPractice) {
+    return { name: "answer", args: {} };
+  }
+
   if (isCreateTool(tool.name)) {
-    const topic = mergePracticeTopic(tool.args.topic?.trim() || extractTopic(prompt), input.pendingTopic);
+    if (formWrite && tool.name === "create_practice") {
+      return { name: "answer", args: {} };
+    }
+    const topic =
+      mergePracticeTopic(tool.args.topic?.trim() || extractTopic(prompt), input.pendingTopic) ??
+      input.pathTopic ??
+      undefined;
+    const allowed =
+      input.accepted === tool.name ||
+      wantsImmediateCreate(prompt, input.confirmed) ||
+      (input.pendingKind === (tool.name === "create_sheet" ? "sheet" : "practice") &&
+        ACCEPT_OFFER.test(prompt.trim()));
+    if (!allowed) {
+      if (tool.name === "create_sheet" && askedForSheet) {
+        return { name: "suggest_sheet", args: { topic } };
+      }
+      if (tool.name === "create_practice" && askedForPractice) {
+        return { name: "suggest_practice", args: { topic, mode: practiceModeOf(prompt, tool.args.mode) } };
+      }
+      return { name: "answer", args: {} };
+    }
     const { ready } = assessCreateReady({
       topic: topic ?? null,
       prompt,
@@ -626,7 +937,46 @@ export function gateChatTool(input: {
     if (!ready) {
       return { name: "clarify", args: { question: tool.args.question, options: tool.args.options } };
     }
-    return { name: tool.name, args: { ...tool.args, topic: topic ?? undefined } };
+    return {
+      name: tool.name,
+      args: {
+        ...tool.args,
+        topic: topic ?? undefined,
+        ...(tool.name === "create_practice" ? { mode: practiceModeOf(prompt, tool.args.mode) } : {}),
+      },
+    };
+  }
+
+  if (tool.name === "create_path") {
+    if (!askedPath && input.accepted !== "create_path") {
+      return { name: "answer", args: {} };
+    }
+    if (input.pathStarted && input.accepted !== "create_path") {
+      return { name: "answer", args: {} };
+    }
+    const topic = tool.args.topic ?? extractTopic(prompt) ?? input.pathTopic ?? undefined;
+    const mapNow =
+      input.accepted === "create_path" ||
+      wantsImmediateCreate(prompt, input.confirmed) ||
+      Boolean(input.hasMaterials);
+    if (!mapNow) {
+      return { name: "suggest_path", args: { topic } };
+    }
+    return {
+      name: "create_path",
+      args: { topic },
+    };
+  }
+  if (tool.name === "advance_path") {
+    return input.hasPath && input.pathStarted && wantsAdvancePath(prompt)
+      ? { name: "advance_path", args: {} }
+      : { name: "answer", args: {} };
+  }
+  if (tool.name === "restart_path") {
+    return input.hasPath && !input.pathStarted ? { name: "restart_path", args: {} } : { name: "answer", args: {} };
+  }
+  if (tool.name === "start_path") {
+    return input.hasPath && !input.pathStarted ? { name: "start_path", args: {} } : { name: "answer", args: {} };
   }
 
   if ((tool.name === "edit_practice" || tool.name === "append_practice" || tool.name === "edit_sheet") && active) {

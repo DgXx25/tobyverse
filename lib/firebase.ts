@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
+import { authPopupUnreliable } from "@/lib/standalone";
 
 function readEnv(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -28,9 +29,9 @@ function envFirebaseConfig() {
 
 function authDomainForOrigin(configured?: string): string | undefined {
   if (typeof window === "undefined") return configured;
-  const host = window.location.hostname;
-  if (host === "localhost" || host === "127.0.0.1") return configured;
-  return host;
+  // Same-origin auth helper (proxied at /__/auth). Cross-origin firebaseapp.com
+  // loses the redirect session in Cursor/VS Code Simple Browser.
+  return window.location.host;
 }
 
 function getFirebaseConfig() {
@@ -81,7 +82,9 @@ export function getFirebaseAuth(): Auth {
 
   try {
     auth = initializeAuth(app, {
-      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+      persistence: authPopupUnreliable()
+        ? browserLocalPersistence
+        : [indexedDBLocalPersistence, browserLocalPersistence],
       popupRedirectResolver: browserPopupRedirectResolver,
     });
   } catch {
@@ -94,12 +97,6 @@ export function getFirebaseDb(): Firestore {
   return getFirestore(getFirebaseApp());
 }
 
-let storage: FirebaseStorage | undefined;
-
 export function getFirebaseStorage(): FirebaseStorage {
-  const app = getFirebaseApp();
-  if (!storage || storage.app !== app) {
-    storage = getStorage(app);
-  }
-  return storage;
+  return getStorage(getFirebaseApp());
 }

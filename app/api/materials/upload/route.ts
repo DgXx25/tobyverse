@@ -1,5 +1,5 @@
-import { assertAccountRequest, authErrorResponse, readIdToken } from "@/lib/api/assert";
-import { hasGcsWriteCredentials, uploadGcsObject } from "@/lib/storage-gcs";
+import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
+import { deleteGcsObject, uploadGcsObject } from "@/lib/storage-gcs";
 import { MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@/lib/materials/limits";
 
 export const runtime = "nodejs";
@@ -13,65 +13,6 @@ class StorageWriteError extends Error {
     super(message);
     this.name = "StorageWriteError";
     this.status = status;
-  }
-}
-
-function storageBucket(): string {
-  return process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim() || "";
-}
-
-function messageFromStorageBody(status: number, body: string): string {
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: string } | string };
-    const detail = typeof parsed.error === "string" ? parsed.error : parsed.error?.message;
-    if (typeof detail === "string" && detail.trim()) {
-      if (/app check/i.test(detail)) {
-        return "Storage App Check blocked this upload.";
-      }
-      return detail.trim();
-    }
-  } catch {
-    // Use the raw body below.
-  }
-  const trimmed = body.replace(/\s+/g, " ").trim();
-  if (trimmed) return `Storage upload failed (${status}). ${trimmed.slice(0, 180)}`;
-  return `Storage upload failed (${status}).`;
-}
-
-async function writeViaAdmin(objectPath: string, buffer: Buffer, contentType: string): Promise<void> {
-  await uploadGcsObject(objectPath, buffer, contentType);
-}
-
-async function writeViaUserToken(
-  path: string,
-  buffer: Buffer,
-  contentType: string,
-  idToken: string,
-  appCheckToken: string,
-): Promise<void> {
-  const bucket = storageBucket();
-  if (!bucket) throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set.");
-  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o?name=${encodeURIComponent(path)}&uploadType=media`;
-  const headers: Record<string, string> = {
-    Authorization: `Firebase ${idToken}`,
-    "Content-Type": contentType || "application/octet-stream",
-  };
-  if (appCheckToken) headers["X-Firebase-AppCheck"] = appCheckToken;
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: new Uint8Array(buffer),
-    });
-  } catch {
-    throw new StorageWriteError("Storage upload failed. Could not reach Firebase Storage.", 502);
-  }
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    const status = response.status === 401 || response.status === 403 ? response.status : 502;
-    throw new StorageWriteError(messageFromStorageBody(response.status, text), status);
   }
 }
 
@@ -134,18 +75,11 @@ export async function POST(request: Request) {
       return Response.json({ error: uploadTooLargeMessage() }, { status: 413 });
     }
 
-    if (hasGcsWriteCredentials()) {
-      try {
-        await writeViaAdmin(path, buffer, contentType);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Storage upload failed.";
-        throw new StorageWriteError(message, 502);
-      }
-    } else {
-      const appCheck =
-        request.headers.get("x-firebase-appcheck")?.trim() ||
-        (typeof form.get("appCheck") === "string" ? String(form.get("appCheck")).trim() : "");
-      await writeViaUserToken(path, buffer, contentType, await readIdToken(request), appCheck);
+    try {
+      await uploadGcsObject(path, buffer, contentType);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Storage upload failed.";
+      throw new StorageWriteError(message, 502);
     }
 
     return Response.json({ ok: true, path });
@@ -156,6 +90,26 @@ export async function POST(request: Request) {
     if (error instanceof StorageWriteError) {
       return Response.json({ error: error.message }, { status: error.status });
     }
+    return authErrorResponse(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const session = await assertAccountRequest(request);
+    const body = (await request.json().catch(() => ({}))) as { path?: unknown };
+    const path = typeof body.path === "string" ? body.path.trim() : "";
+    const match = PATH_PATTERN.exec(path);
+    if (!match || match[1] !== session.uid) {
+      return Response.json(
+        { error: `Storage path must be users/${session.uid}/projects/{projectId}/materials/{id}/{file}.` },
+        { status: 403 },
+      );
+    }
+
+    await deleteGcsObject(path);
+    return Response.json({ ok: true });
+  } catch (error) {
     return authErrorResponse(error);
   }
 }

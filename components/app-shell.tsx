@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/sidebar";
 import { MobileTopBar } from "@/components/mobile-top-bar";
 import { AccountSheet } from "@/components/account-sheet";
 import { AnalyticsSession } from "@/components/analytics-session";
-import { ShellProvider, useShell } from "@/components/workspace/shell-context";
+import { ShellProvider } from "@/components/workspace/shell-context";
 import { SettingsModal } from "@/components/workspace/settings-modal";
 import { WhatsNewModal } from "@/components/whats-new-modal";
 
@@ -50,18 +50,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function AppShellFrame({ userId, children }: { userId: string; children: React.ReactNode }) {
-  const { mobileNavOpen } = useShell();
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (!mobileNavOpen) {
-      root.classList.remove("nav-lock");
-      return;
-    }
-    root.classList.add("nav-lock");
-    return () => root.classList.remove("nav-lock");
-  }, [mobileNavOpen]);
-
   return (
     <div className="app-shell flex h-dvh overflow-hidden">
       <div className="app-wallpaper" aria-hidden />
@@ -69,7 +57,7 @@ function AppShellFrame({ userId, children }: { userId: string; children: React.R
       <Sidebar />
       <main className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
         <MobileTopBar />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
+        <div className="page-y-scroll flex h-0 min-h-0 min-w-0 flex-1 flex-col">{children}</div>
       </main>
       <SettingsModal />
       <AccountSheet />

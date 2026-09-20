@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
+import { looksLikeUrl } from "@/lib/materials/ingest-client";
 import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
 import type { ChatAttachment } from "@/types/chat";
 
@@ -25,7 +26,15 @@ function AttachmentChip({ item }: { item: ChatAttachment }) {
       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface font-mono text-[8px] font-medium uppercase tracking-wide text-muted">
         {fileTypeBadge(item.type, item.title)}
       </span>
-      <span className="min-w-0 truncate text-foreground">{item.title}</span>
+      <span className="min-w-0 truncate">
+        {looksLikeUrl(item.title) ? (
+          <a href={item.title} target="_blank" rel="noopener noreferrer" className="chat-link block truncate">
+            {item.title}
+          </a>
+        ) : (
+          <span className="text-foreground">{item.title}</span>
+        )}
+      </span>
     </span>
   );
 }

@@ -74,7 +74,7 @@ export async function rewritePracticeItems(input: {
   let updated = 0;
   for (const [index, item] of items.entries()) {
     if (item.type === "unsupported") continue;
-    input.onStatus?.(`Updating practice · ${index + 1}/${items.length}`);
+    input.onStatus?.("Updating…");
     try {
       const next = await generateOne({
         projectTitle: input.project.title,

@@ -89,6 +89,90 @@ export function peekJsonString(text: string, key: string): string | null {
   }
 }
 
+/** Unclosed `{...}` still being streamed as the last item of a JSON array. */
+export function extractOpenArrayObject(text: string, key: string): string | null {
+  const colon = findKey(text, key);
+  if (colon < 0) return null;
+  const i = skipWs(text, colon);
+  if (text[i] !== "[") return null;
+  let cursor = i + 1;
+  while (cursor < text.length) {
+    cursor = skipWs(text, cursor);
+    if (cursor >= text.length) return null;
+    if (text[cursor] === "]") return null;
+    if (text[cursor] === ",") {
+      cursor += 1;
+      continue;
+    }
+    const value = scanValue(text, cursor);
+    if (value) {
+      cursor = value.end;
+      continue;
+    }
+    if (text[cursor] === "{") return text.slice(cursor);
+    return null;
+  }
+  return null;
+}
+
+/** Close an unfinished `{...}` / `[...]` / `"...` so a growing stream can JSON.parse. */
+export function closePartialJson(source: string): string | null {
+  const start = source.search(/[[{]/);
+  if (start < 0) return null;
+  const text = source.slice(start);
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") stack.push("}");
+    else if (ch === "[") stack.push("]");
+    else if ((ch === "}" || ch === "]") && stack[stack.length - 1] === ch) stack.pop();
+  }
+  let out = text;
+  if (inString) {
+    if (escape) out += "\\";
+    out += '"';
+  }
+  out = out.replace(/,\s*"[^"\\]*"\s*:\s*$/, "");
+  out = out.replace(/"[^"\\]*"\s*:\s*$/, "");
+  out = out.replace(/,\s*$/, "");
+  while (stack.length) out += stack.pop();
+  try {
+    JSON.parse(out);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+export function parsePartialObject(source: string): Record<string, unknown> | null {
+  const closed = closePartialJson(source);
+  if (!closed) return null;
+  try {
+    const value = JSON.parse(closed) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function extractJsonArrayItems(text: string, key: string): unknown[] {
   const colon = findKey(text, key);
   if (colon < 0) return [];

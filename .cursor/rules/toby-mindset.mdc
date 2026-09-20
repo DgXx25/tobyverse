@@ -1,0 +1,16 @@
+---
+description: TobyVerse chat mindset — request first, never force a lesson format
+globs: lib/ai/voice.ts,lib/chat/context.ts,lib/core/chat-modes.ts,lib/paths/lead.ts,lib/paths/model.ts,lib/memory/prompt.ts,lib/study-sheets/prompt.ts,docs/mindset.md
+alwaysApply: false
+---
+
+# TobyVerse mindset
+
+Source of truth: `docs/mindset.md`.
+
+When changing chat/notes prompts or “voice”:
+- Read `docs/mindset.md` first.
+- Small quality edits are allowed.
+- Do not violate its invariants (request comes first; no forced lesson/story/table/quiz).
+- Keep global voice in `ASK_WRITING_CONTRACT`. Path teaching rituals stay in path lead/briefing only.
+- After a philosophy change, update `docs/mindset.md` and then the runtime strings so they still match.

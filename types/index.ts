@@ -15,6 +15,7 @@ export {
   CHAT_MODES,
   CHAT_ARTIFACT_KINDS,
   type ChatMode,
+  type AcceptedChatTool,
   type ChatRole,
   type ChatThread,
   type ChatMessage,
@@ -51,10 +52,22 @@ export {
   type CaseTreePayload,
   type EssayPayload,
   type AnalysisPayload,
+  type PaperPayload,
+  type PaperFormId,
 } from "@/types/exercise";
 export type { Material, MaterialChunk, MaterialStatus, MaterialType } from "@/types/material";
 export { MATERIAL_TYPES } from "@/types/material";
 export type { StudySheet, NotesLiveState } from "@/types/study-sheet";
+export type {
+  StudyPath,
+  PathCourse,
+  PathUnit,
+  PathNode,
+  PathNodeStatus,
+  PathBriefing,
+  PathLiveState,
+} from "@/types/path";
+export { PATH_NODE_STATUSES } from "@/types/path";
 export type { VisualBlock, VisualType, NoteBlock, CatalogKind, CatalogRef, ExerciseVisual, EmbedKind } from "@/types/visual";
 export { VISUAL_TYPES } from "@/types/visual";
 export type {

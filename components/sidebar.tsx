@@ -8,19 +8,85 @@ import { signOut } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 import { subscribeProjectsForUser, listDiscardedProjectIds, PROJECT_DISCARDED_EVENT } from "@/lib/projects";
+import { peekOpeningProject } from "@/lib/workspace/start-project";
+import { subscribeChatThreads } from "@/lib/chats";
+import { DEFAULT_CHAT_THREAD_ID } from "@/lib/core/constants";
+import type { ChatThread } from "@/types/chat";
 import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
 import { SidebarChatRow } from "@/components/sidebar-chat-row";
 import type { Project } from "@/types/project";
 import { UiIcon } from "@/components/workspace/ui-icon";
+import { useSidebarSwipe } from "@/lib/workspace/sidebar-swipe";
+
+const COLLAPSE_KEY = "tv.sidebar.collapsed";
+
+function readCollapsed() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(COLLAPSE_KEY) === "1";
+}
+
+function blurActive() {
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+}
 
 export function Sidebar() {
-  const { collapsed, setCollapsed, sidebarHidden, mobileNavOpen, setMobileNavOpen } = useShell();
+  const { sidebarHidden, mobileNavOpen, setMobileNavOpen } = useShell();
+  const [collapsed, setCollapsedState] = useState(readCollapsed);
+  const [sheetMounted, setSheetMounted] = useState(mobileNavOpen);
+  const railRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLButtonElement>(null);
+
+  const setCollapsed = useCallback((value: boolean) => {
+    blurActive();
+    setCollapsedState(value);
+    window.localStorage.setItem(COLLAPSE_KEY, value ? "1" : "0");
+  }, []);
+  const collapseRail = useCallback(() => setCollapsed(true), [setCollapsed]);
+  const expandRail = useCallback(() => setCollapsed(false), [setCollapsed]);
+  const closeSheet = useCallback(() => setMobileNavOpen(false), [setMobileNavOpen]);
+
+  useSidebarSwipe({
+    panel: railRef,
+    enabled: !sidebarHidden,
+    kind: "rail",
+    collapsed,
+    onCollapse: collapseRail,
+    onExpand: expandRail,
+  });
+  useSidebarSwipe({
+    panel: sheetRef,
+    overlay: overlayRef,
+    enabled: mobileNavOpen && sheetMounted,
+    kind: "sheet",
+    onCollapse: closeSheet,
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!mobileNavOpen) {
+      root.classList.remove("nav-lock");
+      return;
+    }
+    root.classList.add("nav-lock");
+    return () => root.classList.remove("nav-lock");
+  }, [mobileNavOpen]);
+
+  useEffect(() => {
+    if (mobileNavOpen) {
+      setSheetMounted(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setSheetMounted(false), 220);
+    return () => window.clearTimeout(timer);
+  }, [mobileNavOpen]);
 
   return (
     <>
       <div
-        className={`relative z-[2] hidden h-dvh shrink-0 overflow-hidden bg-surface transition-[width] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] md:block ${
+        ref={railRef}
+        className={`sidebar-slot relative z-[2] hidden h-dvh shrink-0 touch-pan-y overflow-hidden bg-surface md:block ${
           sidebarHidden
             ? "pointer-events-none w-0 border-r-0"
             : collapsed
@@ -30,35 +96,41 @@ export function Sidebar() {
       >
         <SidebarFrame
           collapsed={collapsed}
-          onCollapse={() => setCollapsed(true)}
-          onExpand={() => setCollapsed(false)}
+          onCollapse={collapseRail}
+          onExpand={expandRail}
         />
       </div>
 
       <div className="md:hidden">
-        {mobileNavOpen ? (
-          <button
-            type="button"
-            aria-label="Close menu"
-            className="fixed inset-0 z-40 bg-black/50"
-            onClick={() => setMobileNavOpen(false)}
-          />
+        {sheetMounted ? (
+          <>
+            {mobileNavOpen ? (
+              <button
+                ref={overlayRef}
+                type="button"
+                aria-label="Close menu"
+                className="fixed inset-0 z-40 bg-black/50"
+                onClick={closeSheet}
+              />
+            ) : null}
+            <div
+              ref={sheetRef}
+              className={`fixed left-0 top-0 z-50 h-dvh w-[min(85vw,320px)] touch-pan-y overflow-hidden bg-surface pt-[env(safe-area-inset-top,0px)] shadow-2xl transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+                mobileNavOpen ? "translate-x-0" : "pointer-events-none -translate-x-full"
+              }`}
+              aria-hidden={!mobileNavOpen}
+              inert={mobileNavOpen ? undefined : true}
+            >
+              <SidebarFrame
+                collapsed={false}
+                mobile
+                onCollapse={closeSheet}
+                onExpand={() => setMobileNavOpen(true)}
+                onNavigate={closeSheet}
+              />
+            </div>
+          </>
         ) : null}
-        <div
-          className={`fixed left-0 top-0 z-50 h-dvh w-[min(85vw,320px)] overflow-hidden bg-surface pt-[env(safe-area-inset-top,0px)] shadow-2xl transition-transform duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ${
-            mobileNavOpen ? "translate-x-0" : "pointer-events-none -translate-x-full"
-          }`}
-          aria-hidden={!mobileNavOpen}
-          inert={mobileNavOpen ? undefined : true}
-        >
-          <SidebarFrame
-            collapsed={false}
-            mobile
-            onCollapse={() => setMobileNavOpen(false)}
-            onExpand={() => setMobileNavOpen(true)}
-            onNavigate={() => setMobileNavOpen(false)}
-          />
-        </div>
       </div>
     </>
   );
@@ -87,6 +159,7 @@ function SidebarFrame({
   const [held, setHeld] = useState<Project | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [chatMenuId, setChatMenuId] = useState<string | null>(null);
+  const [childThreads, setChildThreads] = useState<ChatThread[]>([]);
   const [flyoutPos, setFlyoutPos] = useState<{ left: number; bottom: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const pfpRef = useRef<HTMLButtonElement>(null);
@@ -119,6 +192,19 @@ function SidebarFrame({
       setMenuOpen(false);
     }
   }, [collapsed]);
+
+  useEffect(() => {
+    const projectId = pathname.startsWith("/project/") ? pathname.split("/")[2] : null;
+    if (!projectId) {
+      setChildThreads([]);
+      return;
+    }
+    return subscribeChatThreads(projectId, (threads) => {
+      setChildThreads(
+        threads.filter((item) => item.id !== DEFAULT_CHAT_THREAD_ID && item.kind !== "main"),
+      );
+    });
+  }, [pathname]);
 
   const firstPath = useRef(true);
   useEffect(() => {
@@ -195,6 +281,7 @@ function SidebarFrame({
   }
 
   const activeProjectId = pathname.startsWith("/project/") ? pathname.split("/")[2] : null;
+  const activeThreadId = pathname.startsWith("/project/") ? pathname.split("/")[3] || DEFAULT_CHAT_THREAD_ID : null;
   const startActive = pathname === "/" || pathname === "/new";
   const libraryActive = pathname === "/library" || pathname.startsWith("/library/");
   const name = user?.isAnonymous ? "Guest" : user?.displayName || user?.email || "Signed in";
@@ -202,12 +289,19 @@ function SidebarFrame({
   const visibleProjects = projects.filter(
     (project) => !hiddenIds.has(project.id) && !discardedIds.has(project.id),
   );
-  const chats =
-    held && !visibleProjects.some((project) => project.id === held.id) && !hiddenIds.has(held.id)
-      ? [...visibleProjects, held]
+  const opening = activeProjectId ? peekOpeningProject(activeProjectId) : null;
+  const withOpening =
+    opening &&
+    !visibleProjects.some((project) => project.id === opening.id) &&
+    !hiddenIds.has(opening.id) &&
+    !discardedIds.has(opening.id)
+      ? [opening, ...visibleProjects]
       : visibleProjects;
+  const chats =
+    held && !withOpening.some((project) => project.id === held.id) && !hiddenIds.has(held.id)
+      ? [...withOpening, held]
+      : withOpening;
 
-  const iconBtn = "flex h-8 w-8 shrink-0 items-center justify-center text-foreground";
   const labelFade = "sidebar-label min-w-0 truncate text-[14px] font-normal text-foreground";
 
   return (
@@ -232,7 +326,7 @@ function SidebarFrame({
             className="sidebar-brand relative flex h-9 w-9 select-none items-center justify-center rounded-xl text-foreground hover:bg-surface-2"
           >
             <span
-              className="sidebar-brand-logo accent-symbol pointer-events-none block h-6 w-6 bg-current transition-opacity duration-150"
+              className="sidebar-brand-logo accent-symbol pointer-events-none block h-6 w-6 bg-current"
               style={{
                 WebkitMask: "url(/logo.svg) center / contain no-repeat",
                 mask: "url(/logo.svg) center / contain no-repeat",
@@ -241,7 +335,7 @@ function SidebarFrame({
             <UiIcon
               name="panel"
               size={18}
-              className="sidebar-brand-toggle pointer-events-none absolute opacity-0 transition-opacity duration-150"
+              className="sidebar-brand-toggle pointer-events-none absolute opacity-0"
             />
           </Link>
           <span className="sidebar-label text-[13px] font-bold leading-none text-foreground">beta</span>
@@ -249,7 +343,10 @@ function SidebarFrame({
         <div className="absolute right-3 top-1/2 z-[1] flex -translate-y-1/2 items-center gap-0.5">
           <button
             type="button"
-            onClick={onCollapse}
+            onClick={(event) => {
+              event.currentTarget.blur();
+              onCollapse();
+            }}
             className="sidebar-collapse-btn flex h-8 w-8 items-center justify-center rounded-xl text-foreground hover:bg-surface-2"
             aria-label={mobile ? "Close menu" : "Collapse sidebar"}
           >
@@ -264,7 +361,7 @@ function SidebarFrame({
           title="New"
           active={startActive}
           icon={
-            <span className={iconBtn}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center text-accent">
               <UiIcon name="plus" size={18} />
             </span>
           }
@@ -278,7 +375,7 @@ function SidebarFrame({
           title="Library"
           active={libraryActive}
           icon={
-            <span className={iconBtn}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center text-accent">
               <UiIcon name="library" size={18} />
             </span>
           }
@@ -303,16 +400,30 @@ function SidebarFrame({
           </p>
         )}
         {chats.map((project) => (
-          <SidebarChatRow
-            key={project.id}
-            project={project}
-            userId={user?.uid ?? ""}
-            active={project.id === activeProjectId}
-            menuOpen={chatMenuId === project.id}
-            onMenuOpen={onChatMenuOpen}
-            onHold={onChatHold}
-            onDeleted={onChatDeleted}
-          />
+          <div key={project.id}>
+            <SidebarChatRow
+              project={project}
+              userId={user?.uid ?? ""}
+              active={project.id === activeProjectId}
+              menuOpen={chatMenuId === project.id}
+              onMenuOpen={onChatMenuOpen}
+              onHold={onChatHold}
+              onDeleted={onChatDeleted}
+            />
+            {project.id === activeProjectId && childThreads.length > 0
+              ? childThreads.map((thread) => (
+                  <Link
+                    key={thread.id}
+                    href={`/project/${project.id}/${thread.id}`}
+                    className={`sidebar-label ml-6 flex h-8 items-center rounded-xl px-2.5 text-[13px] ${
+                      activeThreadId === thread.id ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"
+                    }`}
+                  >
+                    <span className="min-w-0 truncate">{thread.title || (thread.kind === "path" ? "გეგმა" : "Chat")}</span>
+                  </Link>
+                ))
+              : null}
+          </div>
         ))}
       </nav>
 
@@ -414,7 +525,7 @@ function NavLink({
       href={href}
       title={title}
       onClick={onNavigate}
-      className={`sidebar-rail-item flex h-9 items-center gap-1.5 rounded-xl px-[13px] text-[14px] font-normal text-foreground transition-colors ${
+      className={`sidebar-rail-item flex h-9 items-center gap-1.5 rounded-xl px-[13px] text-[14px] font-normal text-foreground ${
         active ? "bg-surface-2" : "hover:bg-surface-2"
       }`}
     >
@@ -474,7 +585,7 @@ function MenuRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-foreground hover:bg-foreground/[0.08]"
+      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-foreground hover:bg-[color-mix(in_srgb,var(--text)_12%,transparent)]"
     >
       <span className="accent-symbol">{icon}</span>
       {label}

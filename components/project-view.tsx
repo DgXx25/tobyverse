@@ -1,9 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { deleteProject, getProjectById, updateProjectActiveArtifact } from "@/lib/projects";
+import { asChatMode } from "@/lib/core/chat-modes";
+import { loadSavedChatMode, saveChatMode } from "@/lib/workspace/chat-mode";
+import { peekOpeningProject, waitForOpeningProject } from "@/lib/workspace/start-project";
+import {
+  deleteProject,
+  getProjectById,
+  updateProjectActiveArtifact,
+  updateProjectChatMode,
+} from "@/lib/projects";
 import { subscribeMaterials } from "@/lib/materials";
 import { trackEvent } from "@/lib/analytics/track";
 import {
@@ -22,48 +30,53 @@ import type { ChatArtifact, ChatMode } from "@/types/chat";
 import type { ActiveArtifactStatus } from "@/types/project";
 import type { Material } from "@/types/material";
 import type { Project } from "@/types";
+import type { PathLiveState } from "@/types/path";
 import type { NotesLiveState } from "@/types/study-sheet";
 import type { NotesGenerateEvent } from "@/lib/study-sheets/generate-client";
+import type { PathGenerateEvent } from "@/lib/paths/generate-client";
 import { CREATING_NOTES_STATUS } from "@/lib/chat/dispatch";
+import type { SetResult } from "@/lib/exercises/session";
 
 const MIN_ARTIFACT = 400;
-const MIN_NOTES = 800;
+const MIN_NOTES = 560;
 const MIN_CHAT = 240;
 const WIDTH_EASE =
   "transition-[width,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
 
 function focusFromPending(pending: {
-  kind: "material" | "sheet" | "plan" | "practice";
+  kind: "material" | "sheet" | "plan" | "practice" | "path";
   id: string;
   title?: string;
 }): ArtifactFocus {
   if (pending.kind === "material") return { kind: "material", id: pending.id };
   if (pending.kind === "practice") return { kind: "practice", id: pending.id, title: pending.title || "Practice" };
+  if (pending.kind === "path") return { kind: "path", id: pending.id, title: pending.title || "Path" };
   if (pending.kind === "plan") return { kind: "plan", id: pending.id, title: pending.title || "Study plan" };
   return { kind: "sheet", id: pending.id, title: pending.title || "Notes" };
 }
 
-export function ProjectView({ projectId }: { projectId: string }) {
+export function ProjectView({ projectId, threadId }: { projectId: string; threadId?: string }) {
   const { user } = useAuth();
   const router = useRouter();
   const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setMobileTopActions } = useShell();
   const [project, setProject] = useState<Project | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [mode, setMode] = useState<ChatMode>("normal");
+  const [mode, setMode] = useState<ChatMode>(() => loadSavedChatMode());
   const { model } = usePreferredModel();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [prefsReady, setPrefsReady] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [focus, setFocus] = useState<ArtifactFocus | null>(null);
-  const [session, setSession] = useState<{ setId: string; ids: string[] } | null>(null);
+  const [session, setSession] = useState<{ setId: string; ids: string[]; mode?: "practice" | "exam" } | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(420);
   const [resizing, setResizing] = useState(false);
-  const [panelView, setPanelView] = useState<"materials" | "sheets" | "practice">("materials");
+  const [panelView, setPanelView] = useState<"materials" | "sheets" | "practice" | "path">("materials");
   const [notesLive, setNotesLive] = useState<NotesLiveState | null>(null);
+  const [pathLive, setPathLive] = useState<PathLiveState | null>(null);
+  const [finishedSet, setFinishedSet] = useState<SetResult | null>(null);
   const openedAt = useRef(Date.now());
   const prefsRef = useRef<WorkspacePrefs | null>(null);
   const widthRef = useRef(420);
@@ -87,30 +100,48 @@ export function ProjectView({ projectId }: { projectId: string }) {
     };
   }, [projectId, user]);
 
+  useLayoutEffect(() => {
+    const seeded = peekOpeningProject(projectId);
+    if (seeded) {
+      setProject(seeded);
+      setError(null);
+      return;
+    }
+    setProject(null);
+    setPrefsReady(false);
+  }, [projectId]);
+
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    getProjectById(projectId)
-      .then((item) => {
+    (async () => {
+      try {
+        await waitForOpeningProject(projectId);
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setError(err instanceof Error && err.message.trim() ? err.message : "Could not start.");
+        }
+      }
+      try {
+        const item = await getProjectById(projectId);
         if (cancelled) return;
         if (!item || item.userId !== user.uid) {
+          if (peekOpeningProject(projectId)) return;
           setError(item ? "You do not have access to this project." : "Project not found.");
           return;
         }
         setProject(item);
-        const prefs = loadWorkspacePrefs(projectId, item.preferredChatMode);
+        const prefs = loadWorkspacePrefs(projectId, asChatMode(item.preferredChatMode));
         prefsRef.current = prefs;
         setMode(prefs.mode);
+        saveChatMode(prefs.mode);
         setSelectedIds(prefs.selectedMaterialIds);
         setArtifactWidth(prefs.artifactWidth);
         setPrefsReady(true);
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not load project.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -148,15 +179,22 @@ export function ProjectView({ projectId }: { projectId: string }) {
     return () => setSidebarHidden(false);
   }, [setSidebarHidden]);
 
+  const rememberActive = useCallback((artifact: ChatArtifact, status: ActiveArtifactStatus) => {
+    if (!user) return;
+    const active = chatArtifactToActive(artifact, status);
+    setProject((current) => (current ? { ...current, activeArtifact: active } : current));
+    void updateProjectActiveArtifact(projectId, user.uid, active).catch(() => undefined);
+  }, [user, projectId]);
+
   useEffect(() => {
     if (!pendingPanel || pendingPanel.projectId !== projectId) return;
     const next = focusFromPending(pendingPanel);
     setFocus(next);
     setPanelOpen(true);
-    if (next.kind === "sheet" || next.kind === "plan") ensureMinWidth(MIN_NOTES);
+    if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     if (next.kind !== "material" && "title" in next) rememberActive(next, "open");
     setPendingPanel(null);
-  }, [pendingPanel, projectId, setPendingPanel]);
+  }, [pendingPanel, projectId, setPendingPanel, rememberActive]);
 
   async function onDelete() {
     if (!user || !project) return;
@@ -186,17 +224,19 @@ export function ProjectView({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, deleting, deleteError]);
 
-  function rememberActive(artifact: ChatArtifact, status: ActiveArtifactStatus) {
-    if (!user) return;
-    const active = chatArtifactToActive(artifact, status);
-    setProject((current) => (current ? { ...current, activeArtifact: active } : current));
-    void updateProjectActiveArtifact(projectId, user.uid, active).catch(() => undefined);
+  function keepPathPanel() {
+    return panelOpen && (focus?.kind === "path" || panelView === "path");
   }
 
   function openArtifact(next: ChatArtifact) {
+    if (next.kind === "sheet" && keepPathPanel()) {
+      rememberActive(next, "open");
+      ensureMinWidth(MIN_NOTES);
+      return;
+    }
     setFocus(next);
     setPanelOpen(true);
-    if (next.kind === "sheet" || next.kind === "plan") ensureMinWidth(MIN_NOTES);
+    if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     rememberActive(next, "open");
   }
 
@@ -207,6 +247,10 @@ export function ProjectView({ projectId }: { projectId: string }) {
     }
     if (event === "start") {
       setNotesLive({ title: "Notes", blocks: [], status: CREATING_NOTES_STATUS });
+      if (keepPathPanel()) {
+        ensureMinWidth(MIN_NOTES);
+        return;
+      }
       setFocus({ kind: "sheet", id: "", title: "Notes" });
       setPanelOpen(true);
       ensureMinWidth(MIN_NOTES);
@@ -224,11 +268,40 @@ export function ProjectView({ projectId }: { projectId: string }) {
     setPanelOpen(true);
     ensureMinWidth(MIN_NOTES);
     if (event.sheetId) {
+      if (keepPathPanel()) return;
       setFocus({
         kind: "sheet",
         id: event.sheetId,
         title: event.title || "Notes",
       });
+    }
+  }
+
+  function handlePathLive(event: PathGenerateEvent | "start" | null) {
+    if (event === null) {
+      setPathLive(null);
+      return;
+    }
+    if (event === "start") {
+      setPathLive({ title: "Path", courses: [], status: "Mapping the path…" });
+      setFocus({ kind: "path", id: "", title: "Path" });
+      setPanelOpen(true);
+      ensureMinWidth(MIN_NOTES);
+      return;
+    }
+    setPathLive((current) => {
+      const base = current ?? { title: "Path", courses: [], status: "Mapping the path…" };
+      return {
+        title: event.title?.trim() || base.title,
+        courses: event.courses ?? base.courses,
+        status: event.status === undefined ? base.status : event.status,
+        pathId: event.pathId || base.pathId,
+      };
+    });
+    setPanelOpen(true);
+    ensureMinWidth(MIN_NOTES);
+    if (event.pathId) {
+      setFocus({ kind: "path", id: event.pathId, title: event.title || "Path" });
     }
   }
 
@@ -247,7 +320,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       savedLayout.current = { width: widthRef.current };
     }
     setSidebarHidden(true);
-    setSession({ setId: artifact.id, ids });
+    setSession({ setId: artifact.id, ids, mode: artifact.mode === "exam" ? "exam" : "practice" });
     setPanelOpen(true);
     const expanded = Math.round(window.innerWidth * 0.62);
     setArtifactWidth(Math.min(Math.round(window.innerWidth * 0.78), Math.max(420, expanded)));
@@ -270,12 +343,12 @@ export function ProjectView({ projectId }: { projectId: string }) {
   function openPanel(next?: ArtifactFocus) {
     if (next) setFocus(next);
     setPanelOpen(true);
-    if (next && (next.kind === "sheet" || next.kind === "plan")) ensureMinWidth(MIN_NOTES);
+    if (next && (next.kind === "sheet" || next.kind === "plan" || next.kind === "path")) ensureMinWidth(MIN_NOTES);
   }
 
-  const onPanelViewChange = useCallback((view: "materials" | "sheets" | "practice") => {
+  const onPanelViewChange = useCallback((view: "materials" | "sheets" | "practice" | "path") => {
     setPanelView(view);
-    if (view === "sheets") ensureMinWidth(MIN_NOTES);
+    if (view === "sheets" || view === "path") ensureMinWidth(MIN_NOTES);
   }, []);
 
   const headerActions: QuietIconAction[] = [
@@ -300,6 +373,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
   useEffect(() => {
     setMobileTopActions(<QuietIconCluster size={20} actions={headerActions} />);
     return () => setMobileTopActions(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setMobileTopActions, panelOpen, projectId]);
 
   function onResizeStart(event: ReactMouseEvent) {
@@ -329,39 +403,52 @@ export function ProjectView({ projectId }: { projectId: string }) {
     window.addEventListener("mouseup", up);
   }
 
-  if (loading) {
-    return <div className="flex h-full items-center px-8 text-sm text-muted">Loading project…</div>;
-  }
+  if (!user) return null;
 
-  if (!project || !user) {
-    return (
-      <div className="mx-auto max-w-3xl px-8 py-10">
-        <p className="text-sm text-muted">{error ?? "Project not found."}</p>
-        <Link href="/" className="mt-4 inline-block text-sm text-muted hover:text-foreground">
-          Back
-        </Link>
-      </div>
-    );
+  if (!project) {
+    if (error) {
+      return (
+        <div className="mx-auto max-w-3xl px-8 py-10">
+          <p className="text-sm text-muted">{error}</p>
+          <Link href="/" className="mt-4 inline-block text-sm text-muted hover:text-foreground">
+            Back
+          </Link>
+        </div>
+      );
+    }
+    return <div className="project-workspace relative flex h-full min-h-0 flex-1 overflow-hidden bg-transparent" />;
   }
 
   return (
-    <div className="relative flex h-full min-h-0 bg-transparent">
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
+    <div className="project-workspace relative flex h-full min-h-0 flex-1 overflow-hidden bg-transparent">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
         <div className="pointer-events-none absolute right-3 top-3 z-20 hidden md:flex">
           <QuietIconCluster className="pointer-events-auto" size={20} actions={headerActions} />
         </div>
         <ProjectChat
+          key={project.id}
           project={project}
           userId={user.uid}
+          threadId={threadId}
+          chatMode={mode}
+          onChatMode={(next) => {
+            setMode(next);
+            saveChatMode(next);
+            void updateProjectChatMode(project.id, user.uid, next).catch(() => undefined);
+          }}
           materials={materials}
           selectedIds={selectedIds}
           onOpenArtifact={openArtifact}
+          onStartPractice={startPractice}
           onNotesLive={handleNotesLive}
+          onPathLive={handlePathLive}
           onOpenMaterial={(id) => {
             setFocus({ kind: "material", id });
             setPanelOpen(true);
           }}
           onProjectPatch={(patch) => setProject((current) => (current ? { ...current, ...patch } : current))}
+          finishedSet={finishedSet}
+          onFinishedSetHandled={() => setFinishedSet(null)}
         />
       </div>
       <div
@@ -384,10 +471,13 @@ export function ProjectView({ projectId }: { projectId: string }) {
             onClose={closePanel}
             onStartPractice={startPractice}
             onExitSession={exitSession}
+            onPracticeComplete={setFinishedSet}
             onViewChange={onPanelViewChange}
             onActivate={(artifact) => rememberActive(artifact, "open")}
             liveNote={notesLive}
+            livePath={pathLive}
             onLiveSettled={() => setNotesLive(null)}
+            onLivePathSettled={() => setPathLive(null)}
           />
         </div>
       </div>

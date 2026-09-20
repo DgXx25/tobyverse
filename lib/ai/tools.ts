@@ -3,15 +3,30 @@ export const CHAT_TOOLS = [
   "clarify",
   "suggest_practice",
   "suggest_sheet",
+  "suggest_path",
   "create_practice",
   "edit_practice",
   "append_practice",
   "create_sheet",
   "edit_sheet",
+  "create_path",
+  "advance_path",
+  "restart_path",
+  "start_path",
   "search_images",
 ] as const;
 
 export type ChatToolName = (typeof CHAT_TOOLS)[number];
+
+/** Never sent as Gemini functions. Keyword / chip intercept owns these. */
+export const INTERCEPT_ONLY_CHAT_TOOLS = [
+  "create_practice",
+  "create_sheet",
+  "create_path",
+  "edit_practice",
+  "append_practice",
+  "edit_sheet",
+] as const satisfies readonly ChatToolName[];
 
 export type ChatToolArgs = {
   topic?: string;
@@ -21,6 +36,7 @@ export type ChatToolArgs = {
   count?: number;
   id?: string;
   query?: string;
+  mode?: "practice" | "exam";
 };
 
 export type ChatToolCall = {
@@ -56,8 +72,21 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "answer",
     description:
-      "Default. A topic name or ordinary question: write the explanation in the user's language. Never reply by asking what the topic is. No chips. Do not create a set or notes.",
-    parameters: { type: "object", properties: {} },
+      "Default. A topic name or ordinary question: write the explanation in the user's language. Never reply by asking what the topic is. No chips. Do not create a set unless they asked to practice or to move on. Do not pass `question` unless they asked to move on or this is an exam-only turn. Never yes/no \"did you get it?\". Never \"what is this called?\" / \"which tense would you use to describe…\". Skip `question` for translate/rewrite/calculate/\"write X\". Table cells: a few words, not a paragraph, never a long parenthetical. Example then `<br>` then a short gloss in their language.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "Only when they asked to move on or for a check: a sentence to complete, same shape as the example. Separate message. Not yes/no. Not \"what is this called?\" / \"which tense describes…\".",
+        },
+        options: {
+          type: "array",
+          description: "Optional 2-4 short tap answers that are candidate FORMS (will finish / will have finished), not topic names. Same language. Do not include Other/სხვა.",
+          items: { type: "string" },
+        },
+      },
+    },
   },
   {
     name: "clarify",
@@ -78,28 +107,44 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   },
   {
     name: "suggest_practice",
-    description: "After a full explanation only. Offer a practice chip. Do not create the set.",
+    description:
+      "After a short briefing, when they asked to practice or for an exam, or they asked to move on. Offer a chip. Do not create the set. Do not offer this after an ordinary explanation. Do not offer this for form-writing (განცხადება / official letter) — that is a paper block in chat. Pass mode exam if they asked for an exam (გამოცდა / გამომცადე / test me).",
     parameters: {
       type: "object",
-      properties: { topic: { type: "string", description: "Topic for the chip." } },
+      properties: {
+        topic: { type: "string", description: "Topic for the chip." },
+        mode: { type: "string", description: "practice or exam." },
+      },
     },
   },
   {
     name: "suggest_sheet",
     description:
-      "Optional notes chip after the user asked a question and you already answered. If they asked for a note (კონსპექტი / დამიკონსპექტე), call create_sheet instead. Never write the notes as chat text.",
+      "When they asked for notes / კონსპექტი. Offer a chip. Do not create the sheet. In Teacher mode you MAY also suggest_sheet after a long explanation — not a one-line answer, not every turn, not on Fast. Do not pass `question`.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Topic for the chip." } },
     },
   },
   {
-    name: "create_practice",
+    name: "suggest_path",
     description:
-      "User asked to practice (or accepted a suggestion, or said to just generate after a clarify). Never write quiz items into chat — card only.",
+      "After a short briefing or one clarify, when they asked to plan (დამიგეგმე / სწავლა მინდა as a plan) or for exam review but a syllabus/topic is still thin. Offer a chip. Do not create the path. Never dump the week list.",
     parameters: {
       type: "object",
-      properties: { topic: { type: "string", description: "Practice topic, including the latest user topic." } },
+      properties: { topic: { type: "string", description: "Course or exam-review topic for the chip." } },
+    },
+  },
+  {
+    name: "create_practice",
+    description:
+      "Only after they accepted a practice/exam chip, said yes, or said დამიწერე / გააკეთე. First ask: brief the move, then suggest_practice — do not create yet. Never write quiz items into chat — card only. Never for form-writing (განცხადება) — that is a paper block. Pass mode exam if they asked for an exam. On a review path, only for memory-heavy theory (terms, lists, flags, formulas) — not a 10-item MCQ because practice exists.",
+    parameters: {
+      type: "object",
+      properties: {
+        topic: { type: "string", description: "Practice or exam topic, including the latest user topic." },
+        mode: { type: "string", description: "practice (retry mistakes until they finish) or exam (one check, 50% counts as a pass)." },
+      },
       required: ["topic"],
     },
     card: true,
@@ -133,7 +178,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "create_sheet",
     description:
-      "User asked for notes (კონსპექტი / დამიკონსპექტე), or answered a notes clarify. Always call this instead of writing the notes in chat. The generator builds visual blocks. One short chat line plus the card.",
+      "Only after they accepted a notes chip, said yes, or said დამიწერე / გააკეთე. Never write the notes as chat text. Notes teach understanding (meaning first, then formula). One short chat line plus the card. Do not generate long notes on a review path unless they asked.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Specific sheet topic." } },
@@ -144,7 +189,7 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
   {
     name: "edit_sheet",
     description:
-      "Rewrite the current notes as a conspectus of visual blocks (section, formula_card, diagram, compare_vs only for mix-ups). Keep the same id. Never dump the notes into chat.",
+      "Rewrite the current notes so a beginner gets the idea (meaning first, then formula). Keep the same id. Never dump the notes into chat.",
     parameters: {
       type: "object",
       properties: {
@@ -156,14 +201,45 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
     card: true,
   },
   {
+    name: "create_path",
+    description:
+      "They asked to plan with a syllabus/topic (დამიგეგმე) or for exam prep with dumped slides/quizzes, or they accepted a plan chip / said დამიწერე / გააკეთე. Build the path card only — never write the week list in chat. Skip course-intro / aims / grading as lesson 1. First node is the first real topic. Exam prep = a short review path (about 4–8 high-yield nodes), not a week-long course. Do not create notes or practice. Never call this for a plain explain (ამიხსნა მოკლედ).",
+    parameters: {
+      type: "object",
+      properties: { topic: { type: "string", description: "Course or semester name, if known." } },
+    },
+    card: true,
+  },
+  {
+    name: "advance_path",
+    description:
+      "Only when the student looks ready: they said გაიარე / next topic, passed a practice/exam check, or tapped Continue on a node already marked ready. Never on a greeting, thanks, or because YOU just explained. Do not dump the rest of the path. Card stays the same path.",
+    parameters: { type: "object", properties: {} },
+    card: true,
+  },
+  {
+    name: "restart_path",
+    description:
+      "A study path already exists and the user wants to start from the first topic (პირველიდან / თავიდან / start from the beginning), or current was jumped into the middle. Only before teaching has started. Reset current to the first open node. One short line plus the same path card. Do not create a new path. Do not write [artifact ...] in chat.",
+    parameters: { type: "object", properties: {} },
+    card: true,
+  },
+  {
+    name: "start_path",
+    description:
+      "The student confirmed the draft path (დავიწყოთ / let's start / Continue). Opens a child thread for this plan; the parent chat stays free. Never call this until they confirmed. Do not change the map. One short line plus the same path card. Do not teach the first topic in the parent chat.",
+    parameters: { type: "object", properties: {} },
+    card: true,
+  },
+  {
     name: "search_images",
     description:
-      "User asked to find or show photos, images, charts, graphs, or diagrams — in any language. Pass their topic as query in the original language. Optional count of photos (default 6). Never create a practice set or notes. If they only said they want photos with no topic, use clarify once instead. If search returns nothing, say so in one short line. Never invent image URLs. Do not dump URL lists in chat.",
+      "Find photos, charts, graphs, maps, or diagrams. Call only if the user asked for a figure/photo/diagram, or this turn is about an attached slide/image. Do not call because a figure might help. Always write one short line in the user's language in the same turn; the photos render under it. Skip abstract-only answers and skip when project files already have the figure. Pass the full topic as query in the original language. Optional count (max 8). If they only asked for photos with no topic, use clarify once instead. If search returns nothing, say so in one short line. Never invent image URLs. Do not dump URL lists in chat.",
     parameters: {
       type: "object",
       properties: {
         query: { type: "string", description: "Image search query." },
-        count: { type: "integer", description: "How many photos to return (default 6)." },
+        count: { type: "integer", description: "Upper bound, max 8. Omit to let search keep only the closest matches." },
       },
       required: ["query"],
     },
@@ -175,7 +251,6 @@ export function isChatToolName(value: unknown): value is ChatToolName {
 }
 
 export function toolStreamsText(name: ChatToolName): boolean {
-  if (name === "search_images") return false;
   return !isArtifactTool(name);
 }
 
@@ -222,7 +297,8 @@ export function parseToolArgs(value: unknown): ChatToolArgs {
     instruction: typeof row.instruction === "string" ? row.instruction.trim() || undefined : undefined,
     id: typeof row.id === "string" ? row.id.trim() || undefined : undefined,
     query: typeof row.query === "string" ? row.query.trim() || undefined : undefined,
-    count: Number.isFinite(count) ? Math.min(10, Math.max(1, Math.floor(count))) : undefined,
+    count: Number.isFinite(count) ? Math.min(8, Math.max(1, Math.floor(count))) : undefined,
+    mode: row.mode === "exam" || row.mode === "practice" ? row.mode : undefined,
   };
 }
 

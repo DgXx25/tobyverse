@@ -261,9 +261,11 @@ function flattenIncoming(raw: unknown): VisualBlock[] {
         if (section) out.push(section);
         continue;
       }
+      const text = typeof row.text === "string" ? clip(row.text, MAX_TERM) : undefined;
       out.push({
         type: "formula_card",
         title: typeof row.title === "string" ? clip(row.title, MAX_TITLE) : undefined,
+        text: text || undefined,
         formula: clip(formula, MAX_FORMULA),
       });
       continue;

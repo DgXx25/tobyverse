@@ -8,6 +8,9 @@ function clickFirstNote(type: ExerciseType): string {
   if (type === "open_short" || type === "essay" || type === "analysis") {
     return " Use a text answer only because the response must be written.";
   }
+  if (type === "paper") {
+    return " Official sheet. form is a layout id (ganckhadeba). Invent a fresh brief each item. given.to is optional addressee. Student writes on the printed paper. Georgian clerical layout: addressee top-right, title center, body, date left, name right.";
+  }
   return "";
 }
 

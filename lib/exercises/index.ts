@@ -23,12 +23,16 @@ export {
   PRACTICE_SET_CAP,
   PRACTICE_SET_MIN,
   PRACTICE_SET_SIZES,
+  PAPER_SET_CAP,
+  FORM_WRITE_HINT,
+  isFormWriteTopic,
   GENERABLE_EXERCISE_TYPES,
   CLICK_FIRST_TYPES,
   type PracticeFamily,
   type GenerableExerciseType,
 } from "@/lib/exercises/plan";
 export { gradeObjective, isObjectiveType, isProblemTypeForHints } from "@/lib/exercises/grade";
+export { paperFormTitle, PAPER_FORM_DEFS } from "@/lib/exercises/forms";
 export {
   createExercise,
   getExercise,

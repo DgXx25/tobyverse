@@ -55,10 +55,6 @@ export default function RootLayout({
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@8..144,100..900&family=Noto+Sans+Georgian:wdth,wght@62.5..100,100..900&display=swap"
-          rel="stylesheet"
-        />
       </head>
       <body className="bg-background font-sans text-foreground antialiased">
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />

@@ -6,9 +6,10 @@ import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
 import { parseChatArtifact } from "@/lib/artifacts/active";
-import { fallbackChatTool, forcedCreateTool, gateChatTool } from "@/lib/composer/intent";
+import { fallbackChatTool, forcedAdvancePath, forcedCreateTool, forcedPathTool, gateChatTool } from "@/lib/composer/intent";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
 import { asMemoryFacts, sanitizePersonalization } from "@/lib/memory/normalize";
+import { asChatMode, chatModeSendsToolDeclarations, chatModeTools } from "@/lib/core/chat-modes";
 import { CHAT_MODES, type ChatArtifact, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
 
 export const runtime = "nodejs";
@@ -23,7 +24,7 @@ type ChatRequestBody = {
 };
 
 function asMode(value: unknown): ChatMode {
-  return value === "socratic" ? "socratic" : "normal";
+  return asChatMode(value);
 }
 
 function asHistory(value: unknown): ChatTurn[] {
@@ -46,7 +47,13 @@ function asHistory(value: unknown): ChatTurn[] {
 }
 
 function asAcceptedTool(value: unknown): ChatGenerationContext["acceptedTool"] {
-  return value === "create_practice" || value === "create_sheet" ? value : undefined;
+  return value === "create_practice" ||
+    value === "create_sheet" ||
+    value === "create_path" ||
+    value === "start_path" ||
+    value === "search_images"
+    ? value
+    : undefined;
 }
 
 function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
@@ -99,9 +106,54 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     acceptedTool: asAcceptedTool(row.acceptedTool),
     priorClarify: row.priorClarify === true,
     pendingTopic: typeof row.pendingTopic === "string" ? row.pendingTopic.trim() || undefined : undefined,
-    pendingKind: row.pendingKind === "sheet" ? "sheet" : row.pendingKind === "practice" ? "practice" : row.pendingKind === "images" ? "images" : undefined,
+    pendingKind:
+      row.pendingKind === "sheet"
+        ? "sheet"
+        : row.pendingKind === "practice"
+          ? "practice"
+          : row.pendingKind === "images"
+            ? "images"
+            : row.pendingKind === "path"
+              ? "path"
+              : undefined,
+    pathTopic: typeof row.pathTopic === "string" ? row.pathTopic.trim() || undefined : undefined,
+    hasPath: row.hasPath === true,
+    inPathThread: row.inPathThread === true,
+    path: asPathBriefing(row.path),
     memories: asMemoryFacts(row.memories, FREE_CAPS.memories),
     personalization: sanitizePersonalization(row.personalization) || undefined,
+    hintAsk: row.hintAsk === true,
+    examAsk: row.examAsk === true,
+  };
+}
+
+function asPathBriefing(value: unknown): ChatGenerationContext["path"] {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.title !== "string" || typeof row.nodeTitle !== "string") return null;
+  const done = typeof row.done === "number" ? row.done : 0;
+  const total = typeof row.total === "number" ? row.total : 0;
+  return {
+    title: row.title.slice(0, 80),
+    courseTitle: typeof row.courseTitle === "string" ? row.courseTitle.slice(0, 80) : "",
+    nodeTitle: row.nodeTitle.slice(0, 80),
+    teach: typeof row.teach === "string" ? row.teach.slice(0, 420) : typeof row.outcome === "string" ? row.outcome.slice(0, 420) : "",
+    outcome: typeof row.outcome === "string" ? row.outcome.slice(0, 160) : "",
+    done,
+    total,
+    courseCount: typeof row.courseCount === "number" ? row.courseCount : 1,
+    started: row.started !== false,
+    kind: row.kind === "review" ? "review" : row.kind === "course" ? "course" : undefined,
+    nodeStatus:
+      row.nodeStatus === "todo" ||
+      row.nodeStatus === "current" ||
+      row.nodeStatus === "ready" ||
+      row.nodeStatus === "done"
+        ? row.nodeStatus
+        : undefined,
+    nextTitle: typeof row.nextTitle === "string" ? row.nextTitle.slice(0, 80) : undefined,
+    why: typeof row.why === "string" ? row.why.slice(0, 80) : undefined,
+    inPathThread: row.inPathThread === true,
   };
 }
 
@@ -169,7 +221,12 @@ function gateFromContext(
     pendingKind: context.pendingKind,
     active: context.activeArtifact,
     accepted: context.acceptedTool,
+    pathTopic: context.pathTopic,
+    projectTitle: context.projectTitle,
+    hasPath: context.hasPath,
+    pathStarted: Boolean(context.hasPath && context.path && context.path.started !== false),
     keywordFallback,
+    mode: context.mode,
   });
 }
 
@@ -227,9 +284,10 @@ export async function POST(request: Request) {
     }
   }
   const context = asContext(body.context, mode);
+  const withPrompt = { ...context, prompt };
   const guestContext = session.anonymous
-    ? { ...context, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
-    : context;
+    ? { ...withPrompt, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
+    : withPrompt;
   const systemInstruction = buildChatSystemPrompt(guestContext);
 
   const stream = new ReadableStream({
@@ -240,11 +298,30 @@ export async function POST(request: Request) {
           : null;
         let streamed = false;
         let textChars = 0;
-        const supportsTools = Boolean(getAIProvider().generateToolStream) && !guestContext.acceptedTool;
+        const supportsTools =
+          Boolean(getAIProvider().generateToolStream) &&
+          !guestContext.acceptedTool &&
+          chatModeSendsToolDeclarations(mode);
         let providerReturnedTool = Boolean(raw);
         let toolSent = false;
 
-        let forced = forcedCreateTool({
+        let forced = guestContext.hintAsk || guestContext.examAsk
+          ? null
+          : forcedPathTool({
+            prompt,
+            hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
+            confirmed: guestContext.confirmed,
+            accepted: guestContext.acceptedTool,
+            pathTopic: guestContext.pathTopic,
+            hasPath: guestContext.hasPath,
+            pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
+          }) ??
+          forcedAdvancePath({
+            prompt,
+            hasPath: guestContext.hasPath,
+            pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
+          }) ??
+          forcedCreateTool({
           prompt,
           hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
           confirmed: guestContext.confirmed,
@@ -252,12 +329,14 @@ export async function POST(request: Request) {
           pendingTopic: guestContext.pendingTopic,
           pendingKind: guestContext.pendingKind,
           accepted: guestContext.acceptedTool,
+          pathTopic: guestContext.pathTopic,
+          projectTitle: guestContext.projectTitle,
         });
         if (session.anonymous && forced) {
           forced = gateGuestChatTool(forced);
           if (forced.name === "answer") forced = null;
         }
-        if (forced && (forced.name === "create_sheet" || forced.name === "create_practice")) {
+        if (forced && (forced.name === "create_sheet" || forced.name === "create_practice" || forced.name === "create_path" || forced.name === "advance_path" || forced.name === "restart_path" || forced.name === "start_path")) {
           controller.enqueue(encodeSse({ tool: forced }));
           controller.enqueue(encodeSse({ done: true }));
           controller.close();
@@ -272,12 +351,29 @@ export async function POST(request: Request) {
           return;
         }
 
+        if (guestContext.hintAsk) {
+          for await (const delta of generateTextStream(prompt, {
+            mode,
+            history,
+            systemInstruction,
+            images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+          })) {
+            streamed = true;
+            textChars += delta.length;
+            controller.enqueue(encodeSse({ delta }));
+          }
+          controller.enqueue(encodeSse({ tool: { name: "answer", args: {} } }));
+          controller.enqueue(encodeSse({ done: true }));
+          controller.close();
+          return;
+        }
+
         if (supportsTools) {
           for await (const part of generateToolStream(prompt, {
             mode,
             history,
             systemInstruction,
-            tools: true,
+            tools: chatModeTools(mode),
             images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
           })) {
             if (part.tool && !raw) {
@@ -286,9 +382,11 @@ export async function POST(request: Request) {
               const preview = gateFromContext(raw, prompt, guestContext, false);
               if (
                 preview &&
+                !guestContext.examAsk &&
                 !toolStreamsText(preview.name) &&
                 preview.name !== "suggest_practice" &&
-                preview.name !== "suggest_sheet"
+                preview.name !== "suggest_sheet" &&
+                preview.name !== "suggest_path"
               ) {
                 toolSent = true;
                 controller.enqueue(encodeSse({ tool: preview }));
@@ -310,6 +408,10 @@ export async function POST(request: Request) {
             priorClarify: guestContext.priorClarify,
             pendingTopic: guestContext.pendingTopic,
             pendingKind: guestContext.pendingKind,
+            pathTopic: guestContext.pathTopic,
+            projectTitle: guestContext.projectTitle,
+            hasPath: guestContext.hasPath,
+            pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
           });
           const preview = gateFromContext(raw, prompt, guestContext, true);
           if (toolStreamsText(preview.name)) {
@@ -328,18 +430,25 @@ export async function POST(request: Request) {
 
         let tool = gateFromContext(raw, prompt, guestContext, !providerReturnedTool);
         if (session.anonymous) tool = gateGuestChatTool(tool);
-        if ((tool.name === "suggest_practice" || tool.name === "suggest_sheet") && textChars < 280) {
+        if (guestContext.hintAsk) {
           tool = { name: "answer", args: {} };
+        }
+        if (guestContext.examAsk) {
+          tool = { name: "answer", args: { question: tool.args.question, options: tool.args.options } };
         }
         if (toolStreamsText(tool.name) && !streamed) {
           if (tool.name === "clarify" && tool.args.question) {
             streamed = true;
             controller.enqueue(encodeSse({ delta: tool.args.question }));
           } else {
+            const captionSystem =
+              tool.name === "search_images"
+                ? `${systemInstruction}\n\nThis turn already called search_images. Write only one short line in the user's language introducing the photos. Nothing else. No URLs. No lists.`
+                : systemInstruction;
             for await (const delta of generateTextStream(prompt, {
               mode,
               history,
-              systemInstruction,
+              systemInstruction: captionSystem,
               images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
             })) {
               streamed = true;

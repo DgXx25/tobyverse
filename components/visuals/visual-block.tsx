@@ -45,8 +45,11 @@ function FitWidth({ children }: { children: ReactNode }) {
   }, [children]);
 
   return (
-    <div ref={hostRef} className="w-full min-w-0 overflow-hidden">
-      <div className="flex justify-center" style={fit.scale < 1 ? { height: fit.height } : undefined}>
+    <div ref={hostRef} className="w-full min-w-0 overflow-x-hidden">
+      <div
+        className="flex justify-center"
+        style={fit.scale < 1 ? { height: Math.ceil(fit.height) + 8 } : undefined}
+      >
         <div
           ref={innerRef}
           className="inline-block"
@@ -328,6 +331,9 @@ function FormulaCard({ block }: { block: Extract<VisualBlock, { type: "formula_c
   return (
     <Card className="text-center">
       {block.title ? <Heading text={block.title} /> : null}
+      {block.text ? (
+        <BodyText text={block.text} className="mb-3 text-left text-[15px] leading-6 text-foreground" />
+      ) : null}
       <div className="overflow-x-auto text-[1.2rem] text-foreground">{renderFormula(block.formula, true) ?? block.formula}</div>
     </Card>
   );
@@ -623,15 +629,13 @@ function FromToShift({ shift, nested = true }: { shift: FromToEmbed; nested?: bo
   if (!sideHasContent(shift.left) || !sideHasContent(shift.right)) return null;
   return (
     <div className={nested ? "note-from-to-nested" : undefined}>
-      <FitWidth>
-        <div className="note-from-to">
-          <FromToPane side={shift.left} />
-          <div className="note-from-to-arrow" aria-hidden>
-            <UiIcon name="arrow" size={18} className="note-from-to-chevron text-muted" />
-          </div>
-          <FromToPane side={shift.right} />
+      <div className="note-from-to">
+        <FromToPane side={shift.left} />
+        <div className="note-from-to-arrow" aria-hidden>
+          <UiIcon name="arrow" size={18} className="note-from-to-chevron text-muted" />
         </div>
-      </FitWidth>
+        <FromToPane side={shift.right} />
+      </div>
       {shift.via ? <ViaCaption text={shift.via} /> : null}
     </div>
   );
@@ -656,9 +660,11 @@ function FromToPane({ side }: { side: FromToSide }) {
   const visual = side.embed ? (
     <FromToEmbedMark embed={side.embed} />
   ) : side.formula ? (
-    <div className="text-center text-[1.05rem] text-foreground">
-      {renderFormula(side.formula, true) ?? side.formula}
-    </div>
+    <FitWidth>
+      <div className="text-center text-[1.05rem] text-foreground">
+        {renderFormula(side.formula, true) ?? side.formula}
+      </div>
+    </FitWidth>
   ) : side.text ? (
     <BodyText text={side.text} className="text-center text-[15px] leading-7 text-foreground" />
   ) : null;

@@ -3,9 +3,13 @@ import {
   extractAppendCount,
   intentFromTool,
   isMutationIntent,
+  practiceModeOf,
   wantsPractice,
   wantsSheet,
   wantsImages,
+  wantsPath,
+  pathKindOf,
+  promptIsKa,
   type ComposerIntent,
 } from "@/lib/composer/intent";
 import { searchImagesClient, toImageAttach } from "@/lib/images/client";
@@ -16,9 +20,26 @@ import { generateStudySheetFromPrompt, rewriteStudySheetFromPrompt } from "@/lib
 import { getStudySheet } from "@/lib/study-sheets/store";
 import { activeToChatArtifact } from "@/lib/artifacts/active";
 import { localImageHits } from "@/lib/images/local";
+import { stripArtifactMarkup } from "@/lib/composer/memory";
+import { stripTrailingCheck, splitTeachingExam } from "@/lib/chat/prompt-ask";
+import { generatePathFromPrompt } from "@/lib/paths/generate-client";
+import {
+  bindPracticeSet,
+  bindSheet,
+  findNode,
+  markNodeDone,
+  nodeTeach,
+  pathArtifactCount,
+  pathIsStarted,
+  progressCounts,
+  restartPath,
+} from "@/lib/paths/model";
+import { getLatestPath, patchStudyPath } from "@/lib/paths/store";
+import { pathThreadId, pathThreadTitle, ensureChatThread } from "@/lib/chats";
 import type { ChatArtifact, ChatArtifactKind, ChatAttachment, ChatImageHit, ChatMessage, PendingKind } from "@/types/chat";
 import type { ActiveArtifact, Project } from "@/types/project";
 import type { Material } from "@/types/material";
+import type { PathCourse, StudyPath } from "@/types/path";
 import type { VisualBlock } from "@/types/visual";
 
 export type ChatDispatchContext = {
@@ -29,13 +50,18 @@ export type ChatDispatchContext = {
   userId: string;
   materials: Material[];
   active: ActiveArtifact | null;
+  path?: StudyPath | null;
+  threadId?: string;
   messages?: Pick<ChatMessage, "artifact">[];
   count?: number;
   pendingKind?: PendingKind | null;
   attachments?: ChatAttachment[];
   onStatus?: (status: string) => void;
   onNotesEvent?: (event: { status?: string | null; title?: string; block?: VisualBlock; blocks?: VisualBlock[]; sheetId?: string }) => void;
+  onPathEvent?: (event: { status?: string | null; title?: string; courses?: PathCourse[]; pathId?: string }) => void;
   signal?: AbortSignal;
+  hintAsk?: boolean;
+  examAsk?: boolean;
 };
 
 export type ChatDispatchResult = {
@@ -45,7 +71,11 @@ export type ChatDispatchResult = {
   options?: string[];
   pendingKind?: PendingKind;
   images?: ChatImageHit[];
-  suggest?: "practice" | "sheet";
+  suggest?: "practice" | "exam" | "sheet" | "path";
+  leadTopic?: string;
+  leadTeach?: string;
+  promptAsk?: { question: string; options?: string[] };
+  openThreadId?: string;
 };
 
 export type ChatToolHandler = {
@@ -54,26 +84,51 @@ export type ChatToolHandler = {
 };
 
 function generatePrompt(ctx: ChatDispatchContext): string {
-  return ctx.tool.args.topic || ctx.tool.args.instruction || ctx.prompt;
+  const explicit = ctx.tool.args.topic?.trim();
+  if (explicit) return explicit;
+  const current = ctx.path ? findNode(ctx.path, ctx.path.currentNodeId)?.node.title.trim() : "";
+  return current || ctx.tool.args.instruction || ctx.prompt;
 }
 
 function oneChatLine(text: string, fallback: string): string {
-  const line = text.trim().split(/\n+/).find((item) => item.trim())?.trim() ?? "";
+  const cleaned = stripArtifactMarkup(text);
+  const line = cleaned.split(/\n+/).find((item) => item.trim())?.trim() ?? "";
   return line && line.length <= 80 ? line : fallback;
 }
 
 function pendingKindForClarify(ctx: ChatDispatchContext): PendingKind | undefined {
-  if (ctx.pendingKind === "sheet" || ctx.pendingKind === "practice" || ctx.pendingKind === "images") {
+  if (
+    ctx.pendingKind === "sheet" ||
+    ctx.pendingKind === "practice" ||
+    ctx.pendingKind === "images" ||
+    ctx.pendingKind === "path"
+  ) {
     return ctx.pendingKind;
   }
   if (wantsSheet(ctx.prompt)) return "sheet";
   if (wantsPractice(ctx.prompt)) return "practice";
+  if (wantsPath(ctx.prompt)) return "path";
   if (wantsImages(ctx.prompt)) return "images";
   return undefined;
 }
 
 export const CREATING_NOTES_STATUS = "Creating notes…";
 export const ANALYSING_MATERIAL_STATUS = "Analysing material…";
+
+export function analysingStatus(items: Array<{ type?: string }> | undefined): string {
+  const list = items ?? [];
+  if (list.length === 0) return ANALYSING_MATERIAL_STATUS;
+  let urls = 0;
+  let files = 0;
+  for (const item of list) {
+    if ((item.type || "").toLowerCase() === "url") urls += 1;
+    else files += 1;
+  }
+  const parts: string[] = [];
+  if (files) parts.push(files === 1 ? "1 file" : `${files} files`);
+  if (urls) parts.push(urls === 1 ? "1 link" : `${urls} links`);
+  return `Reading ${parts.join(", ")}…`;
+}
 
 function imageFailLine(_prompt: string): string {
   return "Couldn't find an image.";
@@ -83,12 +138,20 @@ function imageFoundLine(_prompt: string): string {
   return "Here are some photos.";
 }
 
+function photoCaption(text: string, fallback: string): string {
+  const clean = stripArtifactMarkup(text)
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean || fallback;
+}
+
 export { imageFailLine, imageFoundLine };
 
 function textResult(ctx: ChatDispatchContext, extra?: Partial<ChatDispatchResult>): ChatDispatchResult {
   return {
     intent: intentFromTool(ctx.tool.name),
-    content: ctx.text,
+    content: stripArtifactMarkup(ctx.text),
     ...extra,
   };
 }
@@ -103,28 +166,70 @@ function practiceIds(ctx: ChatDispatchContext): string[] {
   return match?.artifact?.ids?.length ? match.artifact.ids : [active.id];
 }
 
+function promptAskFromTool(ctx: ChatDispatchContext): ChatDispatchResult["promptAsk"] {
+  if (ctx.hintAsk) return undefined;
+  const question = ctx.tool.args.question?.trim();
+  if (!question) return undefined;
+  return { question, options: ctx.tool.args.options };
+}
+
 async function runAnswer(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
-  return textResult(ctx);
+  if (ctx.hintAsk) return textResult(ctx);
+  const raw = stripArtifactMarkup(ctx.text);
+  const { taught, exam } = splitTeachingExam(raw, ctx.tool.args.question);
+  const fromTool = promptAskFromTool(ctx);
+  const blank = ctx.examAsk && !exam && !fromTool && looksLikeBlank(raw) ? raw.trim() : undefined;
+  const promptAsk = exam
+    ? { question: exam, options: ctx.tool.args.options }
+    : fromTool ?? (blank ? { question: blank, options: ctx.tool.args.options } : undefined);
+  if (ctx.examAsk) {
+    if (!promptAsk) return textResult(ctx, { content: taught || raw });
+    return textResult(ctx, { content: "", promptAsk });
+  }
+  if (!promptAsk) return textResult(ctx, { content: taught || raw });
+  return textResult(ctx, {
+    content: taught,
+    promptAsk,
+  });
+}
+
+function looksLikeBlank(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length > 280) return false;
+  return /_{2,}|……|\(\s*[a-z]+(?:\/[a-z]+)?\s*\)/i.test(t);
 }
 
 async function runClarify(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   return textResult(ctx, {
-    content: ctx.text.trim() || ctx.tool.args.question || "",
+    content: stripArtifactMarkup(ctx.text.trim() || ctx.tool.args.question || ""),
     options: ctx.tool.args.options ?? [],
     pendingKind: pendingKindForClarify(ctx),
   });
 }
 
 async function runSuggestPractice(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
-  return textResult(ctx, { suggest: "practice" });
+  return textResult(ctx, { suggest: practiceModeOf(ctx.prompt, ctx.tool.args.mode), pendingKind: "practice" });
 }
 
 async function runSuggestSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
-  return textResult(ctx, { suggest: "sheet" });
+  const promptAsk = promptAskFromTool(ctx);
+  if (!promptAsk) return textResult(ctx, { suggest: "sheet", pendingKind: "sheet" });
+  return textResult(ctx, {
+    content: stripTrailingCheck(stripArtifactMarkup(ctx.text), promptAsk.question),
+    suggest: "sheet",
+    pendingKind: "sheet",
+    promptAsk,
+  });
+}
+
+async function runSuggestPath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
+  return textResult(ctx, { suggest: "path", pendingKind: "path" });
 }
 
 async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
-  ctx.onStatus?.("Generating a practice set…");
+  const mode = practiceModeOf(ctx.prompt, ctx.tool.args.mode);
+  const ka = promptIsKa(ctx.prompt);
+  ctx.onStatus?.(mode === "exam" ? (ka ? "ვამზადებ გამოცდას" : "Generating exam") : (ka ? "ვამზადებ ვარჯიშს" : "Generating practice"));
   const set = await generatePracticeSet({
     project: ctx.project,
     userId: ctx.userId,
@@ -133,15 +238,29 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
     count: ctx.count,
     onStatus: ctx.onStatus,
   });
+  const path = ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
+  ctx.onStatus?.(ka ? "მზადაა" : "Done");
+  if (path?.currentNodeId) {
+    const next = bindPracticeSet(path, path.currentNodeId, set.ids[0]);
+    await patchStudyPath(ctx.project.id, path.id, { courses: next.courses }).catch(() => undefined);
+  }
   return {
     intent: "practice",
-    content: "Practice set is ready.",
+    content:
+      mode === "exam"
+        ? ka
+          ? "გამოცდა მზადაა."
+          : "Exam is ready."
+        : ka
+          ? "ვარჯიში მზადაა."
+          : "Practice set is ready.",
     artifact: {
       kind: "practice",
       id: set.ids[0],
-      title: "Practice set",
+      title: mode === "exam" ? (ka ? "გამოცდა" : "Exam") : ka ? "ვარჯიში" : "Practice set",
       count: set.count,
       ids: set.ids,
+      mode,
     },
   };
 }
@@ -159,10 +278,15 @@ async function runCreateSheet(ctx: ChatDispatchContext): Promise<ChatDispatchRes
     onEvent: ctx.onNotesEvent,
   });
   if (!sheet.id) throw new Error("Could not save notes.");
+  const path = ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
+  if (path && pathIsStarted(path) && path.currentNodeId) {
+    const next = bindSheet(path, path.currentNodeId, sheet.id);
+    await patchStudyPath(ctx.project.id, path.id, { courses: next.courses }).catch(() => undefined);
+  }
   ctx.onNotesEvent?.({ title: sheet.title, blocks: sheet.blocks, sheetId: sheet.id, status: null });
   return {
     intent: "study",
-    content: oneChatLine(ctx.text, "Created notes."),
+    content: "",
     artifact: { kind: "sheet", id: sheet.id, title: sheet.title, count: sheet.blocks.length },
   };
 }
@@ -198,7 +322,7 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
   if (!active || active.kind !== "practice_set") throw new Error("Open a set first.");
   const ids = practiceIds(ctx);
   const count = ctx.tool.args.count ?? extractAppendCount(ctx.prompt);
-  ctx.onStatus?.(`Generating practice · ${count} items`);
+  ctx.onStatus?.("Generating practice");
   const extra = await appendPracticeItems({
     project: ctx.project,
     userId: ctx.userId,
@@ -225,7 +349,7 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
 async function runSearchImages(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const query = ctx.tool.args.query?.trim() || ctx.prompt.trim();
   const count = ctx.tool.args.count ?? IMAGE_SEARCH_DEFAULT;
-  ctx.onStatus?.("Searching…");
+  ctx.onStatus?.("Searching photos…");
   const local = localImageHits({
     query,
     materials: ctx.materials,
@@ -242,15 +366,154 @@ async function runSearchImages(ctx: ChatDispatchContext): Promise<ChatDispatchRe
   });
   const images = [...local, ...web];
   if (images.length === 0) {
-    return { intent: "ask", content: imageFailLine(ctx.prompt), images: [] };
+    return { intent: "ask", content: photoCaption(ctx.text, imageFailLine(ctx.prompt)), images: [] };
   }
   return {
     intent: "ask",
-    content: imageFoundLine(ctx.prompt),
+    content: photoCaption(ctx.text, imageFoundLine(ctx.prompt)),
     images,
   };
 }
 
+async function runCreatePath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
+  ctx.onStatus?.("Mapping the path…");
+  ctx.onPathEvent?.({ status: "Mapping the path…" });
+  const kind = pathKindOf(ctx.prompt);
+  const generated = await generatePathFromPrompt({
+    projectId: ctx.project.id,
+    userId: ctx.userId,
+    projectTitle: ctx.project.title,
+    materials: ctx.materials,
+    prompt: generatePrompt(ctx),
+    kind,
+    signal: ctx.signal,
+    onEvent: ctx.onPathEvent,
+  });
+  const count = pathArtifactCount({ courses: generated.courses });
+  ctx.onPathEvent?.({
+    title: generated.title,
+    courses: generated.courses,
+    pathId: generated.id,
+    status: null,
+  });
+  const ready = promptIsKa(ctx.prompt)
+    ? "გზა მზადაა. შეგიძლია შეცვალო, ან Continue-ით დავიწყოთ."
+    : "Path is ready. Change it if you want, or Continue when you're ready to start.";
+  return {
+    intent: "plan",
+    content: oneChatLine(ctx.text, ready),
+    artifact: { kind: "path", id: generated.id, title: generated.title, count },
+  };
+}
+
+async function runAdvancePath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
+  const path = ctx.path ?? (await getLatestPath(ctx.project.id));
+  if (!path) throw new Error("Open a path first.");
+  if (!pathIsStarted(path)) throw new Error("Start the path first.");
+  const currentId = path.currentNodeId;
+  const fromTitle = findNode(path, currentId)?.node.title;
+  const next = markNodeDone(path, currentId);
+  await patchStudyPath(ctx.project.id, path.id, {
+    courses: next.courses,
+    currentCourseId: next.currentCourseId,
+    currentNodeId: next.currentNodeId,
+  });
+  const loc = findNode(next, next.currentNodeId);
+  const finished = next.currentNodeId === currentId && findNode(next, currentId)?.node.status === "done";
+  const { done, total } = progressCounts(next.courses);
+  return {
+    intent: "plan",
+    content: finished ? (promptIsKa(ctx.prompt) ? "გზა დასრულდა." : "Path complete.") : "",
+    artifact: {
+      kind: "path",
+      id: next.id,
+      title: next.title,
+      count: total,
+      step: {
+        from: fromTitle,
+        to: finished ? undefined : loc?.node.title,
+        done,
+        total,
+      },
+    },
+    leadTopic: finished ? undefined : loc?.node.title,
+    leadTeach: finished ? undefined : loc ? nodeTeach(loc.node) : undefined,
+  };
+}
+
+async function runRestartPath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
+  const path = ctx.path ?? (await getLatestPath(ctx.project.id));
+  if (!path) throw new Error("Open a path first.");
+  if (pathIsStarted(path)) {
+    return {
+      intent: "ask",
+      content: promptIsKa(ctx.prompt)
+        ? "ეს გზა უკვე დაიწყო. სხვა კურსისთვის ახალი ჩატი გახსენი."
+        : "This path already started. Open a new chat to map a different course.",
+    };
+  }
+  const next = restartPath(path);
+  await patchStudyPath(ctx.project.id, path.id, {
+    courses: next.courses,
+    currentCourseId: next.currentCourseId,
+    currentNodeId: next.currentNodeId,
+  });
+  const loc = findNode(next, next.currentNodeId);
+  const line = loc ? `Back at the start: ${loc.node.title}.` : "Path reset to the beginning.";
+  return {
+    intent: "plan",
+    content: oneChatLine(ctx.text, line),
+    artifact: {
+      kind: "path",
+      id: next.id,
+      title: next.title,
+      count: pathArtifactCount(next),
+    },
+  };
+}
+
+async function runStartPath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
+  const path = ctx.path ?? (await getLatestPath(ctx.project.id));
+  if (!path) throw new Error("Open a path first.");
+  const threadId = path.threadId || pathThreadId(path.id);
+  const title = pathThreadTitle(path);
+  await ensureChatThread({
+    projectId: ctx.project.id,
+    userId: ctx.userId,
+    mode: ctx.project.preferredChatMode,
+    threadId,
+    kind: "path",
+    title,
+    pathId: path.id,
+  });
+  if (!pathIsStarted(path) || path.threadId !== threadId) {
+    await patchStudyPath(ctx.project.id, path.id, { started: true, threadId });
+  }
+  const loc = findNode(path, path.currentNodeId);
+  const { done, total } = progressCounts(path.courses);
+  const sameThread = ctx.threadId === threadId;
+  const line = promptIsKa(ctx.prompt)
+    ? "გეგმა გაიხსნა. მთავარ ჩატში კვლავ შეგიძლია იკითხო."
+    : "Plan is open. This chat stays free.";
+  return {
+    intent: "plan",
+    content: sameThread ? "" : oneChatLine(ctx.text, line),
+    artifact: {
+      kind: "path",
+      id: path.id,
+      title: path.title,
+      count: total,
+      step: {
+        to: loc?.node.title,
+        done,
+        total,
+      },
+    },
+    openThreadId: threadId,
+    leadTopic: sameThread ? loc?.node.title : undefined,
+    leadTeach: sameThread && loc ? nodeTeach(loc.node) : undefined,
+  };
+}
 async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const active = ctx.active;
   if (!active) throw new Error("Open a set or sheet first.");
@@ -273,7 +536,7 @@ async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResul
   ctx.onNotesEvent?.({ title: next.title, blocks: next.blocks, sheetId: sheet.id, status: null });
   return {
     intent: "rewrite_sheet",
-    content: "Updated notes.",
+    content: promptIsKa(ctx.prompt) ? "განვაახლე კონსპექტი." : "Updated notes.",
     artifact: activeToChatArtifact({ ...active, title: next.title, status: "ready" }),
   };
 }
@@ -283,11 +546,16 @@ export const CHAT_TOOL_HANDLERS: Record<ChatToolName, ChatToolHandler> = {
   clarify: { run: runClarify },
   suggest_practice: { run: runSuggestPractice },
   suggest_sheet: { run: runSuggestSheet },
+  suggest_path: { run: runSuggestPath },
   create_practice: { run: runCreatePractice, artifactKind: "practice" },
   edit_practice: { run: runEditPractice, artifactKind: "practice" },
   append_practice: { run: runAppendPractice, artifactKind: "practice" },
   create_sheet: { run: runCreateSheet, artifactKind: "sheet" },
   edit_sheet: { run: runEditSheet, artifactKind: "sheet" },
+  create_path: { run: runCreatePath, artifactKind: "path" },
+  advance_path: { run: runAdvancePath, artifactKind: "path" },
+  restart_path: { run: runRestartPath, artifactKind: "path" },
+  start_path: { run: runStartPath, artifactKind: "path" },
   search_images: { run: runSearchImages },
 };
 
@@ -299,15 +567,23 @@ export function toolProducesArtifact(name: ChatToolName): boolean {
   return Boolean(CHAT_TOOL_HANDLERS[name]?.artifactKind) || isArtifactTool(name);
 }
 
-export function dispatchStatus(intent: ComposerIntent, toolName?: ChatToolName): string {
-  if (toolName === "search_images") return "Searching…";
-  if (toolName === "clarify") return "Planning…";
-  if (intent === "study") return CREATING_NOTES_STATUS;
-  if (intent === "rewrite_sheet") return "Updating notes…";
-  if (intent === "practice") return "Generating a practice set…";
-  if (intent === "plan") return "Planning…";
-  if (isMutationIntent(intent)) return "Updating…";
-  return "Thinking";
+export function thinkingStatus(ka = false): string {
+  return ka ? "ვფიქრობ" : "Thinking";
+}
+
+export function dispatchStatus(intent: ComposerIntent, toolName?: ChatToolName, ka = false): string {
+  if (toolName === "search_images") return ka ? "ვეძებ ფოტოებს…" : "Searching photos…";
+  if (toolName === "clarify") return ka ? "ვგეგმავ…" : "Planning…";
+  if (intent === "study") return ka ? "ვწერ კონსპექტს…" : CREATING_NOTES_STATUS;
+  if (intent === "rewrite_sheet") return ka ? "ვაახლებ კონსპექტს…" : "Updating notes…";
+  if (intent === "practice") return ka ? "ვამზადებ ვარჯიშს" : "Generating practice";
+  if (toolName === "advance_path") return ka ? "გადავდივართ…" : "Moving on…";
+  if (toolName === "restart_path") return ka ? "თავიდან…" : "Starting at the beginning…";
+  if (toolName === "start_path") return ka ? "ვიწყებთ…" : "Starting…";
+  if (toolName === "create_path") return ka ? "ვგეგმავ გზას…" : "Mapping the path…";
+  if (intent === "plan") return ka ? "ვგეგმავ გზას…" : "Mapping the path…";
+  if (isMutationIntent(intent)) return ka ? "ვაახლებ…" : "Updating…";
+  return thinkingStatus(ka);
 }
 
 /** Run the registered handler. Unknown names stay text — never practice. */

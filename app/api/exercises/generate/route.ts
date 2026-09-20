@@ -116,7 +116,12 @@ export async function POST(request: Request) {
     body.current && typeof body.current === "object" ? JSON.stringify(body.current).slice(0, 4000) : "";
 
   if (!compiled.trim() && knowledge.length === 0 && !currentJson) {
-    return Response.json({ error: "Add materials or knowledge first." }, { status: 400 });
+    const formOnly =
+      (typeof body.type === "string" && body.type === "paper") ||
+      (Array.isArray(body.types) && body.types.length > 0 && body.types.every((item) => item === "paper"));
+    if (!formOnly) {
+      return Response.json({ error: "Add materials or knowledge first." }, { status: 400 });
+    }
   }
 
   const projectTitle = typeof body.projectTitle === "string" ? body.projectTitle : "Project";

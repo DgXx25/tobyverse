@@ -4,16 +4,14 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { LandingScreen } from "@/components/landing-screen";
-import { enterAppAfterSignIn, isAccountUser, peekCurrentUser, persistSignedInSession } from "@/lib/auth";
-import { hasSignedInCookie } from "@/lib/signed-in-cookie";
+import { enterAppAfterSignIn, isAccountUser, persistSignedInSession } from "@/lib/auth";
 
-export function PublicHome() {
+export function PublicHome({ sessionHint = false }: { sessionHint?: boolean }) {
   const router = useRouter();
   const { user, loading } = useAuth();
   const sent = useRef(false);
-  const current = user ?? peekCurrentUser();
-  const account = isAccountUser(current);
-  const restoring = loading && (account || hasSignedInCookie());
+  const account = isAccountUser(user);
+  const restoring = loading && sessionHint;
 
   useEffect(() => {
     if (sent.current || !isAccountUser(user)) return;

@@ -8,9 +8,9 @@ export const PRACTICE_SET_SIZES = [10] as const;
 export const FREE_PRACTICE_SET_CAP = PRACTICE_SET_CAP;
 export const EXERCISE_SET_CAP = PRACTICE_SET_CAP;
 
-export type PracticeFamily = "recall" | "procedure" | "writing";
+export type PracticeFamily = "recall" | "procedure" | "writing" | "form";
 
-export const GENERABLE_EXERCISE_TYPES = ["mcq", "connect", "problem_steps", "open_short", "analysis", "essay"] as const;
+export const GENERABLE_EXERCISE_TYPES = ["mcq", "connect", "problem_steps", "open_short", "analysis", "essay", "paper"] as const;
 export type GenerableExerciseType = (typeof GENERABLE_EXERCISE_TYPES)[number];
 
 export function isGenerableExerciseType(type: string): type is GenerableExerciseType {
@@ -35,6 +35,16 @@ export type PlannedExercise = {
   category: ExerciseCategory;
 };
 
+export const PAPER_SET_CAP = 3;
+
+export const FORM_WRITE_HINT =
+  /განცხადებ|საჩივარ|მიმართვა|application letter|official letter|petition|ხელისუფლებ/i;
+
+export function isFormWriteTopic(...parts: Array<string | null | undefined>): boolean {
+  return FORM_WRITE_HINT.test(parts.filter(Boolean).join("\n"));
+}
+
+const FORM_HINT = FORM_WRITE_HINT;
 const WRITING_HINT =
   /essay|ესე|analysis|ანალიზ|case study|შემთხვევ|discuss|განიხილ|write about|დაწერ|compare and contrast|argument|რუბრიკ/i;
 const PROCEDURE_HINT =
@@ -45,6 +55,7 @@ const RECALL_HINT =
 export function practiceFamilyForTopic(topic: string): PracticeFamily {
   const text = topic.trim();
   if (!text) return "recall";
+  if (FORM_HINT.test(text)) return "form";
   if (WRITING_HINT.test(text)) return "writing";
   if (PROCEDURE_HINT.test(text)) return "procedure";
   if (RECALL_HINT.test(text)) return "recall";
@@ -53,9 +64,11 @@ export function practiceFamilyForTopic(topic: string): PracticeFamily {
 
 export function practiceFamilyFromTypes(types: Array<ExerciseType | "unsupported">): PracticeFamily {
   const usable = types.filter((type): type is ExerciseType => type !== "unsupported");
+  const form = usable.filter((type) => type === "paper").length;
   const writing = usable.filter((type) => type === "essay" || type === "analysis" || type === "open_short" || type === "case_tree").length;
   const procedure = usable.filter((type) => type === "problem_steps").length;
   const recall = usable.filter((type) => type === "mcq" || type === "connect").length;
+  if (form > 0 && form >= writing && form >= procedure && form >= recall) return "form";
   if (procedure > 0 && procedure >= writing && procedure >= recall) return "procedure";
   if (writing > recall) return "writing";
   return "recall";
@@ -107,6 +120,9 @@ export function planPracticeSet(family: PracticeFamily, cap = EXERCISE_SET_CAP):
       ],
       cap,
     );
+  }
+  if (family === "form") {
+    return planFromParts([{ type: "paper", category: "problems", weight: 1 }], cap);
   }
   if (family === "writing") {
     return planFromParts(

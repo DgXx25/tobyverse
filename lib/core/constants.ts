@@ -16,8 +16,9 @@ export const PROJECT_GOAL_LABELS: Record<ProjectGoal, string> = {
 };
 
 export const CHAT_MODE_LABELS: Record<ChatMode, string> = {
-  normal: "Normal",
-  socratic: "Hints on problems",
+  auto: "Auto",
+  fast: "Fast",
+  teacher: "Teacher",
 };
 
 export const DEFAULT_CHAT_THREAD_ID = "main";

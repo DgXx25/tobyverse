@@ -2,9 +2,9 @@ import type { EntityId, IsoDateString } from "@/types/common";
 import type { VisualBlock } from "@/types/visual";
 
 /** Add a type + renderer. Do not delete old fields. Bump schemaVersion. */
-export const NOTES_SCHEMA_VERSION = 10 as const;
+export const NOTES_SCHEMA_VERSION = 11 as const;
 
-export type NoteSchemaVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type NoteSchemaVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
 export type NotesLiveState = {
   title: string;

@@ -9,6 +9,7 @@ function coerceLegacy(value: unknown): unknown {
     slides?: unknown;
     formula?: unknown;
     title?: unknown;
+    text?: unknown;
     left?: unknown;
     right?: unknown;
     from?: unknown;
@@ -31,7 +32,12 @@ function coerceLegacy(value: unknown): unknown {
     return { type: "steps", items };
   }
   if (row.type === "formula_card" && typeof row.formula === "string") {
-    return { type: "formula_card", title: typeof row.title === "string" ? row.title : undefined, formula: row.formula };
+    return {
+      type: "formula_card",
+      title: typeof row.title === "string" ? row.title : undefined,
+      text: typeof row.text === "string" ? row.text : undefined,
+      formula: row.formula,
+    };
   }
   if (row.type === "walk" && !Array.isArray(row.slides) && Array.isArray(row.items)) {
     return { ...row, slides: row.items };
@@ -80,7 +86,7 @@ export function blockPreviewText(blocks: VisualBlock[]): string {
     if (block.type === "graph") return block.caption || block.title || "";
     if (block.type === "steps") return block.items[0] ?? "";
     if (block.type === "compare_vs") return `${block.left.title} vs ${block.right.title}`;
-    if (block.type === "formula_card") return block.formula;
+    if (block.type === "formula_card") return block.text || block.title || block.formula;
     if (block.type === "table") return block.headers.join(" · ");
     if (block.type === "concept_row") return block.items.map((item) => item.title).join(" · ");
     if (block.type === "sparkline") return block.caption || block.title || "";

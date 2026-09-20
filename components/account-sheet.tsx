@@ -51,6 +51,9 @@ export function AccountSheet() {
         if (open) return;
         closeAccountSheet();
       }}
+      onAnimationEnd={(open) => {
+        if (!open) setAccountSheetPage("root");
+      }}
     >
       <DrawerContent className="sheet-pad">
         <DrawerHandle className="mx-auto mt-2.5 mb-1" />

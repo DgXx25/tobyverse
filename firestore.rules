@@ -109,7 +109,7 @@ service cloud.firestore {
     function isValidLearning(data) {
       return data.keys().hasOnly(["text", "updatedAt"])
         && data.keys().hasAll(["text", "updatedAt"])
-        && data.text is string && data.text.size() <= 800
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 800
         && (data.updatedAt is timestamp || data.updatedAt is string);
     }
 

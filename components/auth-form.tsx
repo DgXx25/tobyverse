@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { isFirebaseConfigured } from "@/lib/firebase";
 import {
   authErrorMessage,
+  consumeGoogleIdTokenFromUrl,
   consumeRedirectResult,
   enterAppAfterSignIn,
   isAccountUser,
@@ -54,35 +55,42 @@ export function AuthForm({ variant = "default" }: { variant?: "default" | "marke
   const sent = useRef(false);
   const [pending, setPending] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [redirectReady, setRedirectReady] = useState(false);
   const configured = isFirebaseConfigured();
   const appleConfigured = isAppleSignInConfigured();
 
   useEffect(() => {
     let live = true;
-    void consumeRedirectResult()
-      .then((result) => {
-        if (!live) return;
-        if (isAccountUser(result.credential?.user) && result.credential) {
-          persistSignedInSession(result.credential.user);
-          sent.current = true;
-          enterAppAfterSignIn(true, (path) => router.replace(path));
-        }
-      })
-      .finally(() => {
-        if (live) setRedirectReady(true);
-      });
+    void (async () => {
+      const google = await consumeGoogleIdTokenFromUrl();
+      if (!live) return;
+      if (isAccountUser(google.credential?.user) && google.credential) {
+        persistSignedInSession(google.credential.user);
+        sent.current = true;
+        enterAppAfterSignIn(true, (path) => router.replace(path));
+        return;
+      }
+      if (google.error) setError(google.error);
+      const result = await consumeRedirectResult();
+      if (!live) return;
+      if (isAccountUser(result.credential?.user) && result.credential) {
+        persistSignedInSession(result.credential.user);
+        sent.current = true;
+        enterAppAfterSignIn(true, (path) => router.replace(path));
+        return;
+      }
+      if (result.error) setError(result.error);
+    })();
     return () => {
       live = false;
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
-    if (!redirectReady || loading || !isAccountUser(user) || sent.current) return;
+    if (loading || !isAccountUser(user) || sent.current) return;
     sent.current = true;
     persistSignedInSession(user);
     enterAppAfterSignIn(true, (path) => router.replace(path));
-  }, [redirectReady, loading, user, router]);
+  }, [loading, user, router]);
 
   async function signIn(provider: Provider) {
     setError(null);
@@ -98,7 +106,6 @@ export function AuthForm({ variant = "default" }: { variant?: "default" | "marke
     } catch (err) {
       const message = authErrorMessage(err);
       if (message) setError(message);
-    } finally {
       setPending(null);
     }
   }
@@ -118,7 +125,7 @@ export function AuthForm({ variant = "default" }: { variant?: "default" | "marke
     );
   }
 
-  if (loading || !redirectReady || isAccountUser(user)) {
+  if (isAccountUser(user)) {
     return <div className="h-28" />;
   }
 

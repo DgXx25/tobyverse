@@ -127,6 +127,24 @@ export const analysisSchema = z.object({
   sampleAnalysis: z.string().max(1200).optional(),
 });
 
+export const paperSchema = z.object({
+  form: z.enum(["ganckhadeba"]),
+  brief: z.string().min(1).max(400),
+  given: z.object({ to: z.string().max(200).optional() }).optional(),
+  rubric: z.array(z.object({ criterion: line, weight: z.number().min(0).max(1) })).max(6).optional(),
+});
+
+export const paperBlockSchema = paperSchema.extend({
+  sample: z
+    .object({
+      to: z.string().max(400).optional(),
+      body: z.string().max(2500).optional(),
+      sign: z.string().max(120).optional(),
+      date: z.string().max(80).optional(),
+    })
+    .optional(),
+});
+
 export const exercisePayloadSchemas = {
   mcq: mcqSchema,
   connect: connectSchema,
@@ -137,6 +155,7 @@ export const exercisePayloadSchemas = {
   case_tree: caseTreeSchema,
   essay: essaySchema,
   analysis: analysisSchema,
+  paper: paperSchema,
 } as const;
 
 export function payloadSchemaFor(type: ExerciseType) {

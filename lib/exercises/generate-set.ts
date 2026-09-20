@@ -12,6 +12,7 @@ import {
   practiceSetBounds,
   CLICK_FIRST_TYPES,
   listExercises,
+  PAPER_SET_CAP,
   type PracticeFamily,
   type ProjectExercise,
 } from "@/lib/exercises";
@@ -43,21 +44,21 @@ export async function generatePracticeSet(input: {
     { userId: input.userId, projectId: input.project.id, excludeAcquired: true },
   ).slice(0, 8);
 
-  if (sources.length === 0 && knowledgeItems.length === 0) {
-    throw new Error("Add a file or describe the topic first.");
-  }
-
   const existing = await listExercises(input.project.id);
   const avoid = existing.map(exerciseStem);
   const goal = goalOrDefault(input.prompt ?? "", input.project.goal);
-  const { requested, minAccept } = practiceSetBounds(input.count ?? choosePracticeSetSize({ goal }));
   const topic = input.prompt?.trim() || input.project.title;
   const family =
     input.family ??
     (existing.length > 0 && !input.prompt?.trim()
       ? practiceFamilyFromTypes(existing.map((item) => item.type))
       : practiceFamilyForTopic(topic));
-  input.onStatus?.(`Generating practice · ${requested} items`);
+  if (sources.length === 0 && knowledgeItems.length === 0 && family !== "form") {
+    throw new Error("Add a file or describe the topic first.");
+  }
+  const { requested, minAccept } = practiceSetBounds(
+    input.count ?? (family === "form" ? PAPER_SET_CAP : choosePracticeSetSize({ goal })),
+  );
   const plan = planPracticeSet(family, requested).filter((item) => {
     if (!isGenerableExerciseType(item.type)) return false;
     if (family === "recall" && !CLICK_FIRST_TYPES.includes(item.type)) return false;

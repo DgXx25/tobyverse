@@ -12,9 +12,9 @@ import {
   where,
   type Unsubscribe,
 } from "firebase/firestore";
-import { deleteChatMessages, ensureChatThread } from "@/lib/chats";
+import { deleteAllChatThreads, ensureChatThread } from "@/lib/chats";
 import { trackEvent } from "@/lib/analytics/track";
-import { preferredChatModeForGoal } from "@/lib/core/chat-modes";
+import { asChatMode, preferredChatModeForGoal } from "@/lib/core/chat-modes";
 import { DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { recipeForGoal } from "@/lib/core/recipes";
 import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
@@ -35,12 +35,8 @@ function asGoal(value: unknown): ProjectGoal {
   return DEFAULT_PROJECT_GOAL;
 }
 
-function asChatMode(value: unknown, goal: ProjectGoal): ChatMode {
-  if (value === "normal" || value === "socratic") {
-    return value;
-  }
-
-  return preferredChatModeForGoal(goal);
+function projectChatMode(value: unknown, goal: ProjectGoal): ChatMode {
+  return asChatMode(value, preferredChatModeForGoal(goal));
 }
 
 function asRecipe(value: unknown, goal: ProjectGoal): LessonRecipe {
@@ -89,7 +85,7 @@ function mapProject(id: string, data: Record<string, unknown>): Project {
     userId: asString(data.userId) || asString(data.ownerId),
     goal,
     recipe: asRecipe(data.recipe, goal),
-    preferredChatMode: asChatMode(data.preferredChatMode, goal),
+    preferredChatMode: projectChatMode(data.preferredChatMode, goal),
     activeArtifact: asActiveArtifact(data.activeArtifact),
     hidden: data.hidden === true,
     createdAt: toIsoDate(data.createdAt),
@@ -141,7 +137,7 @@ export async function createProject(input: CreateProjectInput): Promise<string> 
     userId: input.userId,
     goal,
     recipe: recipeForGoal(goal),
-    preferredChatMode: preferredChatModeForGoal(goal),
+    preferredChatMode: asChatMode(input.preferredChatMode, preferredChatModeForGoal(goal)),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -149,7 +145,7 @@ export async function createProject(input: CreateProjectInput): Promise<string> 
   await ensureChatThread({
     projectId: ref.id,
     userId: input.userId,
-    mode: preferredChatModeForGoal(goal),
+    mode: asChatMode(input.preferredChatMode, preferredChatModeForGoal(goal)),
   });
 
   trackEvent({
@@ -255,7 +251,7 @@ export async function deleteProject(projectId: string, userId: string): Promise<
     listExercises(projectId),
   ]);
   await Promise.all([
-    deleteChatMessages(projectId),
+    deleteAllChatThreads(projectId),
     ...materials.map((item) => removeMaterial(item)),
     ...sheets.map((item) => deleteStudySheet(projectId, item.id)),
     ...exercises.map((item) => deleteExercise(projectId, item.id)),

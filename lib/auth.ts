@@ -3,10 +3,12 @@ import {
   OAuthProvider,
   browserPopupRedirectResolver,
   getRedirectResult,
+  linkWithCredential,
   linkWithPopup,
   linkWithRedirect,
   reauthenticateWithPopup,
   signInAnonymously,
+  signInWithCredential,
   signInWithPopup,
   signInWithRedirect,
   type User,
@@ -14,11 +16,15 @@ import {
 } from "firebase/auth";
 import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
 import { POST_LOGIN_PATH, writeSignedInCookie } from "@/lib/signed-in-cookie";
-import { isStandaloneDisplay } from "@/lib/standalone";
+import { authPopupUnreliable } from "@/lib/standalone";
 
 export { POST_LOGIN_PATH };
 
 const PENDING_REDIRECT_KEY = "tv.auth-redirect";
+const GOOGLE_OIDC_KEY = "tv.google-oidc";
+const GOOGLE_ID_TOKEN_KEY = "tv.google-id-token";
+const GOOGLE_OAUTH_ERROR_KEY = "tv.google-oauth-error";
+const REDIRECT_RESULT_MS = 2500;
 
 function googleProvider() {
   const provider = new GoogleAuthProvider();
@@ -99,20 +105,31 @@ export function persistSignedInSession(user: User | null) {
   writeSignedInCookie(true);
 }
 
-let redirectResultPromise: Promise<{ credential: UserCredential | null; error: string | null }> | undefined;
+let redirectResultPromise:
+  | Promise<{ credential: UserCredential | null; error: string | null; attempted: boolean }>
+  | undefined;
 
-export function consumeRedirectResult(): Promise<{ credential: UserCredential | null; error: string | null }> {
+export function consumeRedirectResult(): Promise<{
+  credential: UserCredential | null;
+  error: string | null;
+  attempted: boolean;
+}> {
   if (typeof window === "undefined" || !isFirebaseConfigured()) {
-    return Promise.resolve({ credential: null, error: null });
+    return Promise.resolve({ credential: null, error: null, attempted: false });
   }
 
   if (!redirectResultPromise) {
     const auth = getFirebaseAuth();
-    redirectResultPromise = getRedirectResult(auth, browserPopupRedirectResolver)
-      .then((next) => ({ credential: next ?? null, error: null as string | null }))
+    redirectResultPromise = Promise.race([
+      getRedirectResult(auth, browserPopupRedirectResolver),
+      new Promise<null>((resolve) => {
+        window.setTimeout(() => resolve(null), REDIRECT_RESULT_MS);
+      }),
+    ])
+      .then((next) => ({ credential: next ?? null, error: null as string | null, attempted: false }))
       .catch((error) => {
         const message = authErrorMessage(error);
-        return { credential: null, error: message || null };
+        return { credential: null, error: message || null, attempted: false };
       })
       .finally(() => {
         clearPendingRedirect();
@@ -120,6 +137,141 @@ export function consumeRedirectResult(): Promise<{ credential: UserCredential | 
   }
 
   return redirectResultPromise;
+}
+
+function googleParamsFromLocation(): URLSearchParams {
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+  const fromHash = new URLSearchParams(hash);
+  if (fromHash.get("id_token") || fromHash.get("error")) return fromHash;
+  return new URLSearchParams(window.location.search);
+}
+
+function stripAuthParamsFromUrl() {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  url.searchParams.delete("id_token");
+  url.searchParams.delete("access_token");
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_description");
+  url.searchParams.delete("state");
+  url.searchParams.delete("authuser");
+  url.searchParams.delete("prompt");
+  url.searchParams.delete("iss");
+  window.history.replaceState(window.history.state, "", url.pathname + url.search);
+}
+
+async function applyGoogleIdToken(idToken: string): Promise<UserCredential> {
+  const auth = getFirebaseAuth();
+  const credential = GoogleAuthProvider.credential(idToken);
+  const guest = auth.currentUser;
+  if (guest?.isAnonymous) {
+    try {
+      return await linkWithCredential(guest, credential);
+    } catch (error) {
+      if (!isAccountTakenError(error)) throw error;
+    }
+  }
+  return signInWithCredential(auth, credential);
+}
+
+let googleIdTokenPromise: Promise<{ credential: UserCredential | null; error: string | null }> | undefined;
+
+/** Finish Google sign-in when Google returned an id_token on this page (Simple Browser). */
+export function consumeGoogleIdTokenFromUrl(): Promise<{
+  credential: UserCredential | null;
+  error: string | null;
+}> {
+  if (typeof window === "undefined" || !isFirebaseConfigured()) {
+    return Promise.resolve({ credential: null, error: null });
+  }
+  if (!googleIdTokenPromise) googleIdTokenPromise = finishGoogleIdTokenFromUrl();
+  return googleIdTokenPromise;
+}
+
+async function finishGoogleIdTokenFromUrl(): Promise<{
+  credential: UserCredential | null;
+  error: string | null;
+}> {
+  const params = googleParamsFromLocation();
+  let idToken = params.get("id_token");
+  let oauthError = params.get("error");
+  let pending = false;
+  try {
+    pending = sessionStorage.getItem(GOOGLE_OIDC_KEY) === "1";
+    if (!idToken) idToken = sessionStorage.getItem(GOOGLE_ID_TOKEN_KEY);
+    if (!oauthError) oauthError = sessionStorage.getItem(GOOGLE_OAUTH_ERROR_KEY);
+    sessionStorage.removeItem(GOOGLE_OIDC_KEY);
+    sessionStorage.removeItem(GOOGLE_ID_TOKEN_KEY);
+    sessionStorage.removeItem(GOOGLE_OAUTH_ERROR_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (!idToken && !oauthError && !pending) return { credential: null, error: null };
+
+  if (oauthError) {
+    stripAuthParamsFromUrl();
+    if (oauthError === "access_denied") return { credential: null, error: null };
+    return { credential: null, error: params.get("error_description") || "Google sign-in was cancelled." };
+  }
+  if (!idToken) {
+    return { credential: null, error: "Sign-in didn't finish. Click Google again." };
+  }
+
+  try {
+    const credential = await applyGoogleIdToken(idToken);
+    stripAuthParamsFromUrl();
+    return { credential, error: null };
+  } catch (error) {
+    stripAuthParamsFromUrl();
+    return { credential: null, error: authErrorMessage(error) || "Sign-in failed." };
+  }
+}
+
+async function googleWebClientId(): Promise<string> {
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.trim();
+  if (!apiKey) throw new Error("Firebase is not configured.");
+  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      continueUri: window.location.origin + "/",
+      providerId: "google.com",
+    }),
+  });
+  const data = (await response.json()) as { authUri?: string; error?: { message?: string } };
+  if (!response.ok || !data.authUri) {
+    throw new Error(data.error?.message || "Could not start Google sign-in.");
+  }
+  const clientId = new URL(data.authUri).searchParams.get("client_id");
+  if (!clientId) throw new Error("Could not start Google sign-in.");
+  return clientId;
+}
+
+function randomNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function startGoogleIdTokenSignIn(): Promise<null> {
+  const clientId = await googleWebClientId();
+  const nonce = randomNonce();
+  const redirectUri = `${window.location.origin}/__/auth/handler`;
+  try {
+    sessionStorage.setItem(GOOGLE_OIDC_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "id_token",
+    scope: "openid email profile",
+    nonce,
+    prompt: "select_account",
+  });
+  window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  return null;
 }
 
 export async function requireSignedInUser(): Promise<User> {
@@ -150,29 +302,59 @@ function isAccountTakenError(error: unknown): boolean {
   return code === "auth/credential-already-in-use" || code === "auth/email-already-in-use";
 }
 
+function shouldFallbackToRedirect(error: unknown): boolean {
+  if (typeof error !== "object" || !error || !("code" in error)) return false;
+  const code = String((error as { code: string }).code);
+  return (
+    code === "auth/popup-blocked" ||
+    code === "auth/popup-closed-by-user" ||
+    code === "auth/cancelled-popup-request" ||
+    code === "auth/web-storage-unsupported"
+  );
+}
+
+async function startRedirectSignIn(
+  auth: ReturnType<typeof getFirebaseAuth>,
+  user: User | null,
+  provider: GoogleAuthProvider | OAuthProvider,
+): Promise<null> {
+  markPendingRedirect();
+  const guest = Boolean(user?.isAnonymous);
+  if (guest && user) {
+    await linkWithRedirect(user, provider, browserPopupRedirectResolver);
+    return null;
+  }
+  await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
+  return null;
+}
+
 async function linkOrSignIn(
   auth: ReturnType<typeof getFirebaseAuth>,
   user: User | null,
   provider: GoogleAuthProvider | OAuthProvider,
 ): Promise<UserCredential | null> {
   const guest = Boolean(user?.isAnonymous);
-  if (isStandaloneDisplay()) {
-    markPendingRedirect();
+  if (authPopupUnreliable()) {
+    if (provider.providerId === "google.com") {
+      return startGoogleIdTokenSignIn();
+    }
+    return startRedirectSignIn(auth, user, provider);
+  }
+  try {
     if (guest && user) {
-      await linkWithRedirect(user, provider, browserPopupRedirectResolver);
-      return null;
+      try {
+        return await linkWithPopup(user, provider, browserPopupRedirectResolver);
+      } catch (error) {
+        if (!isAccountTakenError(error)) throw error;
+      }
     }
-    await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
-    return null;
-  }
-  if (guest && user) {
-    try {
-      return await linkWithPopup(user, provider, browserPopupRedirectResolver);
-    } catch (error) {
-      if (!isAccountTakenError(error)) throw error;
+    return await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+  } catch (error) {
+    if (shouldFallbackToRedirect(error)) {
+      return startRedirectSignIn(auth, user, provider);
     }
+    throw error;
   }
-  return signInWithPopup(auth, provider, browserPopupRedirectResolver);
 }
 
 export async function signInWithGoogle(): Promise<UserCredential | null> {

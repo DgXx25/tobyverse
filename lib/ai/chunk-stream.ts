@@ -1,3 +1,5 @@
+import { stripArtifactMarkup } from "@/lib/composer/memory";
+
 /** Incremental or cumulative provider chunks → a single growing string. */
 export function mergeStreamDelta(full: string, delta: string): string {
   if (!delta) return full;
@@ -13,39 +15,34 @@ export function mergeStreamDelta(full: string, delta: string): string {
 
 export function createChunkBuffer(
   onUpdate: (text: string) => void,
-  opts?: { minChars?: number; ms?: number },
+  _opts?: { minChars?: number; ms?: number },
 ) {
-  const minChars = opts?.minChars ?? 18;
-  const ms = opts?.ms ?? 36;
   let full = "";
-  let sinceFlush = 0;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let frame = 0;
+
+  function visible() {
+    return stripArtifactMarkup(full);
+  }
 
   function flush() {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    sinceFlush = 0;
-    onUpdate(full);
+    frame = 0;
+    onUpdate(visible());
   }
 
   return {
     push(delta: string) {
-      const next = mergeStreamDelta(full, delta);
-      sinceFlush += Math.max(0, next.length - full.length);
-      full = next;
-      if (sinceFlush >= minChars || /\n/.test(delta)) {
-        flush();
-        return;
-      }
-      if (!timer) timer = setTimeout(flush, ms);
+      full = mergeStreamDelta(full, delta);
+      if (!frame) frame = requestAnimationFrame(flush);
     },
     finish() {
+      if (frame) cancelAnimationFrame(frame);
       flush();
-      return full;
+      return visible();
     },
     get text() {
+      return visible();
+    },
+    get raw() {
       return full;
     },
   };

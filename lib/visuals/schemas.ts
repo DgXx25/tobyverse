@@ -62,6 +62,7 @@ export const compareVsSchema = z.object({
 export const formulaCardSchema = z.object({
   type: z.literal("formula_card"),
   title: title.optional(),
+  text: z.string().min(1).max(360).optional(),
   formula,
 });
 

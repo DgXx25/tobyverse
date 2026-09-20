@@ -12,7 +12,25 @@ export function parseChatArtifact(value: unknown): ChatArtifact | null {
     title: row.title,
     count: typeof row.count === "number" ? row.count : undefined,
     ids: Array.isArray(row.ids) ? row.ids.filter((id): id is string => typeof id === "string") : undefined,
+    mode: row.mode === "exam" || row.mode === "practice" ? row.mode : undefined,
+    step: asArtifactStep(row.step),
   });
+}
+
+function asArtifactStep(value: unknown): ChatArtifact["step"] {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const from = typeof row.from === "string" ? row.from.trim() : "";
+  const to = typeof row.to === "string" ? row.to.trim() : "";
+  const done = typeof row.done === "number" && Number.isFinite(row.done) ? row.done : undefined;
+  const total = typeof row.total === "number" && Number.isFinite(row.total) ? row.total : undefined;
+  if (!from && !to && done == null && total == null) return undefined;
+  return {
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(done != null ? { done } : {}),
+    ...(total != null ? { total } : {}),
+  };
 }
 
 export function compactChatArtifact(artifact: ChatArtifact | null | undefined): ChatArtifact | null {
@@ -24,18 +42,23 @@ export function compactChatArtifact(artifact: ChatArtifact | null | undefined): 
   };
   if (typeof artifact.count === "number" && Number.isFinite(artifact.count)) next.count = artifact.count;
   if (artifact.ids?.length) next.ids = artifact.ids;
+  if (artifact.mode === "exam" || artifact.mode === "practice") next.mode = artifact.mode;
+  const step = asArtifactStep(artifact.step);
+  if (step) next.step = step;
   return next;
 }
 
 export function toActiveKind(kind: string): ActiveArtifactKind {
   if (kind === "practice") return "practice_set";
   if (kind === "sheet" || kind === "plan") return "study_sheet";
+  if (kind === "path") return "study_path";
   return kind;
 }
 
 export function toChatArtifactKind(kind: string): ChatArtifactKind {
   if (kind === "practice_set") return "practice";
   if (kind === "study_sheet") return "sheet";
+  if (kind === "study_path") return "path";
   return kind;
 }
 
@@ -61,6 +84,7 @@ export function activeToChatArtifact(active: ActiveArtifact): ChatArtifact {
       title: active.title || "Practice set",
       count: active.count ?? active.ids?.length,
       ids: active.ids,
+      mode: active.title === "Exam" || active.title === "გამოცდა" ? "exam" : "practice",
     };
   }
   if (active.kind === "study_sheet") {
@@ -68,6 +92,14 @@ export function activeToChatArtifact(active: ActiveArtifact): ChatArtifact {
       kind: active.title === "Study plan" ? "plan" : "sheet",
       id: active.id,
       title: active.title || "Notes",
+      count: active.count,
+    };
+  }
+  if (active.kind === "study_path") {
+    return {
+      kind: "path",
+      id: active.id,
+      title: active.title || "Path",
       count: active.count,
     };
   }

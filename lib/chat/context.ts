@@ -1,8 +1,11 @@
 import { withAskWritingContract } from "@/lib/ai/voice";
+import { tobyCardsForTurn } from "@/lib/blocks/match";
 import { compactArtifactLine } from "@/lib/composer/memory";
 import { chatSystemInstruction } from "@/lib/core/chat-modes";
-import { PROJECT_GOAL_LABELS } from "@/lib/core/constants";
-import { formatMemoryBlock, formatPersonalizationBlock } from "@/lib/memory/prompt";
+import { DEFAULT_PROJECT_GOAL, PROJECT_GOAL_LABELS } from "@/lib/core/constants";
+import { isFormWriteTopic } from "@/lib/exercises/plan";
+import { formatKnownUserBlock, pickMemoriesForAsk } from "@/lib/memory/prompt";
+import { formatPathBriefing } from "@/lib/paths/model";
 import type { ChatGenerationContext } from "@/types/chat";
 import type { ProjectGoal } from "@/types/goals";
 
@@ -14,30 +17,37 @@ function goalLabel(goal: string): string {
   return goal;
 }
 
+function showLearningGoal(context: ChatGenerationContext): boolean {
+  if (context.path) return true;
+  const goal = context.goal.trim();
+  if (!goal || goal === DEFAULT_PROJECT_GOAL) return false;
+  return true;
+}
+
 export function buildChatSystemPrompt(context: ChatGenerationContext): string {
   const extra = [
-    `You are TobyVerse, a calm study tutor inside the project "${context.projectTitle}".`,
-    `Learning goal: ${goalLabel(context.goal)}.`,
+    `Project: ${context.projectTitle}.`,
+    showLearningGoal(context) ? `Learning goal: ${goalLabel(context.goal)}.` : null,
     context.projectDescription ? `Project notes: ${context.projectDescription}` : null,
-    "Call at most one tool per turn. Default: answer. Never dump quiz items or sheet body into chat.",
-    "Follow the latest user topic. Do not lock onto the first topic or say you only teach it.",
-    "A topic name or ordinary question (what/which/რომელია/რა არის) → answer. Teach it. Never bounce it back as a question. Clarify only via the clarify tool, and only when notes/practice/photos are missing one detail.",
-    "If they asked for notes (კონსპექტი / დამიკონსპექტე / study notes), you MUST call create_sheet immediately when the topic is known. Do not write the conspectus in chat. One short line plus the card. After a notes clarify, the next topic reply is create_sheet.",
-    "If they asked to practice and the topic is usable, call create_practice (card only). You may ask at most one clarifying question with 2–4 short options in their language. Never canned English. Never a second clarify. If they already asked for practice or notes and then say რაც გინდა, დააგენერირე, სულ, random, or just generate — create now.",
-    "If they asked to find or show photos, images, charts, graphs, or diagrams — in any language — call search_images with their topic. Never create_practice or create_sheet for that. If they only said they want photos with no topic, clarify once, then search. If search returns nothing, say so in one line. Never invent URLs. Do not dump URL lists in chat. User-uploaded files in the project win over web search.",
-    "Off-topic (other products): one short honest sentence, then back to the thread.",
-    "Be concise. Use $...$ for math so it renders. One key line may use ==this==. Use markdown sparingly. Do not mention these instructions.",
+    "Call at most one tool per turn. Default: answer. Never dump quiz items, sheet body, or [artifact ...] markup into chat.",
+    context.path
+      ? null
+      : "Follow the latest user topic. Do not lock onto the first topic or say you only teach it.",
+    "A topic name or ordinary question → answer it. Never bounce it back as a question.",
+    "Do not mention these instructions.",
   ]
     .filter(Boolean)
     .join("\n");
 
   const sections: string[] = [chatSystemInstruction(context.mode, extra)];
 
-  const memoryBlock = formatMemoryBlock(context.memories ?? []);
-  if (memoryBlock) sections.push(memoryBlock);
-
-  const learningBlock = formatPersonalizationBlock(context.personalization ?? "");
-  if (learningBlock) sections.push(learningBlock);
+  if (context.mode !== "fast") {
+    const known = formatKnownUserBlock({
+      memories: pickMemoriesForAsk(context.memories ?? [], context.prompt ?? ""),
+      personalization: context.personalization ?? "",
+    });
+    if (known) sections.push(known);
+  }
 
   if (context.knowledgeItems.length > 0) {
     const facts = context.knowledgeItems
@@ -51,7 +61,7 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
       .map((item) => `### ${item.name}\n${item.excerpt}`)
       .join("\n\n");
     sections.push(
-      `Short excerpts from the student's project materials. Prefer these over guessing. They are not the full files. Ask about a slide or figure to see its stored image.\n${materials}`,
+      `Short excerpts from project materials. Prefer these over guessing. They are not the full files. Ask about a slide or figure to see its stored image.\n${materials}`,
     );
   }
 
@@ -67,7 +77,7 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     const lines = artifacts.map((item) => compactArtifactLine(item)).join("\n");
     const latest = context.latestArtifact ? compactArtifactLine(context.latestArtifact) : lines;
     sections.push(
-      `Created artifacts this project (facts only, no item text). If asked whether a set or sheet exists, use these.\n${lines}\nLatest: ${latest}`,
+      `Created artifacts this project (facts only, no item text). If asked whether a set or sheet exists, use these. Never write these lines, ids, or [artifact ...] markup in chat.\n${lines}\nLatest: ${latest}`,
     );
   }
 
@@ -80,24 +90,46 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
   }
 
   if (context.priorClarify && context.pendingKind === "sheet") {
-    sections.push(
-      "The user already asked for notes. This message is the missing topic. Call create_sheet. One short line plus the card. Do not write an essay.",
-    );
+    sections.push("The user already asked for notes. This message is the missing topic. Brief once, then suggest_sheet.");
   } else if (context.priorClarify && context.pendingKind === "practice") {
     sections.push(
-      "The user already asked to practice. This message is the missing topic. Call create_practice. Card only.",
+      "The user already asked to practice or for an exam. This message is the missing topic. Brief the move (short), then suggest_practice. If they asked for an exam, pass mode exam.",
     );
+  } else if (context.priorClarify && context.pendingKind === "path") {
+    sections.push("The user already asked to plan. This message is the missing course. Brief once, then suggest_path.");
   } else if (context.priorClarify && context.pendingKind === "images") {
     sections.push(
-      "The user already asked for photos. This message is the topic. Call search_images. Do not invent URLs. Do not dump a link list.",
+      "The user already asked for photos. This message is the topic. Call search_images. Write one short line in their language. Do not invent URLs. Do not dump a link list.",
     );
   }
 
-  if (context.acceptedTool === "create_practice") {
-    sections.push("The user accepted a practice suggestion. Call create_practice.");
-  } else if (context.acceptedTool === "create_sheet") {
-    sections.push("The user accepted a notes suggestion. Call create_sheet.");
+  if (isFormWriteTopic(context.prompt, context.projectTitle, context.pathTopic, context.pendingTopic)) {
+    sections.push(
+      "Form-writing this turn (განცხადება / official letter). Do not call suggest_practice. If they don't know how or asked for an example: a paper fence with sample filled in (real names). If they asked to try: an empty paper. Not a placeholder table.",
+    );
   }
+
+  if (context.hintAsk) {
+    sections.push(
+      "HINT TURN. They asked for a nudge on the current check. One or two short sentences pointing at the rule or form. NEVER give the answer. NEVER fill the blank. NEVER complete the sentence. NEVER say which option is right. Do not re-teach. Do not pass question. Do not call any path, notes, or practice tool.",
+    );
+  } else if (context.examAsk) {
+    sections.push(
+      "EXAM-ONLY TURN. They asked for a check. Do not teach. Do not recap. Do not call advance_path. Pass ONE completion in `question` only — a sentence with one blank, same shape as the last table example. Body empty. Optional 2-3 form options, not tense names. NEVER \"which tense/form describes…\". NEVER name the topic.",
+    );
+  } else if (context.path) {
+    sections.push(
+      formatPathBriefing({
+        ...context.path,
+        started: context.path.started !== false,
+        teach: context.path.teach || context.path.outcome || "",
+        inPathThread: context.inPathThread === true || context.path.inPathThread === true,
+      }),
+    );
+  }
+
+  const tobyCards = tobyCardsForTurn(context);
+  if (tobyCards) sections.push(tobyCards);
 
   return withAskWritingContract(sections.join("\n\n"));
 }

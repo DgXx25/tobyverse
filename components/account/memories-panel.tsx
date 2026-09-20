@@ -27,6 +27,7 @@ export function MemoriesPanel() {
       return;
     }
     setLoading(true);
+    setError(null);
     const stopMemories = subscribeMemories(
       userId,
       (next) => {
@@ -38,11 +39,7 @@ export function MemoriesPanel() {
         setError("Could not load memories.");
       },
     );
-    const stopProfile = subscribeLearningProfile(
-      userId,
-      (next) => setProfile(next),
-      () => setError("Could not load how you learn."),
-    );
+    const stopProfile = subscribeLearningProfile(userId, (next) => setProfile(next));
     return () => {
       stopMemories();
       stopProfile();
@@ -83,7 +80,6 @@ export function MemoriesPanel() {
         <p className="mt-1 text-[14px] leading-6 text-muted">
           One short note Toby uses to teach you — how you like to study, and why you ask.
         </p>
-        {error ? <p className="mt-3 text-[13px] text-red-400">{error}</p> : null}
         {profile ? (
           <>
             <p className="mt-4 whitespace-pre-wrap text-[15px] leading-6 text-foreground">{profile}</p>
@@ -110,6 +106,7 @@ export function MemoriesPanel() {
         <p className="mt-2 text-[13px] text-muted">
           {items.length} / {FREE_CAPS.memories} on the free plan
         </p>
+        {error ? <p className="mt-3 text-[13px] text-red-400">{error}</p> : null}
 
         <div className="mt-6 divide-y divide-border">
           {loading && items.length === 0 ? (

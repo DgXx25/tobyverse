@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { DocumentPaper } from "@/components/workspace/document-paper";
+import { LinkifiedText } from "@/components/workspace/linkified-text";
 import { ViewerBoundary } from "@/components/workspace/viewer-boundary";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { docxBytesToHtml } from "@/lib/materials/docx-html";
@@ -317,7 +318,9 @@ function PptxStage({ material }: { material: Material }) {
     if (!extracted && extractedName) return <FileMessage text="Loading…" />;
     return (
       <DocumentPaper>
-        <p className="whitespace-pre-wrap">{text || "No preview yet. Download to open in PowerPoint."}</p>
+        <p className="whitespace-pre-wrap">
+          <LinkifiedText text={text || "No preview yet. Download to open in PowerPoint."} />
+        </p>
       </DocumentPaper>
     );
   }
@@ -388,7 +391,9 @@ function SlideStage({
   if (!fileName) {
     return (
       <DocumentPaper>
-        <p className="whitespace-pre-wrap">{text || "No text on this slide."}</p>
+        <p className="whitespace-pre-wrap">
+          <LinkifiedText text={text || "No text on this slide."} />
+        </p>
       </DocumentPaper>
     );
   }
@@ -399,7 +404,9 @@ function SlideStage({
         <FileMessage text={file.status === 401 ? "Sign in." : "ფაილი ვერ მოიძებნა"} />
         {text ? (
           <DocumentPaper>
-            <p className="whitespace-pre-wrap">{text}</p>
+            <p className="whitespace-pre-wrap">
+              <LinkifiedText text={text} />
+            </p>
           </DocumentPaper>
         ) : null}
       </div>
@@ -465,7 +472,9 @@ function TextStage({ material }: { material: Material }) {
   if (!file.ok && !text) return <FileMessage text="ფაილი ვერ მოიძებნა" />;
   return (
     <DocumentPaper>
-      <p className="whitespace-pre-wrap">{text || "No preview yet."}</p>
+      <p className="whitespace-pre-wrap">
+        <LinkifiedText text={text || "No preview yet."} />
+      </p>
     </DocumentPaper>
   );
 }
@@ -519,7 +528,9 @@ function DocxStage({ material, originalName }: { material: Material; originalNam
   if (!text && original && !original.ok) return <FileMessage text="ფაილი ვერ მოიძებნა" />;
   return (
     <DocumentPaper>
-      <p className="whitespace-pre-wrap">{text || "No preview yet."}</p>
+      <p className="whitespace-pre-wrap">
+        <LinkifiedText text={text || "No preview yet."} />
+      </p>
     </DocumentPaper>
   );
 }

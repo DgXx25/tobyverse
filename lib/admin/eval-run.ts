@@ -107,7 +107,7 @@ async function record(
     projectId: session.project.id,
     userId: session.userId,
     role: input.role,
-    mode: "normal",
+    mode: "auto",
     content: input.content,
     intent: input.intent,
     artifact: input.artifact ?? null,
@@ -122,7 +122,7 @@ async function record(
     lessonId: null,
     exerciseId: null,
     role: input.role,
-    mode: "normal",
+    mode: "auto",
     content: input.content,
     attachments: [],
     relatedExerciseType: null,
@@ -160,7 +160,7 @@ async function streamChat(session: Session, prompt: string): Promise<{ text: str
     headers: await authHeaders(),
     body: JSON.stringify({
       prompt,
-      mode: "normal",
+      mode: "auto",
       provider: DEFAULT_AI_PROVIDER,
       history,
       context: {
