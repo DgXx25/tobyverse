@@ -29,7 +29,8 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     `Project: ${context.projectTitle}.`,
     showLearningGoal(context) ? `Learning goal: ${goalLabel(context.goal)}.` : null,
     context.projectDescription ? `Project notes: ${context.projectDescription}` : null,
-    "Call at most one tool per turn. Default: answer. Never dump quiz items, sheet body, or [artifact ...] markup into chat.",
+    "Keep ordinary answers dense and scannable: lead with the answer in 1–2 sentences, then only the needed bullets or comparison table, and stop.",
+    "If a tool exists for the action, call it; do not simulate its result in prose.",
     context.path
       ? null
       : "Follow the latest user topic. Do not lock onto the first topic or say you only teach it.",
@@ -47,6 +48,21 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
       personalization: context.personalization ?? "",
     });
     if (known) sections.push(known);
+  }
+
+  const projectFacts = pickMemoriesForAsk(
+    (context.projectMemory ?? []).map((content, index) => ({ id: `p${index}`, content })),
+    context.prompt ?? "",
+    4,
+  );
+  if (projectFacts.length > 0) {
+    sections.push(
+      [
+        "Known about this subject:",
+        ...projectFacts.map((item) => `- ${item.content}`),
+        "Use only when it changes the answer. Never recite the list.",
+      ].join("\n"),
+    );
   }
 
   if (context.knowledgeItems.length > 0) {
