@@ -198,7 +198,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
     if (view !== "icon") return;
     let cancel = false;
     void Promise.resolve(ICON_NAMES).then((names) => {
-      if (!cancel) setPackNames(names);
+      if (!cancel) setPackNames(names.slice());
     });
     return () => {
       cancel = true;
