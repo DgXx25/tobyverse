@@ -195,7 +195,7 @@ export function SourcesPane({
 
   useEffect(() => {
     if (!menu) return;
-    function onPointer(event: MouseEvent) {
+    function onPointer(event: Event) {
       const target = event.target;
       if (target instanceof Element && target.closest("[data-source-menu]")) return;
       setMenu(null);
@@ -203,13 +203,16 @@ export function SourcesPane({
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") setMenu(null);
     }
+    function onScroll() {
+      setMenu(null);
+    }
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", onPointer, true);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onPointer, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [menu]);
 
