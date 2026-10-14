@@ -249,7 +249,7 @@ export function SourcesPane({
   return (
     <section
       aria-label="Sources"
-      className={`relative flex min-h-0 flex-col bg-transparent ${className}`}
+      className={`relative flex min-h-0 w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-transparent ${className}`}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -299,7 +299,7 @@ export function SourcesPane({
         {error ? <p role="alert" className="mt-2 text-[12px] leading-4 text-red-400">{error}</p> : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-3">
+      <div className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-4 pt-3">
         {items.length > 0 ? (
           <div className="mb-1 flex h-8 items-center justify-end gap-2 px-2 text-[12px] text-muted">
             <span>Select all</span>
@@ -351,7 +351,7 @@ export function SourcesPane({
                   setMenu({ id: item.id, top: event.clientY, right: Math.max(8, window.innerWidth - event.clientX) });
                 }}
               >
-                <div className={`flex items-center rounded-lg px-1 hover:bg-background ${menuOpen ? "bg-background" : ""}`}>
+                <div className={`flex min-w-0 items-center overflow-hidden rounded-lg px-1 hover:bg-background ${menuOpen ? "bg-background" : ""}`}>
                   <button
                     type="button"
                     onClick={() => onOpenMaterial(item.id)}

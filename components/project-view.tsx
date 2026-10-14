@@ -662,12 +662,13 @@ export function ProjectView({
 
   return (
     <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-transparent ${resizing ? "pane-resizing" : ""}`}>
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <div
         aria-hidden="true"
         className="artifact-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
         style={{ width: sourcesOpen ? sourcesWidth : 0 }}
       />
+      {phone ? null : (
       <div
         className={`artifact-panel-slot edge-stroke absolute inset-y-0 left-0 z-30 hidden max-w-full bg-surface md:rounded-tr-2xl shrink-0 overflow-hidden md:block ${
           sourcesOpen ? "pointer-events-auto" : "pointer-events-none"
@@ -694,18 +695,21 @@ export function ProjectView({
         </div>
         <button type="button" aria-label="Resize sources" onMouseDown={onSourcesResizeStart} className="absolute inset-y-0 right-0 z-10 hidden w-2 cursor-col-resize md:block" />
       </div>
-      {mobilePane === "sources" ? (
-        <SourcesPane
-          className="absolute inset-0 z-[35] bg-background md:hidden"
-          projectId={project.id}
-          userId={user.uid}
-          items={materials}
-          selectedIds={selectedIds}
-          onSelectedIds={setSelectedIds}
-          onOpenMaterial={openMaterial}
-          readingId={readingId}
-          onCloseReading={() => setReadingId(null)}
-        />
+      )}
+      {phone && mobilePane === "sources" ? (
+        <div className="absolute inset-0 z-[35] min-w-0 overflow-hidden bg-background">
+          <SourcesPane
+            className="h-full w-full"
+            projectId={project.id}
+            userId={user.uid}
+            items={materials}
+            selectedIds={selectedIds}
+            onSelectedIds={setSelectedIds}
+            onOpenMaterial={openMaterial}
+            readingId={readingId}
+            onCloseReading={() => setReadingId(null)}
+          />
+        </div>
       ) : null}
       <div className="pointer-events-none absolute left-3 top-1 z-40 hidden md:flex">
         <QuietIconCluster className="pointer-events-auto" size={18} actions={[sourcesToggleAction]} />
