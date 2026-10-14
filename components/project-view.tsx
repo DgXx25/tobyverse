@@ -325,7 +325,8 @@ export function ProjectView({
     if (!pendingPanel || pendingPanel.projectId !== projectId) return;
     const next = focusFromPending(pendingPanel);
     if (next.kind === "material") {
-      setSourcePreviewId(next.id);
+      setReadingId(next.id);
+      setMobilePane("sources");
       setPendingPanel(null);
       return;
     }
