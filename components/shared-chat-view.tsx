@@ -8,6 +8,7 @@ import { NoteDocument } from "@/components/visuals/note-document";
 import { QuietIconCluster } from "@/components/workspace/quiet-icon-cluster";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { RichContent } from "@/components/rich-content";
+import { loadSharedChatClient } from "@/lib/sharing/client";
 import type { SharedChatSnapshot } from "@/lib/sharing/types";
 import { isStudioConfigPrompt } from "@/lib/workspace/studio";
 
