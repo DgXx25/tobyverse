@@ -7,6 +7,7 @@ import { collectNoteProse } from "@/lib/notes/compat";
 import { studySheetSystemPrompt } from "@/lib/study-sheets/prompt";
 import { notesDocumentSchema } from "@/lib/visuals/schemas";
 import type { VisualBlock } from "@/types/visual";
+import type { AiUsageReporter } from "@/types/billing";
 
 export type NotesStreamEvent =
   | { type: "status"; status: string }
@@ -31,7 +32,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function* streamNotesDocument(userPrompt: string): AsyncGenerator<NotesStreamEvent> {
+export async function* streamNotesDocument(userPrompt: string, options: { usage?: AiUsageReporter } = {}): AsyncGenerator<NotesStreamEvent> {
   let raw = "";
   let emitted = 0;
   let title = "";
@@ -40,6 +41,7 @@ export async function* streamNotesDocument(userPrompt: string): AsyncGenerator<N
     for await (const chunk of generateTextStream(userPrompt, {
       json: true,
       systemInstruction: studySheetSystemPrompt(),
+      usage: options.usage,
     })) {
       raw += chunk;
       const nextTitle = peekJsonString(raw, "title");
@@ -73,6 +75,7 @@ export async function* streamNotesDocument(userPrompt: string): AsyncGenerator<N
   if (!parsed) {
     const repaired = await generateJson(userPrompt, notesDocumentSchema, {
       systemInstruction: studySheetSystemPrompt(),
+      usage: options.usage,
     });
     if (!repaired.ok) {
       yield { type: "error", error: repaired.error };

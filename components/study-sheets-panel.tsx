@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { trackEvent } from "@/lib/analytics/track";
 import { subscribeMaterials } from "@/lib/materials/store";
 import { subscribeStudySheets } from "@/lib/study-sheets/store";
 import { generateStudySheetFromPrompt } from "@/lib/study-sheets/generate-client";
@@ -69,7 +68,6 @@ export function StudySheetsPanel({
         prompt: "Rebuild notes from the project materials and recent chat.",
       });
       setActiveId(sheet.id);
-      trackEvent({ userId, projectId, type: "study_sheet_generated", value: materials.length });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not rebuild the sheet.");
     } finally {
@@ -79,7 +77,6 @@ export function StudySheetsPanel({
 
   function openSheet(id: string) {
     setActiveId(id);
-    trackEvent({ userId, projectId, type: "study_sheet_opened" });
   }
 
   return (

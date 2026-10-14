@@ -5,7 +5,9 @@
  *   displayName, email, photoURL, plan ("free" in beta; not client-writable to other values),
  *   usage { weekStart, chatTurns, practiceGenerated, notesGenerated, storageBytes },
  *     storageBytes is capped at 1 GiB per user (materials), enforced during beta.
- *   preferredModel (optional: gemini | grok | gpt),
+ *   preferredModel (optional Gemini model id; admin-only models are authorized by the server),
+ *   chatMode (optional: auto | fast | teacher), theme (optional: light | dark),
+ *   themeAccents (optional: light/dark accent ids), highContrast (optional: boolean),
  *   createdAt, updatedAt
  *
  *   memories/{memoryId}
@@ -17,7 +19,14 @@
  *     How this student learns. Rewritten in place, never a list of facts.
  *
  * projects/{projectId}
- *   title, description, userId, goal, recipe, preferredChatMode, createdAt, updatedAt
+ *   title, description, userId, goal, recipe, preferredChatMode,
+ *   projectMemory (string[], max 12 × 200), icon, folder,
+ *   createdAt, updatedAt
+ *   A project is a notebook. Its conversation is the main thread. Materials live here.
+ *
+ * chats/{chatId}                 // URL index for /c/:chatId
+ *   projectId, nestedId, userId, title, kind, public?, shareId?, createdAt, updatedAt
+ *   First/legacy thread: chatId === projectId, nestedId === "main".
  *
  *   lessons/{lessonId}
  *     title, topic, status, recipe, exerciseIds, userId, createdAt, updatedAt
@@ -32,8 +41,13 @@
  *
  *   materials/{materialId}
  *     title, type, storagePath, textPath, extractedTextPreview (max 300), sizeBytes,
- *     pageCount, hasImages, textChars, images[{page,path,mime}], status, userId, createdAt
+ *     pageCount, hasImages, textChars, images[{page,path,mime}], status, userId, createdAt,
+ *     index{status, chunks, nextPage|nextChunk, textChars, version}  (server-written indexing cursor)
  *     Full extracted text lives in Storage as extracted.txt — never in Firestore.
+ *
+ *     chunks/{chunkId}              // written by the server only (owner-scoped by the project rules): the retrieval index
+ *       userId, projectId, materialId, page, pageEnd, section, text, terms[], tokens,
+ *       embedding (vector 768), v. Needs the indexes in firestore.indexes.json.
  *
  *   studySheets/{sheetId}
  *     title, blocks (JSON visual blocks), content (legacy), sourceMaterialIds, userId, createdAt
@@ -59,11 +73,9 @@
  *   userId, knowledgeItemId, projectId, status, correctCount, incorrectCount,
  *   lastSeen, nextReview, easeFactor, updatedAt
  *
- * analyticsEvents/{eventId}         // tiny usage pings (no chat text)
- *   userId, projectId, type, value, createdAt
- *
- * trainingSignals/{signalId}        // optional compact fine-tune breadcrumbs
- *   userId, projectId, contextType, signal, shortHash, itemId, createdAt
+ * trainingSignals/{signalId}        // compact fine-tune breadcrumb or assistant dislike
+ *   Legacy: userId, projectId, contextType, signal, shortHash, itemId, createdAt
+ *   Dislike: chatId, messageId, reason, snippet, createdAt (reason/snippet <= 240)
  *
  * playgroundSnapshots/{id}          // admin-only compact prompt audits
  *   userId, prompts (truncated), scores, winner, auditSummary, createdAt
@@ -71,8 +83,8 @@
  * evalSnapshots/{id}                // admin-only compact chat-tool eval runs
  *   userId, passed, failed, cases (expected/actual/pass/note), createdAt
  *
- * Storage (not Firestore): users/{userId}/projects/{projectId}/materials/{materialId}/{fileName}
- *   original upload + extracted.txt + optional slide-N.jpg / page-N.jpg
+ * Storage (not Firestore): users/{userId}/projects/{projectId}/materials/{materialId}/...
+ *   original upload plus extracted.txt for non-PDF types. No page or slide images are produced.
  */
 
 export const COLLECTIONS = {
@@ -92,10 +104,10 @@ export const COLLECTIONS = {
   progress: "progress",
   knowledgeItems: "knowledgeItems",
   userProgress: "userProgress",
-  analyticsEvents: "analyticsEvents",
   trainingSignals: "trainingSignals",
   playgroundSnapshots: "playgroundSnapshots",
   evalSnapshots: "evalSnapshots",
+  aiUsageWeeks: "aiUsageWeeks",
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];
@@ -110,6 +122,7 @@ export const firestorePaths = {
 
   projects: () => COLLECTIONS.projects,
   project: (projectId: string) => `${COLLECTIONS.projects}/${projectId}`,
+  rootChat: (chatId: string) => `${COLLECTIONS.chats}/${chatId}`,
 
   lessons: (projectId: string) =>
     `${COLLECTIONS.projects}/${projectId}/${COLLECTIONS.lessons}`,
@@ -156,10 +169,12 @@ export const firestorePaths = {
   userProgressDoc: (progressId: string) =>
     `${COLLECTIONS.userProgress}/${progressId}`,
 
-  analyticsEvents: () => COLLECTIONS.analyticsEvents,
   trainingSignals: () => COLLECTIONS.trainingSignals,
   playgroundSnapshots: () => COLLECTIONS.playgroundSnapshots,
   evalSnapshots: () => COLLECTIONS.evalSnapshots,
+  aiUsageWeeks: (userId: string) => `${COLLECTIONS.users}/${userId}/${COLLECTIONS.aiUsageWeeks}`,
+  aiUsageWeek: (userId: string, weekStart: string) =>
+    `${COLLECTIONS.users}/${userId}/${COLLECTIONS.aiUsageWeeks}/${weekStart}`,
 } as const;
 
 export function materialStoragePath(

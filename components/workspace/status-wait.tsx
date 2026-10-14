@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { ChatArtifactStep } from "@/types/chat";
 
 /** Elapsed wait, like a stopwatch: 0:05, 1:03, 1:02:03. */
 export function formatWait(ms: number): string {
@@ -13,9 +14,9 @@ export function formatWait(ms: number): string {
   return `${m}:${pad(sec)}`;
 }
 
-export function formatWorked(ms: number, ka = false): string {
+export function formatWorked(ms: number, _ka = false): string {
   const s = Math.max(1, Math.round(ms / 1000));
-  return ka ? `იმუშავა ${s} წმ` : `Worked for ${s}s`;
+  return `Worked for ${s}s ›`;
 }
 
 export function StatusWait({
@@ -23,6 +24,7 @@ export function StatusWait({
   since,
   timer = false,
   settled = false,
+  savedStep,
   className = "text-sm",
 }: {
   label: string;
@@ -31,6 +33,7 @@ export function StatusWait({
   timer?: boolean;
   /** Finished turn: no shimmer. */
   settled?: boolean;
+  savedStep?: ChatArtifactStep;
   className?: string;
 }) {
   const fallback = useRef(since ?? Date.now());
@@ -38,6 +41,7 @@ export function StatusWait({
   const [now, setNow] = useState(() => Date.now());
   const [current, setCurrent] = useState(label);
   const [outgoing, setOutgoing] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const slideRef = useRef<number>(0);
 
   useEffect(() => {
@@ -67,15 +71,21 @@ export function StatusWait({
         {outgoing ? (
           <span className={`status-wait-line status-wait-out ${settled ? "text-muted" : "status-shimmer"}`}>{outgoing}</span>
         ) : null}
-        <span
-          key={current}
-          className={`status-wait-line ${settled ? "text-muted" : "status-shimmer"}${outgoing ? " status-wait-in" : ""}`}
-        >
-          {current}
-        </span>
+        {settled && savedStep && current.startsWith("Worked for ") ? (
+          <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="status-wait-line text-left text-muted">
+            {current}
+          </button>
+        ) : (
+          <span key={current} className={`status-wait-line ${settled ? "text-muted" : "status-shimmer"}${outgoing ? " status-wait-in" : ""}`}>
+            {current}
+          </span>
+        )}
       </span>
       {timer ? (
         <span className="shrink-0 tabular-nums text-muted">{formatWait(now - fallback.current)}</span>
+      ) : null}
+      {expanded && savedStep ? (
+        <span className="text-xs text-muted">{[savedStep.from, savedStep.to].filter(Boolean).join(" → ")}{savedStep.done != null ? ` · ${savedStep.done}${savedStep.total != null ? `/${savedStep.total}` : ""}` : ""}</span>
       ) : null}
     </div>
   );

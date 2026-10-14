@@ -72,16 +72,18 @@ export function paperIsExample(data: PaperPayload): boolean {
 export function PaperPlay({
   data,
   locked,
+  skipped = false,
   onSelect,
   streaming = false,
 }: {
   data: PaperPayload;
   locked?: boolean;
+  skipped?: boolean;
   onSelect: (value: PaperAnswer) => void;
   streaming?: boolean;
 }) {
   const example = paperIsExample(data);
-  const frozen = Boolean(locked || example);
+  const frozen = Boolean(locked || example || skipped);
   const sampleTo = example ? (data.sample?.to ?? data.given?.to ?? "") : "";
   const sampleBody = example ? (data.sample?.body ?? "") : "";
   const sampleSign = example ? (data.sample?.sign ?? "") : "";
@@ -122,7 +124,7 @@ export function PaperPlay({
       {data.brief.trim() ? (
         <p className="ex-paper-brief">{streamFields ? <StreamWords text={data.brief} /> : data.brief}</p>
       ) : null}
-      <div className={`ex-paper${example ? " is-example" : ""}`}>
+      <div className={`ex-paper${example ? " is-example" : ""}${skipped ? " is-skipped" : ""}`}>
         <div className="ex-paper-to">
           <GrowField
             value={liveTo}
@@ -130,10 +132,10 @@ export function PaperPlay({
               setTo(value);
               emit({ to: value });
             }}
-            placeholder="ვის მიმართავ"
+            placeholder="Addressee"
             locked={frozen}
             align="right"
-            ariaLabel="მიმართვა"
+            ariaLabel="Addressee"
             streaming={streamFields}
           />
         </div>
@@ -144,10 +146,10 @@ export function PaperPlay({
             setBody(value);
             emit({ body: value });
           }}
-          placeholder="მე, …"
+          placeholder="I, …"
           locked={frozen}
           multiline
-          ariaLabel="განცხადების ტექსტი"
+          ariaLabel="Statement"
           streaming={streamFields}
         />
         <div className="ex-paper-foot">
@@ -157,9 +159,9 @@ export function PaperPlay({
               setDate(value);
               emit({ date: value });
             }}
-            placeholder="თარიღი"
+            placeholder="Date"
             locked={frozen}
-            ariaLabel="თარიღი"
+            ariaLabel="Date"
             streaming={streamFields}
           />
           <GrowField
@@ -168,10 +170,10 @@ export function PaperPlay({
               setSign(value);
               emit({ sign: value });
             }}
-            placeholder="სახელი, გვარი"
+            placeholder="First and last name"
             locked={frozen}
             align="right"
-            ariaLabel="ხელმოწერა"
+            ariaLabel="Signature"
             streaming={streamFields}
           />
         </div>

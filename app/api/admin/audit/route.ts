@@ -2,12 +2,14 @@ import { generateText } from "@/lib/ai/gemini";
 import { adminErrorResponse, assertAdminRequest } from "@/lib/admin/assert";
 import { auditSystemPrompt, parsePlaygroundAudit } from "@/lib/admin/audit";
 import { clipPrompt } from "@/lib/admin/playground";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  let uid = "";
   try {
-    await assertAdminRequest(request);
+    uid = await assertAdminRequest(request);
   } catch (error) {
     return adminErrorResponse(error);
   }
@@ -40,13 +42,17 @@ export async function POST(request: Request) {
     ].join("\n");
   });
 
+  let usage;
   try {
+    usage = await startAiUsageSession(uid);
     const text = await generateText(
       `User prompt: ${clipPrompt(userPrompt, 400)}\n\n${compact.join("\n\n")}`,
-      { systemInstruction: auditSystemPrompt() },
+      { systemInstruction: auditSystemPrompt(), usage: usage.report },
     );
+    await usage.commit();
     return Response.json({ audit: parsePlaygroundAudit(text) });
   } catch (error) {
+    if (usage) await usage.commit().catch((commitError) => console.error("[ai-usage] commit failed", commitError));
     const message = error instanceof Error ? error.message : "Audit failed.";
     return Response.json({ error: message }, { status: 500 });
   }

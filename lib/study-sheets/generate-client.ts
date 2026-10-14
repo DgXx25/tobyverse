@@ -1,5 +1,4 @@
 import { authHeaders } from "@/lib/api/client";
-import { incrementUsage } from "@/lib/account/store";
 import { createStudySheet, updateStudySheet } from "@/lib/study-sheets/store";
 import { collectProjectSources } from "@/lib/composer/sources";
 import type { Material } from "@/types/material";
@@ -34,7 +33,6 @@ export async function generateStudySheetFromPrompt(input: {
     content: generated.content,
     sourceMaterialIds: input.materials.map((item) => item.id),
   });
-  await incrementUsage(input.userId, "notesGenerated");
   input.onEvent?.({ title, blocks: generated.blocks, sheetId: id });
   return { id, title, blocks: generated.blocks };
 }

@@ -3,6 +3,18 @@ import { materialStoragePath } from "@/lib/firestore";
 import { extForMime } from "@/lib/materials/types";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
 
+export class StorageUploadError extends Error {
+  readonly status?: number;
+  readonly kind?: "network";
+
+  constructor(message: string, options?: { status?: number; kind?: "network" }) {
+    super(message);
+    this.name = "StorageUploadError";
+    this.status = options?.status;
+    this.kind = options?.kind;
+  }
+}
+
 export function originalStoragePath(
   userId: string,
   projectId: string,
@@ -38,7 +50,14 @@ function asBlob(data: Blob | Uint8Array, contentType: string): Blob {
   return new Blob([new Uint8Array(data)], { type: contentType });
 }
 
-async function postStorageUpload(path: string, data: Blob | Uint8Array | string, contentType: string): Promise<void> {
+export type MaterialStorageUpload = { path: string; sizeBytes: number; contentType: string; reservedBytes: number };
+
+async function postStorageUpload(
+  path: string,
+  data: Blob | Uint8Array | string,
+  contentType: string,
+  options: { reservePool?: boolean; originalName?: string } = {},
+): Promise<MaterialStorageUpload> {
   const user = await requireSignedInUser();
   if (!user.uid) {
     throw new Error("Sign in required.");
@@ -50,19 +69,6 @@ async function postStorageUpload(path: string, data: Blob | Uint8Array | string,
   const blob =
     typeof data === "string" ? new Blob([data], { type: contentType }) : asBlob(data, contentType);
 
-  try {
-    const { ref, uploadBytesResumable } = await import("firebase/storage");
-    const { getFirebaseStorage } = await import("@/lib/firebase");
-    const objectRef = ref(getFirebaseStorage(), path);
-    const task = uploadBytesResumable(objectRef, blob, { contentType });
-    await new Promise<void>((resolve, reject) => {
-      task.on("state_changed", undefined, reject, () => resolve());
-    });
-    return;
-  } catch {
-    // Next upload still works locally; production large files need the SDK path above.
-  }
-
   const token = await user.getIdToken();
   if (!token) {
     throw new Error("Storage upload failed: signed in, but getIdToken() returned no token.");
@@ -70,10 +76,13 @@ async function postStorageUpload(path: string, data: Blob | Uint8Array | string,
   const form = new FormData();
   form.set("path", path);
   form.set("contentType", contentType);
+  if (options.reservePool) form.set("reservePool", "true");
   if (typeof data === "string") {
     form.set("text", data);
   } else {
-    form.set("file", blob, path.split("/").pop() || "file");
+    const filename = encodeURIComponent(path.split("/").pop() || "file");
+    form.set("file", blob, filename);
+    form.set("fileName", options.originalName || filename);
   }
   let response: Response;
   try {
@@ -83,21 +92,61 @@ async function postStorageUpload(path: string, data: Blob | Uint8Array | string,
       body: form,
     });
   } catch {
-    throw new Error("Upload failed.");
+    throw new StorageUploadError("Network error. Try again.", { kind: "network" });
   }
-  const body = (await response.json().catch(() => ({}))) as { error?: string };
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    path?: string;
+    sizeBytes?: number;
+    contentType?: string;
+    reservedBytes?: number;
+  };
   if (!response.ok) {
     const detail = body.error?.trim() || `Storage upload failed (${response.status}).`;
-    throw new Error(detail);
+    throw new StorageUploadError(detail, { status: response.status });
   }
+  return {
+    path: body.path || path,
+    sizeBytes: Number.isFinite(body.sizeBytes) ? Number(body.sizeBytes) : (typeof data === "string" ? new TextEncoder().encode(data).byteLength : blob.size),
+    contentType: body.contentType || contentType,
+    reservedBytes: Number.isFinite(body.reservedBytes) ? Number(body.reservedBytes) : 0,
+  };
 }
 
-export async function uploadMaterialBytes(path: string, data: Blob | Uint8Array, contentType: string) {
-  await postStorageUpload(path, data, contentType);
+export function pdfPageTextPath(userId: string, projectId: string, materialId: string, page: number): string {
+  return materialStoragePath(userId, projectId, materialId, `pages/${String(page).padStart(4, "0")}.txt`);
+}
+
+export function pdfPageImagePath(userId: string, projectId: string, materialId: string, page: number): string {
+  return materialStoragePath(userId, projectId, materialId, `page-${page}.png`);
+}
+
+export async function uploadMaterialBytes(
+  path: string,
+  data: Blob | Uint8Array,
+  contentType: string,
+  options?: { reservePool?: boolean; originalName?: string },
+): Promise<MaterialStorageUpload> {
+  return postStorageUpload(path, data, contentType, options);
 }
 
 export async function uploadExtractedText(path: string, text: string) {
   await postStorageUpload(path, text, "text/plain; charset=utf-8");
+}
+
+export async function releaseStoragePool(bytes: number): Promise<void> {
+  if (!Number.isFinite(bytes) || bytes <= 0) return;
+  const user = await requireSignedInUser();
+  const token = await user.getIdToken();
+  const response = await fetch("/api/materials/upload", {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ releaseBytes: Math.ceil(bytes) }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error?.trim() || "Could not release material storage.");
+  }
 }
 
 const missingMaterialFiles = new Set<string>();

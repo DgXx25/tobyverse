@@ -9,7 +9,7 @@ import { UiIcon } from "@/components/workspace/ui-icon";
 
 const PREVIEW_COUNT = 5;
 
-function originLabel(images: ChatImageHit[], ka: boolean): string | null {
+function originLabel(images: ChatImageHit[], _ka: boolean): string | null {
   const web = images.filter((image) => image.kind !== "upload" && !image.storagePath);
   if (web.length === 0) return null;
   const counts = new Map<string, number>();
@@ -25,12 +25,12 @@ function originLabel(images: ChatImageHit[], ka: boolean): string | null {
       best = count;
     }
   }
-  if (top === "wikimedia" || top === "wikipedia") return ka ? "ვიკიპედია" : "Wikipedia";
+  if (top === "wikimedia" || top === "wikipedia") return "Wikipedia";
   if (top === "openverse") return "Openverse";
   if (top === "pexels") return "Pexels";
   if (top === "pixabay") return "Pixabay";
   if (top === "google") return "Google";
-  return ka ? "ვიკიპედია" : "Wikipedia";
+  return "Wikipedia";
 }
 
 export function ImageGallery({

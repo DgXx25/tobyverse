@@ -18,15 +18,20 @@ import {
   asUserUsage,
   emptyUsage,
   FREE_CAPS,
-  STORAGE_CAP_LABEL,
   storageQuotaMessage,
+  storageInsufficientMessage,
   utcWeekStart,
   wouldExceedStorage,
   type UsageCounter,
 } from "@/lib/account/plan";
-import { isKnownProvider, parsePreferredModel, type AiProviderId } from "@/lib/ai/catalog";
-import { formatBytes } from "@/lib/format";
+import { isKnownAiModel, parsePreferredModel, type AiModelId } from "@/lib/ai/catalog";
+import { isAccentId, isThemeId, parseThemeAccents, readStoredTheme, readStoredThemeAccents, type ThemeAccents, type ThemeId } from "@/lib/workspace/theme";
 import type { UserProfile, UserUsage } from "@/types/user";
+import { CHAT_MODES, type ChatMode } from "@/types/chat";
+
+function isChatMode(value: unknown): value is ChatMode {
+  return typeof value === "string" && (CHAT_MODES as readonly string[]).includes(value);
+}
 
 export class StorageQuotaError extends Error {
   constructor(message = storageQuotaMessage()) {
@@ -35,18 +40,9 @@ export class StorageQuotaError extends Error {
   }
 }
 
-function isPermissionDenied(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const code = "code" in error && typeof error.code === "string" ? error.code : "";
-  return code === "permission-denied" || code === "firestore/permission-denied";
-}
-
 function quotaMessage(used: number, extra: number): string {
   const remaining = Math.max(0, FREE_CAPS.storageBytes - used);
-  if (remaining <= 0) return storageQuotaMessage();
-  const need = formatBytes(extra) || "more space";
-  const left = formatBytes(remaining) || "none";
-  return `Not enough storage. This needs ${need}; ${left} left of ${STORAGE_CAP_LABEL}.`;
+  return storageInsufficientMessage(remaining, extra);
 }
 
 function userRef(userId: string) {
@@ -61,8 +57,13 @@ function mapProfile(id: string, data: Record<string, unknown>): UserProfile {
     email: typeof data.email === "string" ? data.email : null,
     photoURL: typeof data.photoURL === "string" ? data.photoURL : null,
     plan: asUserPlan(data.plan),
+    admin: data.admin === true || (typeof data.email === "string" && data.email.toLowerCase() === "davit.gvakharia@gmail.com"),
     usage: asUserUsage(data.usage, weekStart),
     preferredModel: parsePreferredModel(data.preferredModel),
+    chatMode: isChatMode(data.chatMode) ? data.chatMode : null,
+    theme: isThemeId(data.theme) ? data.theme : null,
+    themeAccents: parseThemeAccents(data.themeAccents),
+    highContrast: data.highContrast === true,
     createdAt: toIsoDate(data.createdAt),
     updatedAt: toIsoDate(data.updatedAt),
   };
@@ -84,6 +85,9 @@ export async function ensureUserProfile(user: User): Promise<void> {
         photoURL,
         plan: "free",
         usage: emptyUsage(),
+        theme: readStoredTheme(),
+        themeAccents: readStoredThemeAccents(),
+        highContrast: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }),
@@ -100,6 +104,9 @@ export async function ensureUserProfile(user: User): Promise<void> {
   };
   if (!("plan" in data) || data.plan == null) patch.plan = "free";
   if (!data.usage || typeof data.usage !== "object") patch.usage = emptyUsage();
+  if (!isThemeId(data.theme)) patch.theme = readStoredTheme();
+  if (!data.themeAccents || typeof data.themeAccents !== "object") patch.themeAccents = readStoredThemeAccents();
+  if (typeof data.highContrast !== "boolean") patch.highContrast = false;
   await updateDoc(ref, omitUndefined(patch));
 }
 
@@ -150,8 +157,8 @@ async function writeUsage(userId: string, mutate: (usage: UserUsage) => UserUsag
   });
 }
 
-export async function updatePreferredModel(userId: string, model: AiProviderId): Promise<void> {
-  if (!userId || !isKnownProvider(model)) return;
+export async function updatePreferredModel(userId: string, model: AiModelId): Promise<void> {
+  if (!userId || !isKnownAiModel(model)) return;
   try {
     await updateDoc(userRef(userId), {
       preferredModel: model,
@@ -159,6 +166,27 @@ export async function updatePreferredModel(userId: string, model: AiProviderId):
     });
   } catch {
     // Preference writes must never block the composer.
+  }
+}
+
+export async function updateUserChatMode(userId: string, mode: ChatMode): Promise<void> {
+  if (!userId || !isChatMode(mode)) return;
+  try {
+    await updateDoc(userRef(userId), { chatMode: mode, updatedAt: serverTimestamp() });
+  } catch {
+    // Preference writes must never block the composer.
+  }
+}
+
+export async function updateUserTheme(userId: string, theme: ThemeId): Promise<void> {
+  if (!userId || !isThemeId(theme)) return;
+  try {
+    await updateDoc(userRef(userId), {
+      theme,
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Theme writes must never block the picker.
   }
 }
 
@@ -184,8 +212,19 @@ export async function reserveStorageBytes(userId: string, bytes: number): Promis
     });
   } catch (error) {
     if (error instanceof StorageQuotaError) throw error;
-    if (isPermissionDenied(error)) throw new StorageQuotaError();
     throw error instanceof Error ? error : new Error("Could not reserve storage.");
+  }
+}
+
+export async function updateUserAppearance(userId: string, input: { themeAccents?: ThemeAccents; highContrast?: boolean }): Promise<void> {
+  if (!userId) return;
+  const themeAccents = input.themeAccents;
+  if (themeAccents && (!isAccentId(themeAccents.light) || !isAccentId(themeAccents.dark))) return;
+  if (input.highContrast !== undefined && typeof input.highContrast !== "boolean") return;
+  try {
+    await updateDoc(userRef(userId), { ...input, updatedAt: serverTimestamp() });
+  } catch {
+    // Appearance writes must never block the app.
   }
 }
 

@@ -147,6 +147,8 @@ export type PaperPayload = {
   /** Filled example on the sheet. Chat-only; practice items strip this. */
   sample?: { to?: string; body?: string; sign?: string; date?: string };
   rubric?: EssayRubricItem[];
+  /** Reopen the last sheet in this thread. Do not rewrite the JSON. */
+  reuse?: boolean;
 };
 
 export type ExercisePayloadMap = {

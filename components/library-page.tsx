@@ -6,23 +6,27 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
-import { LibraryCardThumb, LibraryLightbox, LibrarySlideViewer } from "@/components/library-media";
+import { LibraryFilePreview } from "@/components/library-file-preview";
+import { LibraryCardThumb } from "@/components/library-media";
+import { displayFileTitle } from "@/lib/materials/viewer-files";
 import { formatBytes, relativeTime } from "@/lib/format";
-import { isLibraryImage, isLibraryPptx } from "@/lib/library/media";
-import { listLibraryItems, type LibraryItem, type LibraryKind } from "@/lib/library/items";
+import { isLibraryImage } from "@/lib/library/media";
+import { listLibraryItems, type LibraryItem } from "@/lib/library/items";
+import { latestChatPath } from "@/lib/chats";
+import { chatPath, projectHomePath } from "@/lib/workspace/routes";
+import { LibraryNotePreview } from "@/components/library-note-preview";
 
-type LibraryTab = "all" | "media" | "files" | LibraryKind;
+type LibraryTab = "all" | "media" | "files" | "sheet";
 
 const TABS: { id: LibraryTab; label: string }[] = [
   { id: "all", label: "All" },
   { id: "media", label: "Media" },
   { id: "files", label: "Files" },
   { id: "sheet", label: "Notes" },
-  { id: "path", label: "Path" },
-  { id: "practice", label: "Practice" },
 ];
 
 function matchesTab(item: LibraryItem, tab: LibraryTab): boolean {
+  if (item.kind === "path" || item.kind === "practice") return false;
   if (tab === "all") return true;
   if (tab === "media") return isLibraryImage(item);
   if (tab === "files") return item.kind === "material" && !isLibraryImage(item);
@@ -38,14 +42,15 @@ function cardMeta(item: LibraryItem): string {
 export function LibraryPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const { setPendingPanel } = useShell();
+  const { pendingPanel, setPendingPanel } = useShell();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<LibraryTab>("all");
   const [query, setQuery] = useState("");
-  const [lightbox, setLightbox] = useState<LibraryItem | null>(null);
-  const [deck, setDeck] = useState<LibraryItem | null>(null);
+  const [preview, setPreview] = useState<{ projectId: string; id: string; title?: string } | null>(null);
+  const [notePreview, setNotePreview] = useState<LibraryItem | null>(null);
+  const [noteError, setNoteError] = useState<string | null>(null);
   const reduceMotion = useReducedMotion();
   const pillTransition = reduceMotion
     ? { duration: 0 }
@@ -73,6 +78,12 @@ export function LibraryPage() {
     };
   }, [user, router]);
 
+  useEffect(() => {
+    if (!pendingPanel || pendingPanel.kind !== "material") return;
+    setPreview(pendingPanel);
+    setPendingPanel(null);
+  }, [pendingPanel, setPendingPanel]);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return items.filter((item) => {
@@ -83,12 +94,13 @@ export function LibraryPage() {
   }, [items, tab, query]);
 
   function openItem(item: LibraryItem) {
-    if (isLibraryImage(item)) {
-      setLightbox(item);
+    if (item.kind === "material") {
+      setPreview({ projectId: item.projectId, id: item.id, title: item.title });
       return;
     }
-    if (isLibraryPptx(item)) {
-      setDeck(item);
+    if (item.kind === "sheet") {
+      setNoteError(null);
+      setNotePreview(item);
       return;
     }
     setPendingPanel({
@@ -98,25 +110,26 @@ export function LibraryPage() {
           ? "path"
           : item.artifact?.kind === "plan"
             ? "plan"
-            : item.kind === "material"
-              ? "material"
-              : item.kind === "practice"
-                ? "practice"
-                : "sheet",
+            : item.kind === "practice"
+              ? "practice"
+              : "sheet",
       id: item.id,
       title: item.title,
     });
-    router.push(`/project/${item.projectId}`);
+    latestChatPath(item.projectId).then((path) => {
+      router.push(path ?? projectHomePath(item.projectId));
+    });
   }
 
   if (user?.isAnonymous) return null;
 
   return (
-    <div className="px-4 py-4 md:px-10 md:py-5">
-      <div className="mx-auto max-w-6xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2 max-md:border-0">
+    <div className="relative flex h-full min-h-0 flex-1 overflow-hidden">
+      <div className="min-w-0 flex-1 overflow-y-auto px-6 py-6 md:px-12 md:py-8">
+        <div className="mx-auto max-w-6xl">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2 max-md:border-0">
           <LayoutGroup id="library-tabs">
-            <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto max-md:hidden">
               {TABS.map((item) => {
                 const active = tab === item.id;
                 return (
@@ -143,56 +156,68 @@ export function LibraryPage() {
               })}
             </nav>
           </LayoutGroup>
+          <select
+            aria-label="Library filter"
+            value={tab}
+            onChange={(event) => setTab(event.target.value as LibraryTab)}
+            className="hidden h-8 max-w-[112px] rounded-full bg-surface-2 px-2 text-[13px] text-foreground outline-none max-md:block"
+          >
+            {TABS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
           <label className="flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1.5 text-muted">
             <UiIcon name="search" size={16} />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search"
-              className="w-36 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted"
+              className="w-36 max-md:w-24 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted"
             />
           </label>
+          </div>
+
+          {loading && <p className="mt-16 text-sm text-muted">Loading library…</p>}
+          {error && <p className="mt-16 text-sm text-muted">{error}</p>}
+          {!loading && !error && filtered.length === 0 && (
+            <div className="mt-24 text-center">
+              <p className="text-[15px] font-medium text-foreground">Nothing here yet</p>
+              <p className="mt-2 text-[13px] text-muted">Files and notes from your chats will show up here.</p>
+            </div>
+          )}
+
+          {!loading && !error && filtered.length > 0 && (
+            <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {filtered.map((item) => (
+                <button key={item.key} type="button" onClick={() => openItem(item)} className="group text-left">
+                  <div className="aspect-[4/3] overflow-hidden rounded-2xl bg-surface-2 transition-colors hover:bg-[color-mix(in_srgb,var(--surface-2)_96%,white)]">
+                    <LibraryCardThumb item={item} />
+                  </div>
+                  <p className="mt-2 truncate text-[13px] text-foreground">{displayFileTitle(item.title)}</p>
+                  <p className="mt-0.5 truncate text-[12px] text-muted">{cardMeta(item)}</p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-
-        {loading && <p className="mt-16 text-sm text-muted">Loading library…</p>}
-        {error && <p className="mt-16 text-sm text-muted">{error}</p>}
-        {!loading && !error && filtered.length === 0 && (
-          <div className="mt-24 text-center">
-            <p className="text-[15px] font-medium text-foreground">Nothing here yet</p>
-            <p className="mt-2 text-[13px] text-muted">Files, notes, and practice sets from your chats will show up here.</p>
-          </div>
-        )}
-
-        {!loading && !error && filtered.length > 0 && (
-          <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {filtered.map((item) => (
-              <button key={item.key} type="button" onClick={() => openItem(item)} className="group text-left">
-                <div className="aspect-[4/3] overflow-hidden rounded-2xl bg-surface-2">
-                  <LibraryCardThumb item={item} />
-                </div>
-                <p className="mt-2 truncate text-[13px] text-foreground">{item.title}</p>
-                <p className="mt-0.5 truncate text-[12px] text-muted">{cardMeta(item)}</p>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
-
-      {lightbox ? (
-        <LibraryLightbox
-          items={items.filter(isLibraryImage)}
-          startKey={lightbox.key}
-          onClose={() => setLightbox(null)}
-          onDeleted={(item) => setItems((current) => current.filter((entry) => entry.key !== item.key))}
-        />
-      ) : null}
-      {deck ? (
-        <LibrarySlideViewer
-          item={deck}
-          onClose={() => setDeck(null)}
-          onDeleted={(item) => setItems((current) => current.filter((entry) => entry.key !== item.key))}
-        />
-      ) : null}
+      {noteError ? <div role="alert" className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2 rounded-xl bg-surface-2 px-4 py-2 text-sm text-foreground">{noteError}</div> : null}
+      {notePreview ? <LibraryNotePreview key={`${notePreview.projectId}/${notePreview.id}`} item={notePreview}
+        onClose={() => setNotePreview(null)}
+        onOpenInChat={async () => {
+          const target = notePreview;
+          try {
+            setPendingPanel({ projectId: target.projectId, kind: target.artifact?.kind === "plan" ? "plan" : "sheet", id: target.id, title: target.title });
+            setNotePreview(null);
+            const path = await latestChatPath(target.projectId);
+            router.push(path ?? chatPath(target.projectId));
+          } catch (error) {
+            setNoteError(error instanceof Error ? error.message : "Could not open note in chat.");
+          }
+        }} /> : null}
+      {preview ? <LibraryFilePreview key={`${preview.projectId}/${preview.id}`} target={preview}
+        items={filtered.filter((item) => item.kind === "material")}
+        onSelect={(item) => setPreview({ projectId: item.projectId, id: item.id, title: item.title })}
+        onDeleted={(id, projectId) => setItems((current) => current.filter((item) => item.id !== id || item.projectId !== projectId))}
+        onClose={() => setPreview(null)} /> : null}
     </div>
   );
 }

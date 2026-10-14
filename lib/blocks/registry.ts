@@ -57,7 +57,7 @@ function inferFenceType(raw: unknown): string {
   const row = raw as Record<string, unknown>;
   if (typeof row.type === "string" && row.type.trim()) return row.type.trim().toLowerCase();
   if ("cells" in row) return "grid";
-  if ("form" in row) return "paper";
+  if ("form" in row || row.reuse === true) return "paper";
   if ("lines" in row || "speakers" in row) return "dialogue";
   return "";
 }
@@ -72,6 +72,16 @@ function asText(value: unknown): string | undefined {
 
 function previewBlock(type: string, raw: Record<string, unknown>): ParsedChatBlock | null {
   if (type === "paper") {
+    if (raw.reuse === true) {
+      return {
+        type,
+        data: {
+          reuse: true,
+          form: "ganckhadeba",
+          brief: asText(raw.brief) ?? "",
+        },
+      };
+    }
     const sample = asRecord(raw.sample);
     const given = asRecord(raw.given);
     return {

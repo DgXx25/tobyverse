@@ -1,5 +1,6 @@
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { allowImageSearch, clampImageCount, ImageSearchError, searchWebImages } from "@/lib/images/search";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,9 +33,12 @@ export async function POST(request: Request) {
   const rawCount = typeof body.count === "number" ? body.count : typeof body.count === "string" ? Number(body.count) : NaN;
 
   try {
-    const images = await searchWebImages(query, Number.isFinite(rawCount) ? clampImageCount(rawCount) : undefined);
+    const usage = await startAiUsageSession(uid);
+    const images = await searchWebImages(query, Number.isFinite(rawCount) ? clampImageCount(rawCount) : undefined, { usage: usage.report });
+    await usage.commit();
     return Response.json({ images });
   } catch (error) {
+    if (!(error instanceof ImageSearchError)) return aiUsageErrorResponse(error);
     const message = error instanceof Error ? error.message : "Image search failed.";
     const status = error instanceof ImageSearchError && /missing/i.test(message) ? 400 : 502;
     return Response.json({ error: message }, { status });

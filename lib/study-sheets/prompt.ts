@@ -40,6 +40,11 @@ How to think (not a template):
 5. Mix-up only if two things get confused.
 6. One thing to keep.
 
+Structure is automatic, never optional. When the topic contains a formula, comparison, ordered method,
+cycle/process, or definition with an example, use the matching formula_card, compare_vs, steps/flow,
+or term_card + example blocks. A prose-only stack of section blocks is invalid when one of those block
+types can show the structure. The user never has to ask for visual blocks.
+
 Blocks:
 section {title?, text, from_to?} — ONE short sentence that teaches. Add from_to when the sentence describes a change.
 term_card {title, text, icon?, emoji?, from_to?} — named term WITH meaning in beginner words. emoji is a real emoji (💡). icon ids: shield, virus, heart, brain, lungs, droplet, flask, atom, zap, warning, leaf, bone, cell, dna, bug, arrow, globe, star, flame.

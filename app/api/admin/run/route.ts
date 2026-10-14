@@ -1,6 +1,7 @@
 import { generateTextStream } from "@/lib/ai/gemini";
 import { adminErrorResponse, assertAdminRequest } from "@/lib/admin/assert";
 import { buildPlaygroundUserMessage } from "@/lib/admin/playground";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +11,9 @@ function encodeSse(payload: Record<string, unknown>): Uint8Array {
 }
 
 export async function POST(request: Request) {
+  let uid = "";
   try {
-    await assertAdminRequest(request);
+    uid = await assertAdminRequest(request);
   } catch (error) {
     return adminErrorResponse(error);
   }
@@ -33,12 +35,19 @@ export async function POST(request: Request) {
   }
 
   const userMessage = buildPlaygroundUserMessage(prompt, materials);
+  let usage;
+  try {
+    usage = await startAiUsageSession(uid);
+  } catch (error) {
+    return aiUsageErrorResponse(error);
+  }
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
         for await (const delta of generateTextStream(userMessage, {
           systemInstruction: systemPrompt || "You are a concise tutor.",
+          usage: usage.report,
         })) {
           controller.enqueue(encodeSse({ delta }));
         }
@@ -48,6 +57,8 @@ export async function POST(request: Request) {
         const message = error instanceof Error ? error.message : "Generation failed.";
         controller.enqueue(encodeSse({ error: message }));
         controller.close();
+      } finally {
+        await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
       }
     },
   });

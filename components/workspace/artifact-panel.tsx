@@ -16,51 +16,72 @@ import { NoteDocument, NoteTitle } from "@/components/visuals/note-document";
 import { VisualList } from "@/components/visuals/visual-block";
 import { QuietIconCluster } from "@/components/workspace/quiet-icon-cluster";
 import { MaterialViewer } from "@/components/workspace/material-viewer";
+import { ProjectSettingsPane } from "@/components/workspace/project-settings-pane";
+import { LibraryCardThumb } from "@/components/library-media";
+import { FileKindIcon } from "@/components/workspace/file-kind-icon";
+import { LibraryFilePreview } from "@/components/library-file-preview";
 import { UiIcon } from "@/components/workspace/ui-icon";
+import { StudioPane } from "@/components/workspace/studio-pane";
+import { createStudySheet } from "@/lib/study-sheets/store";
+import type { StudioTile } from "@/lib/workspace/studio";
 import { useAuth } from "@/components/auth-provider";
 import { isGuestUser } from "@/lib/guest";
 import type { ChatArtifact, ChatMessage } from "@/types/chat";
 import type { Material } from "@/types/material";
+import type { LibraryItem } from "@/lib/library/items";
 import type { PathLiveState, StudyPath } from "@/types/path";
 import type { NotesLiveState, StudySheet } from "@/types/study-sheet";
 import type { VisualBlock } from "@/types/visual";
 
-type TabId = "materials" | "sheets" | "practice" | "path";
+export type ArtifactTabId = "studio" | "materials" | "sheets" | "practice" | "path" | "settings";
+type TabId = ArtifactTabId;
 
-export type ArtifactFocus = ChatArtifact | { kind: "material"; id: string };
+export type ArtifactFocus = ChatArtifact | { kind: "material" | "settings"; id: string };
 
 export function ArtifactPanel({
   projectId,
   userId,
+  listedProject,
   focus,
   session,
   onResizeStart,
-  onClose,
+  onClosePanel,
+  onCloseMaterial,
   onStartPractice,
   onExitSession,
   onPracticeComplete,
   onViewChange,
   onActivate,
+  onPanelChromeChange,
   liveNote = null,
   livePath = null,
   onLiveSettled,
   onLivePathSettled,
+  onStudioCreate,
+  studioBusy = false,
+  generatingLabel = null,
 }: {
   projectId: string;
   userId: string;
+  listedProject: boolean;
   focus: ArtifactFocus | null;
   session: { setId: string; ids: string[]; mode?: "practice" | "exam" } | null;
   onResizeStart: (event: MouseEvent) => void;
-  onClose: () => void;
+  onClosePanel?: () => void;
+  onCloseMaterial?: () => void;
   onStartPractice: (artifact: ChatArtifact) => void;
   onExitSession: () => void;
   onPracticeComplete?: (result: SetResult) => void;
   onViewChange?: (view: TabId) => void;
   onActivate?: (artifact: ChatArtifact) => void;
+  onPanelChromeChange?: (ownsChrome: boolean) => void;
   liveNote?: NotesLiveState | null;
   livePath?: PathLiveState | null;
   onLiveSettled?: () => void;
   onLivePathSettled?: () => void;
+  onStudioCreate?: (tile: StudioTile, run?: { prompt: string; tool?: StudioTile["tool"] }) => void;
+  studioBusy?: boolean;
+  generatingLabel?: string | null;
 }) {
   const { user } = useAuth();
   const canViewFiles = Boolean(user && !isGuestUser(user));
@@ -68,7 +89,8 @@ export function ArtifactPanel({
   const [sheets, setSheets] = useState<StudySheet[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [paths, setPaths] = useState<StudyPath[]>([]);
-  const [tab, setTab] = useState<TabId>("materials");
+  const [tab, setTab] = useState<TabId>("studio");
+  const tabRef = useRef(tab);
   const [materialId, setMaterialId] = useState<string | null>(null);
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
@@ -79,10 +101,14 @@ export function ArtifactPanel({
   const [pathsReady, setPathsReady] = useState(false);
 
   useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
+
+  useEffect(() => {
     setSheetsReady(false);
     setPracticeReady(false);
     setPathsReady(false);
-    setTab("materials");
+    setTab("studio");
     setMaterialId(null);
     setSheetId(null);
     setPracticeId(null);
@@ -148,7 +174,7 @@ export function ArtifactPanel({
   useEffect(() => {
     if (session || !focus) return;
     if (liveNote) {
-      if (tab === "path") return;
+      if (tabRef.current === "path") return;
       setTab("sheets");
       setSheetError(null);
       if (liveNote.sheetId) setSheetId(liveNote.sheetId);
@@ -177,18 +203,22 @@ export function ArtifactPanel({
     if (focus.kind === "material") {
       setTab("materials");
       setMaterialId(focus.id);
+      return;
     }
-  }, [focus, session, liveNote, livePath, tab]);
+    if (focus.kind === "settings") {
+      setTab("settings");
+    }
+  }, [focus, session, liveNote, livePath]);
 
   useEffect(() => {
     if (session) return;
     if (liveNote) return;
     if (tab === "sheets" && sheetsReady && counts.sheets === 0) {
-      setTab("materials");
+      setTab("studio");
       setSheetId(null);
     }
     if (tab === "practice" && practiceReady && counts.practice === 0) {
-      setTab("materials");
+      setTab("studio");
       setPracticeId(null);
     }
   }, [counts.sheets, counts.practice, session, tab, sheetsReady, practiceReady, liveNote]);
@@ -201,10 +231,15 @@ export function ArtifactPanel({
   const selectedMaterial = materials.find((item) => item.id === materialId) ?? null;
   const selectedSheet = sheets.find((item) => item.id === sheetId) ?? null;
   const selectedSet = practiceSets.find((item) => item.id === practiceId) ?? null;
-  const showSheets = counts.sheets > 0 || Boolean(liveNote) || (tab === "sheets" && !sheetsReady);
-  const showPractice = counts.practice > 0 || (tab === "practice" && !practiceReady);
-  const showPath = counts.path > 0 || tab === "path" || Boolean(livePath);
-  const hideTopBar = tab === "sheets" && (Boolean(selectedSheet) || Boolean(liveNote));
+  const hideTopBar = Boolean(session) ||
+    (tab === "materials" && Boolean(selectedMaterial)) ||
+    (tab === "sheets" && (Boolean(selectedSheet) || Boolean(liveNote))) ||
+    (tab === "practice" && Boolean(selectedSet)) ||
+    (tab === "path" && Boolean(selectedPath || livePath));
+
+  useLayoutEffect(() => {
+    onPanelChromeChange?.(hideTopBar);
+  }, [hideTopBar, onPanelChromeChange]);
 
   useEffect(() => {
     if (!liveNote || liveNote.status || !liveNote.sheetId || !onLiveSettled) return;
@@ -221,14 +256,14 @@ export function ArtifactPanel({
   }, [livePath, selectedPath, onLivePathSettled]);
 
   return (
-    <aside className="relative z-[1] flex h-full w-full shrink-0 flex-col bg-transparent py-2 pl-1 pr-2 max-md:!w-full">
+    <aside className="relative z-[1] flex h-full w-full shrink-0 flex-col overflow-hidden bg-transparent max-md:!w-full">
       <button
         type="button"
         aria-label="Resize panel"
         onMouseDown={onResizeStart}
         className="absolute inset-y-0 left-0 z-10 hidden w-2 cursor-col-resize md:block"
       />
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-transparent">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">
         {session ? (
           <PracticeSession
             projectId={projectId}
@@ -244,77 +279,32 @@ export function ArtifactPanel({
           />
         ) : (
           <>
-            {hideTopBar ? null : (
-            <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
+            {tab === "materials" && selectedMaterial ? null : hideTopBar ? null : (
+            <header className="flex h-11 shrink-0 items-center gap-1 bg-surface py-0 pl-2 pr-12">
+              {onClosePanel ? (
+                <button type="button" onClick={onClosePanel} aria-label="Back to chat" title="Back to chat" className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[12px] text-muted transition-colors hover:bg-surface-2 hover:text-foreground md:hidden">
+                  <UiIcon name="back" size={16} />
+                  <span>Chat</span>
+                </button>
+              ) : null}
               <nav className="flex min-w-0 flex-1 items-center">
                 <QuietIconCluster
                   size={18}
                   actions={[
                     {
-                      id: "materials",
-                      label: "Materials",
-                      icon: "materials",
-                      active: tab === "materials",
-                      disabled: counts.materials === 0,
-                      onClick: () => {
-                        setTab("materials");
-                        setMaterialId(null);
-                      },
+                      id: "studio",
+                      label: "Studio",
+                      icon: "spark" as const,
+                      active: tab === "studio",
+                      onClick: () => setTab("studio"),
                     },
-                    ...(showPath
-                      ? [
-                          {
-                            id: "path",
-                            label: "Path",
-                            icon: "plan" as const,
-                            active: tab === "path",
-                            onClick: () => setTab("path"),
-                          },
-                        ]
-                      : []),
-                    ...(showSheets
-                      ? [
-                          {
-                            id: "sheets",
-                            label: "Notes",
-                            icon: "notes" as const,
-                            active: tab === "sheets",
-                            onClick: () => {
-                              setTab("sheets");
-                              setSheetId(null);
-                            },
-                          },
-                        ]
-                      : []),
-                    ...(showPractice
-                      ? [
-                          {
-                            id: "practice",
-                            label: "Practice",
-                            icon: "practice" as const,
-                            active: tab === "practice",
-                            onClick: () => {
-                              setTab("practice");
-                              setPracticeId(null);
-                            },
-                          },
-                        ]
-                      : []),
                   ]}
                 />
               </nav>
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-transparent text-muted hover:text-foreground"
-                aria-label="Close panel"
-              >
-                <UiIcon name="close" size={18} />
-              </button>
             </header>
             )}
 
-            <div className={`min-h-0 flex-1 ${tab === "materials" && materialId ? "overflow-hidden" : tab === "path" ? "overflow-hidden" : "overflow-y-auto"}`}>
+            <div className={`artifact-panel-content min-h-0 flex-1 ${tab === "materials" && materialId ? "overflow-hidden" : tab === "path" ? "overflow-hidden" : "overflow-y-auto"}`}>
               {tab === "path" && (livePath || selectedPath) ? (
                 <PathView
                   path={
@@ -333,15 +323,71 @@ export function ArtifactPanel({
               ) : tab === "path" && !pathsReady ? null : tab === "path" ? (
                 <EmptyState title="No path yet" body="Ask for a course path from a syllabus. It will open here." />
               ) : null}
+              {tab === "studio" && (
+                <StudioPane
+                  sheets={sheets}
+                  practiceSets={practiceSets}
+                  paths={paths}
+                  hasSources={materials.some((item) => item.status !== "failed")}
+                  sourceCount={materials.filter((item) => item.status === "ready").length || materials.length}
+                  busy={studioBusy}
+                  generatingLabel={generatingLabel}
+                  onCreate={(tile, run) => onStudioCreate?.(tile, run)}
+                  onOpenSheet={(id) => {
+                    setSheetError(null);
+                    setTab("sheets");
+                    setSheetId(id);
+                    const sheet = sheets.find((item) => item.id === id);
+                    if (sheet) {
+                      onActivate?.({
+                        kind: sheet.title === "Study plan" ? "plan" : "sheet",
+                        id: sheet.id,
+                        title: sheet.title,
+                      });
+                    }
+                  }}
+                  onOpenPractice={(id) => {
+                    setTab("practice");
+                    setPracticeId(id);
+                    const found = practiceSets.find((item) => item.id === id);
+                    if (found) onActivate?.(found);
+                  }}
+                  onOpenPath={() => setTab("path")}
+                  onAddNote={async ({ title, text }) => {
+                    const id = await createStudySheet({
+                      projectId,
+                      userId,
+                      title: title || "Note",
+                      blocks: [],
+                      content: text,
+                      sourceMaterialIds: [],
+                    });
+                    setTab("sheets");
+                    setSheetId(id);
+                  }}
+                />
+              )}
               {tab === "materials" && (
                 <MaterialsView
                   items={materials}
                   selectedId={materialId}
                   canView={canViewFiles}
-                  onSelect={setMaterialId}
+                  onSelect={(id) => {
+                    setMaterialId(id);
+                    if (!id) setTab("studio");
+                  }}
                   selected={selectedMaterial}
+                  onCloseSelected={() => {
+                    setMaterialId(null);
+                    setTab("studio");
+                    if (focus?.kind === "material") onCloseMaterial?.();
+                    if (focus?.kind === "settings") setTab("settings");
+                  }}
                 />
               )}
+              {tab === "settings" && listedProject ? (
+                <ProjectSettingsPane projectId={projectId} />
+              ) : null}
               {tab === "sheets" && (
                 <SheetsView
                   items={sheets}
@@ -412,7 +458,7 @@ function ArtifactBack({
         type="button"
         onClick={onBack}
         aria-label="Back"
-        className="flex min-w-0 max-w-full items-center gap-1.5 rounded-lg py-1 pl-1 pr-2 text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
+        className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-muted transition-colors hover:bg-surface-2 hover:text-foreground"
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center text-muted">
           <UiIcon name="back" size={16} />
@@ -429,12 +475,14 @@ function MaterialsView({
   canView,
   onSelect,
   selected,
+  onCloseSelected,
 }: {
   items: Material[];
   selectedId: string | null;
   canView: boolean;
   onSelect: (id: string | null) => void;
   selected: Material | null;
+  onCloseSelected: () => void;
 }) {
   if (items.length === 0) {
     return (
@@ -454,32 +502,88 @@ function MaterialsView({
         </div>
       );
     }
-    return <MaterialViewer material={selected} onClose={() => onSelect(null)} />;
+    if (usesOverlayPreview(selected)) {
+      const previewItems: LibraryItem[] = items.map((item) => ({
+        key: `material:${item.projectId}:${item.id}`, kind: "material", id: item.id,
+        projectId: item.projectId, projectTitle: "", title: item.title,
+        preview: item.extractedTextPreview, meta: item.type, createdAt: item.createdAt,
+        materialType: item.type, sizeBytes: item.sizeBytes, pageCount: item.pageCount,
+        hasImages: item.hasImages, images: item.images, storagePath: item.storagePath,
+        previewPagePath: item.previewPagePath,
+      }));
+      return <>
+        <MaterialGrid items={items} selectedId={selectedId} onSelect={onSelect} />
+        <LibraryFilePreview
+          key={selected.id}
+          target={{ projectId: selected.projectId, id: selected.id, title: selected.title }}
+          items={previewItems}
+          onSelect={(item) => onSelect(item.id)}
+          onDeleted={() => undefined}
+          onClose={onCloseSelected}
+        />
+      </>;
+    }
+    return <MaterialViewer key={selected.id} material={selected} onClose={onCloseSelected} onBack={() => onSelect(null)} />;
   }
 
+  return <MaterialGrid items={items} selectedId={selectedId} onSelect={onSelect} />;
+}
+
+function MaterialGrid({ items, selectedId, onSelect }: {
+  items: Material[];
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
   return (
-    <div className="space-y-1 px-3 py-3">
+    <div className="artifact-grid-container">
+      <div className="artifact-tile-grid">
       {items.map((item) => (
         <button
           key={item.id}
           type="button"
           onClick={() => onSelect(item.id)}
-          className={`block w-full rounded-xl px-3 py-2.5 text-left hover:bg-surface-2 ${
-            selectedId === item.id ? "bg-surface-2" : ""
-          }`}
+          className={`group min-w-0 text-left ${selectedId === item.id ? "opacity-80" : ""}`}
         >
-          <p className="truncate text-[13px] text-foreground">{item.title}</p>
-          <p className="mt-0.5 text-[11px] text-muted">
+          <div className="artifact-panel-block aspect-[4/3] overflow-hidden rounded-2xl">
+            <LibraryCardThumb item={{
+              key: `material:${item.projectId}:${item.id}`, kind: "material", id: item.id,
+              projectId: item.projectId, projectTitle: "", title: item.title,
+              preview: item.extractedTextPreview, meta: item.type, createdAt: item.createdAt,
+              materialType: item.type, sizeBytes: item.sizeBytes, pageCount: item.pageCount,
+              hasImages: item.hasImages, images: item.images, storagePath: item.storagePath,
+              previewPagePath: item.previewPagePath,
+            }} />
+          </div>
+          <p className="mt-2 truncate text-[13px] text-foreground">{item.title}</p>
+          <p className="mt-0.5 truncate text-[12px] text-muted">
             {[item.type.toUpperCase(), formatBytes(item.sizeBytes), shortDate(item.createdAt)].filter(Boolean).join(" · ")}
           </p>
         </button>
       ))}
+      </div>
     </div>
   );
 }
 
+function usesOverlayPreview(material: Material): boolean {
+  return material.type === "pptx" || material.type === "docx" || material.type === "xlsx" || /\.(?:ppt|pptx|doc|docx|xls|xlsx)$/i.test(material.originalName || material.storagePath);
+}
+
 function notesMatch(a: VisualBlock[], b: VisualBlock[]): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function SheetsView({
@@ -538,19 +642,24 @@ function SheetsView({
   }
 
   return (
-    <div className="space-y-1 px-3 py-3">
-      {error ? <p className="px-3 pb-2 text-xs text-red-400">{error}</p> : null}
+    <div className="artifact-grid-container">
+      {error ? <p className="pb-2 text-xs text-red-400">{error}</p> : null}
+      <div className="artifact-tile-grid">
       {items.map((item) => (
         <button
           key={item.id}
           type="button"
           onClick={() => onSelect(item.id)}
-          className="block w-full rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
+          className="group min-w-0 text-left"
         >
+          <div className="artifact-panel-block flex aspect-[4/3] items-center justify-center overflow-hidden rounded-2xl">
+            <FileKindIcon kind="notes" size={52} />
+          </div>
           <p className="truncate text-[13px] text-foreground">{item.title}</p>
-          <p className="mt-0.5 text-[11px] text-muted">{shortDate(item.createdAt) || "Notes"}</p>
+          <p className="mt-0.5 truncate text-[12px] text-muted">{formatDateTime(item.createdAt) || "Notes"}</p>
         </button>
       ))}
+      </div>
     </div>
   );
 }
@@ -661,7 +770,7 @@ function PracticeView({
             key={item.id}
             type="button"
             onClick={() => onSelect(item.id)}
-            className="block w-full rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
+            className="artifact-panel-block block w-full rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
           >
             <p className="truncate text-[13px] text-foreground">Practice set · {count} items</p>
             <p className="mt-0.5 text-[11px] text-muted">{saved > 0 ? `Saved at ${saved + 1}` : "Ready to start"}</p>

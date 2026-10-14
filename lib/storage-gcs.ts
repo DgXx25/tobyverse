@@ -20,6 +20,24 @@ function bucketName(): string {
   );
 }
 
+function userProject(): string {
+  return (
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim() ||
+    process.env.GOOGLE_CLOUD_PROJECT?.trim() ||
+    process.env.GCLOUD_PROJECT?.trim() ||
+    ""
+  );
+}
+
+function storageHeaders(token: string, extra?: Record<string, string>): Record<string, string> {
+  const project = userProject();
+  return {
+    Authorization: `Bearer ${token}`,
+    ...(project ? { "x-goog-user-project": project } : {}),
+    ...extra,
+  };
+}
+
 function readJsonFile(filePath: string): Record<string, unknown> | null {
   try {
     if (!fs.existsSync(filePath)) return null;
@@ -221,10 +239,7 @@ export async function uploadGcsObject(objectPath: string, buffer: Buffer, conten
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": contentType || "application/octet-stream",
-      },
+      headers: storageHeaders(token, { "Content-Type": contentType || "application/octet-stream" }),
       body: new Uint8Array(buffer),
     });
   } catch {
@@ -245,7 +260,7 @@ export async function deleteGcsObject(objectPath: string): Promise<void> {
   try {
     response = await fetch(url, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: storageHeaders(token),
     });
   } catch {
     throw new Error("Storage delete failed. Could not reach Google Cloud Storage.");
@@ -272,7 +287,7 @@ export async function listGcsPrefix(prefix: string): Promise<string[]> {
     const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o?${params.toString()}`;
     let response: Response;
     try {
-      response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      response = await fetch(url, { headers: storageHeaders(token) });
     } catch {
       throw new Error("Could not list files from Storage.");
     }
@@ -299,7 +314,7 @@ export async function downloadGcsObject(
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: storageHeaders(token),
     });
   } catch {
     throw new Error("Could not read file from Storage.");

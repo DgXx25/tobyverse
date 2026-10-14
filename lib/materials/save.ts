@@ -1,15 +1,31 @@
+import { authHeaders } from "@/lib/api/client";
 import { deleteMaterialDoc } from "@/lib/materials/store";
-import { deleteStoragePath, extractedTextPath } from "@/lib/materials/storage";
+import { deleteStoragePath, extractedTextPath, releaseStoragePool } from "@/lib/materials/storage";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
-import { adjustStorageBytes } from "@/lib/account/store";
 import type { Material } from "@/types/material";
+
+/** Vector chunks live server-side only, so removal goes through the API. Best effort: never blocks deletion. */
+export async function dropMaterialIndex(projectId: string, materialId: string): Promise<void> {
+  try {
+    await fetch("/api/materials/delete", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ projectId, materialId }),
+    });
+  } catch {
+    /* orphaned chunks are invisible to retrieval once the material doc is gone */
+  }
+}
 
 export async function removeMaterial(material: Material): Promise<void> {
   const paths = new Set<string>([material.storagePath, material.textPath]);
   for (const image of material.images) paths.add(image.path);
-  await Promise.all([...paths].map((path) => deleteStoragePath(path)));
+  await Promise.all([
+    ...[...paths].map((path) => deleteStoragePath(path)),
+    dropMaterialIndex(material.projectId, material.id),
+  ]);
   await deleteMaterialDoc(material.projectId, material.id);
-  void adjustStorageBytes(material.userId, -material.sizeBytes);
+  void releaseStoragePool(material.sizeBytes).catch(() => undefined);
 }
 
 export async function removeLibraryMaterial(item: {
@@ -28,8 +44,11 @@ export async function removeLibraryMaterial(item: {
   if (parsed) {
     paths.add(extractedTextPath(parsed.userId, parsed.projectId, parsed.materialId));
   }
-  await Promise.all([...paths].map((path) => deleteStoragePath(path)));
+  await Promise.all([
+    ...[...paths].map((path) => deleteStoragePath(path)),
+    dropMaterialIndex(item.projectId, item.id),
+  ]);
   await deleteMaterialDoc(item.projectId, item.id);
   const ownerId = parsed?.userId ?? "";
-  if (ownerId && item.sizeBytes) void adjustStorageBytes(ownerId, -item.sizeBytes);
+  if (ownerId && item.sizeBytes) void releaseStoragePool(item.sizeBytes).catch(() => undefined);
 }

@@ -102,5 +102,14 @@ export function matchChatBlocks(context: ChatGenerationContext): ChatBlockDef[] 
 }
 
 export function tobyCardsForTurn(context: ChatGenerationContext): string {
-  return formatTobyBlockCards(matchChatBlocks(context));
+  const defs = matchChatBlocks(context);
+  const cards = formatTobyBlockCards(defs);
+  if (!cards || !context.threadPaper || !defs.some((item) => item.id === "paper")) return cards;
+  return `${cards}
+
+A paper sheet is already in this thread. If they want to fill or try it now, do not rewrite the JSON. Emit only:
+\`\`\`toby paper
+{"reuse":true}
+\`\`\`
+The UI places that sheet at the bottom. Older sheets stay skipped — no Check.`;
 }

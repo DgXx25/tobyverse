@@ -27,7 +27,7 @@ export const SLASH_MODES: SlashItem[] = [
 
 export const SLASH_SKILLS: SlashItem[] = [
   { kind: "skill", id: "practice", command: "practice", label: "Practice", hint: "Make a practice set", icon: "practice" },
-  { kind: "skill", id: "notes", command: "notes", label: "Notes", hint: "Write study notes", icon: "notes" },
+  { kind: "skill", id: "notes", command: "note", label: "Note", hint: "Write study notes", icon: "notes" },
   { kind: "skill", id: "path", command: "path", label: "Path", hint: "Map a course", icon: "plan" },
   { kind: "skill", id: "photos", command: "photos", label: "Photos", hint: "Find photos", icon: "search" },
 ];
@@ -37,7 +37,7 @@ export const COMPOSER_SKILL_META: Record<
   { label: string; placeholder: string; intent: ComposerIntent; icon: "practice" | "notes" | "plan" | "search" }
 > = {
   practice: { label: "Practice", placeholder: "What should I practice?", intent: "practice", icon: "practice" },
-  notes: { label: "Notes", placeholder: "What should I take notes on?", intent: "study", icon: "notes" },
+  notes: { label: "Note", placeholder: "What should I take notes on?", intent: "study", icon: "notes" },
   path: { label: "Path", placeholder: "Which course should I map?", intent: "plan", icon: "plan" },
   photos: { label: "Photos", placeholder: "What should I search photos of?", intent: "ask", icon: "search" },
 };
@@ -90,7 +90,9 @@ export function consumeSlashCommand(draft: string): {
   const token = match[1].toLowerCase();
   const rest = (match[2] ?? "").trimStart();
   const modeItem = SLASH_MODES.find((item) => item.command === token || item.label.toLowerCase() === token);
-  const skillItem = SLASH_SKILLS.find((item) => item.command === token || item.label.toLowerCase() === token);
+  const skillItem = SLASH_SKILLS.find(
+    (item) => item.command === token || item.label.toLowerCase() === token || (item.id === "notes" && token === "notes"),
+  );
   if (modeItem && isChatModeId(modeItem.id)) {
     return { mode: asChatMode(modeItem.id), prompt: rest };
   }

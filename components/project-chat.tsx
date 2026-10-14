@@ -4,21 +4,21 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, startTransit
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
+import { useUserProfile } from "@/components/account/use-user-profile";
+import { HeadlineVerb } from "@/components/workspace/headline-verb";
 import { GuestGoogleCta } from "@/components/guest-google-cta";
 import { createChunkBuffer } from "@/lib/ai/chunk-stream";
 import { readChatSse } from "@/lib/ai/sse";
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { dispatchChatTool, dispatchStatus, imageFailLine, imageFoundLine, analysingStatus, thinkingStatus } from "@/lib/chat/dispatch";
 import { latestOpenAsk, splitTeachingExam } from "@/lib/chat/prompt-ask";
-import { trackEvent } from "@/lib/analytics/track";
 import { addChatMessage, allocateChatMessageId, ensureChatThread, patchChatMessage, subscribeChatMessages } from "@/lib/chats";
 import { DEFAULT_CHAT_THREAD_ID, DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
-import { incrementUsage } from "@/lib/account/store";
-import { excerptsForChat } from "@/lib/materials/chat-context";
 import { pickChatFigures, shouldAttachChatFigures } from "@/lib/materials/figures";
 import { listMaterials, removeMaterial, waitForMaterialPreviews } from "@/lib/materials";
 import { ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl, urlsInText } from "@/lib/materials/ingest-client";
 import { newChipId, attachmentsFromMaterials, snapshotChatAttachments } from "@/lib/composer/attach";
+import { patchComposerChip } from "@/lib/composer/chips";
 import {
   peekPendingStart,
   takePendingStart,
@@ -44,21 +44,25 @@ import {
 } from "@/lib/composer/slash";
 import { inferProjectGoal } from "@/lib/composer/goal";
 import { isSimpleChatTask } from "@/lib/blocks/match";
+import { papersInTurns } from "@/lib/blocks/paper-thread";
 import { artifactFacts, historyTurnsFromMessages, historyWithoutCurrentPrompt, latestArtifact } from "@/lib/composer/memory";
 import { listMemories } from "@/lib/memory/store";
 import { getLearningProfile } from "@/lib/memory/profile";
 import { syncUserMemories } from "@/lib/memory/client";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
-import { autoNameProject } from "@/lib/workspace/auto-title";
-import { isRealUserPrompt, needsAutoTitle, DEFAULT_FIRST_PROMPT } from "@/lib/workspace/title";
+import { autoNameChat } from "@/lib/workspace/auto-title";
+import type { StudioRequest } from "@/lib/workspace/studio";
+import { isRealUserPrompt, needsAutoTitle, DEFAULT_FIRST_PROMPT, PLACEHOLDER_CHAT_TITLE } from "@/lib/workspace/title";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
 import { workFinishedPrompt, type SetResult } from "@/lib/exercises/session";
 import { gateGuestChatTool, guestCapReached, GuestCapError, isGuestUser, recordGuestAssistantTurn, syncGuestAssistantCount } from "@/lib/guest";
 import { recipeForGoal } from "@/lib/core/recipes";
 import { updateProjectActiveArtifact, updateProjectGoal } from "@/lib/projects";
 import { RichContent } from "@/components/rich-content";
+import { ChatExerciseProvider } from "@/components/workspace/chat-exercise-context";
 import { MixedText } from "@/components/visuals/mixed-text";
 import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
+import { IllustrationBlocks } from "@/components/workspace/illustration-blocks";
 import { ClarifyChips } from "@/components/workspace/clarify-chips";
 import { MessageAttachments } from "@/components/workspace/message-attachments";
 import { ArtifactCard } from "@/components/workspace/artifact-card";
@@ -66,13 +70,22 @@ import { ChatSetCard } from "@/components/exercises/chat-set";
 import { ImageGallery } from "@/components/workspace/image-gallery";
 import { LinkifiedText } from "@/components/workspace/linkified-text";
 import { StatusWait, formatWorked } from "@/components/workspace/status-wait";
-import { SourcesChip, sourcesForTurn } from "@/components/workspace/sources-chip";
+import {
+  generateStatusText,
+  uploadStatusText,
+  type ComposerStatusState,
+} from "@/components/workspace/composer-status";
+import { CitationProvider, CitedSources } from "@/components/workspace/citations";
+import { usedSources } from "@/lib/rag/sources";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
+import { ReportContentModal } from "@/components/workspace/report-content-modal";
 import { getStudySheet } from "@/lib/study-sheets/store";
 import { findNode, findNodeByPracticeSet, flattenNodes, hintAskPrompt, leadPathPrompt, markNodeDone, markNodeReady, moveOnPrompt, nodeTeach, pathBriefing, pathIsStarted, resumeAfterWorkPrompt, subscribeStudyPaths } from "@/lib/paths";
 import { patchStudyPath } from "@/lib/paths/store";
+import { submitAssistantDislike } from "@/lib/feedback/store";
 import { stripArtifactMarkup } from "@/lib/composer/memory";
+import { chatPath, publicChatId } from "@/lib/workspace/routes";
 import type { NotesGenerateEvent } from "@/lib/study-sheets/generate-client";
 import type { PathGenerateEvent } from "@/lib/paths/generate-client";
 import type { AcceptedChatTool, ActiveArtifact, ActiveArtifactStatus, ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatTurn, PendingKind, Project } from "@/types";
@@ -91,14 +104,16 @@ type StreamState = {
   images?: ChatImageHit[];
   options?: string[];
   promptAsk?: ChatMessage["promptAsk"];
+  blocks?: ChatMessage["blocks"];
+  sources?: ChatMessage["sources"];
   memorized?: boolean;
 };
 
-function ExamCard({ question, ka }: { question: string; ka: boolean }) {
+function ExamCard({ question, ka: _ka }: { question: string; ka: boolean }) {
   return (
-    <blockquote className="note-highlight my-3 px-3.5 py-2.5">
+    <blockquote className="note-highlight px-3.5 py-2.5">
       <p className="mb-1.5 text-[12px] font-medium text-muted">
-        {ka ? "სცადე — შეავსე, როგორც მაგალითში" : "Try this — same move as the example"}
+        Try this — same move as the example
       </p>
       <MixedText text={question} />
     </blockquote>
@@ -106,7 +121,7 @@ function ExamCard({ question, ka }: { question: string; ka: boolean }) {
 }
 
 function FollowChips({
-  ka,
+  ka: _ka,
   followup,
   pathStart,
   teaching,
@@ -126,14 +141,13 @@ function FollowChips({
 }) {
   const actions: { id: string; label: string; primary?: boolean }[] = [];
   if (followup) {
-    actions.push({ id: "continue", label: ka ? "გაგრძელება" : "Continue", primary: true });
+    actions.push({ id: "continue", label: "Continue", primary: true });
   } else if (pathStart) {
-    actions.push({ id: "new-chat", label: ka ? "ახალი ჩატი" : "New chat" });
-    actions.push({ id: "continue", label: ka ? "გაგრძელება" : "Continue", primary: true });
+    actions.push({ id: "continue", label: "Continue", primary: true });
   } else if (teaching) {
     if (askQuestion) actions.push({ id: "hint", label: hintLabel });
     for (const option of options) actions.push({ id: option, label: option });
-    actions.push({ id: "continue", label: ka ? "გაგრძელება" : "Continue", primary: true });
+    actions.push({ id: "continue", label: "Continue", primary: true });
   } else if (askQuestion) {
     actions.push({ id: "hint", label: hintLabel });
     for (const option of options) actions.push({ id: option, label: option });
@@ -153,6 +167,24 @@ function FollowChips({
           }
         >
           {action.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SuggestedFollowups({ prompts, onPick }: { prompts: string[]; onPick: (prompt: string) => void }) {
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      {prompts.slice(0, 2).map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          onClick={() => onPick(prompt)}
+          className="flex w-fit max-w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-[13px] text-muted hover:bg-surface-2 hover:text-foreground"
+        >
+          <UiIcon name="forward" size={14} />
+          <span className="truncate">{prompt}</span>
         </button>
       ))}
     </div>
@@ -233,17 +265,20 @@ function pendingUserMessage(projectId: string, threadId: string, pending: Pendin
 function openingChatState(
   projectId: string,
   threadId: string,
-  isMainThread: boolean,
 ): {
   messages: ChatMessage[];
   sending: boolean;
   stream: StreamState | null;
   loading: boolean;
 } {
-  if (!isMainThread || typeof window === "undefined") {
+  if (typeof window === "undefined") {
     return { messages: [], sending: false, stream: null, loading: true };
   }
-  const pending = peekOpeningPending(projectId) ?? peekPendingStart(projectId);
+  const startKey = publicChatId(projectId, threadId);
+  const pending =
+    (threadId === DEFAULT_CHAT_THREAD_ID ? peekOpeningPending(projectId) : null) ??
+    peekPendingStart(startKey) ??
+    (threadId === DEFAULT_CHAT_THREAD_ID ? peekPendingStart(projectId) : null);
   if (!pending) {
     return { messages: [], sending: false, stream: null, loading: true };
   }
@@ -252,7 +287,7 @@ function openingChatState(
     messages,
     sending: true,
     stream: {
-      id: `opening-stream-${projectId}`,
+      id: `opening-stream-${startKey}`,
       content: "",
       intent: pending.intent ?? DEFAULT_COMPOSER_INTENT,
       status: pending.awaitingIngest ? analysingStatus(undefined) : thinkingStatus(promptIsKa(pending.prompt)),
@@ -278,6 +313,23 @@ function isLatestPathCard(
   return false;
 }
 
+function papersBefore(messages: ChatMessage[], index: number) {
+  return papersInTurns(messages.slice(0, index));
+}
+
+function exerciseStillOpen(
+  messages: ChatMessage[],
+  index: number,
+  streamId: string | undefined,
+  sending: boolean,
+) {
+  if (messages.slice(index + 1).some((item) => item.role === "user")) return false;
+  const id = messages[index]?.id;
+  if (streamId && streamId !== id) return false;
+  if (sending && streamId !== id) return false;
+  return true;
+}
+
 export function ProjectChat({
   project,
   userId,
@@ -293,8 +345,16 @@ export function ProjectChat({
   onFinishedSetHandled,
   composerLocked = false,
   threadId = DEFAULT_CHAT_THREAD_ID,
+  threadTitle,
   chatMode = "auto",
   onChatMode,
+  onComposerHeightChange,
+  chatLayoutWidth,
+  initialMessages = [],
+  onLoadOlder,
+  studioRequest = null,
+  onStudioRequestHandled,
+  onBusyChange,
 }: {
   project: Project;
   userId: string;
@@ -309,24 +369,36 @@ export function ProjectChat({
   onFinishedSetHandled?: () => void;
   composerLocked?: boolean;
   threadId?: string;
+  threadTitle?: string;
   chatMode?: ChatMode;
   onChatMode?: (mode: ChatMode) => void;
+  onComposerHeightChange?: (height: number) => void;
+  chatLayoutWidth?: number;
+  initialMessages?: ChatMessage[];
+  onLoadOlder?: () => Promise<ChatMessage[]>;
+  /** A Studio tile asked for something. Sent as the user's own turn once the chat is idle. */
+  studioRequest?: StudioRequest | null;
+  onStudioRequestHandled?: (id: number) => void;
+  onBusyChange?: (busy: boolean) => void;
   onProjectPatch?: (patch: {
     title?: string;
     goal?: ProjectGoal;
     recipe?: LessonRecipe;
     activeArtifact?: ActiveArtifact | null;
+    projectMemory?: string[];
   }) => void;
 }) {
   const { user } = useAuth();
+  const { profile: userProfile } = useUserProfile();
   const router = useRouter();
   const { model } = usePreferredModel();
   const { openSettings } = useShell();
   const guest = isGuestUser(user);
   const chatThreadId = threadId || DEFAULT_CHAT_THREAD_ID;
   const isMainThread = chatThreadId === DEFAULT_CHAT_THREAD_ID;
-  const [openingUi] = useState(() => openingChatState(project.id, chatThreadId, isMainThread));
+  const [openingUi] = useState(() => openingChatState(project.id, chatThreadId));
   const [messages, setMessages] = useState<ChatMessage[]>(openingUi.messages);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [memorizedIds, setMemorizedIds] = useState<Set<string>>(() => new Set());
   const memorizedRef = useRef<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
@@ -335,13 +407,22 @@ export function ProjectChat({
   const [sending, setSending] = useState(openingUi.sending);
   const [stoppable, setStoppable] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const retryRef = useRef<(() => void) | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const [stream, setStream] = useState<StreamState | null>(openingUi.stream);
   const [chips, setChips] = useState<ComposerChip[]>([]);
   const [suggest, setSuggest] = useState<{ messageId: string; kind: "practice" | "exam" | "sheet" | "path" } | null>(null);
+  const [suggestedFollowups, setSuggestedFollowups] = useState<{ messageId: string; prompts: string[] } | null>(null);
   const [followup, setFollowup] = useState<{ kind: "sheet" | "practice"; ka: boolean; since: number } | null>(null);
+  const [stoppedIds, setStoppedIds] = useState<Set<string>>(() => new Set());
   const [needGoogle, setNeedGoogle] = useState(false);
   const [path, setPath] = useState<StudyPath | null>(null);
   const [workedMs, setWorkedMs] = useState<Record<string, number>>({});
+  const [turnReaction, setTurnReaction] = useState<Record<string, "like" | "dislike">>({});
+  const [dislikeOpen, setDislikeOpen] = useState<string | null>(null);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [expandedUserMessages, setExpandedUserMessages] = useState<Record<string, boolean>>({});
   const pinBottomRef = useRef(true);
   const pathRef = useRef<StudyPath | null>(null);
   const artifactStepsRef = useRef<Map<string, NonNullable<ChatArtifact["step"]>>>(new Map());
@@ -355,6 +436,12 @@ export function ProjectChat({
   const streamRef = useRef<StreamState | null>(null);
   const finishedKeyRef = useRef<string | null>(null);
   streamRef.current = stream;
+
+  useEffect(() => {
+    if (!initialMessages.length) return;
+    setMessages((current) => mergeOpeningMessages(current, initialMessages, artifactStepsRef.current));
+    setLoading(false);
+  }, [initialMessages]);
   const chatModeRef = useRef(chatMode);
   chatModeRef.current = chatMode;
   const sessionGoalRef = useRef<ProjectGoal | null>(null);
@@ -365,7 +452,10 @@ export function ProjectChat({
 
   useEffect(() => {
     let cancelled = false;
-    const keepOpening = isMainThread && Boolean(peekOpeningPending(project.id) ?? peekPendingStart(project.id));
+    const keepOpening = Boolean(
+      peekPendingStart(publicChatId(project.id, chatThreadId)) ??
+        (isMainThread ? peekOpeningPending(project.id) ?? peekPendingStart(project.id) : null),
+    );
     if (!keepOpening) {
       setLoading(true);
       setMessages([]);
@@ -402,7 +492,7 @@ export function ProjectChat({
       },
       (err) => {
         if (!cancelled) {
-          setError(err.message);
+          setError(/insufficient permissions/i.test(err.message) ? "Could not open chat." : err.message);
           setLoading(false);
         }
       },
@@ -465,7 +555,7 @@ export function ProjectChat({
     pinBottomRef.current = true;
     memorizedRef.current = new Set();
     setMemorizedIds(new Set());
-  }, [project.id]);
+  }, [project.id, chatThreadId]);
 
   function markMemorized(id: string) {
     if (!id || memorizedRef.current.has(id)) return;
@@ -485,12 +575,16 @@ export function ProjectChat({
   useEffect(() => {
     const node = composerBoxRef.current;
     if (!node) return;
-    const sync = () => setComposerH(node.offsetHeight);
+    const sync = () => {
+      const height = node.offsetHeight;
+      setComposerH(height);
+      onComposerHeightChange?.(height);
+    };
     sync();
     const observer = new ResizeObserver(sync);
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [onComposerHeightChange]);
 
   function keepComposerFocus() {
     composerRef.current?.focus();
@@ -514,10 +608,22 @@ export function ProjectChat({
     if (!scroller) return;
     const onScroll = () => {
       pinBottomRef.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 72;
+      if (scroller.scrollTop < 80 && onLoadOlder && !loadingOlder) {
+        setLoadingOlder(true);
+        const height = scroller.scrollHeight;
+        void onLoadOlder().then((older) => {
+          if (!older.length) return;
+          setMessages((current) => mergeOpeningMessages(current, [...older, ...current], artifactStepsRef.current));
+          requestAnimationFrame(() => {
+            const node = scrollerRef.current;
+            if (node) node.scrollTop += node.scrollHeight - height;
+          });
+        }).catch(() => undefined).finally(() => setLoadingOlder(false));
+      }
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => scroller.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [loadingOlder, onLoadOlder]);
 
   useLayoutEffect(() => {
     if (loading) return;
@@ -530,39 +636,54 @@ export function ProjectChat({
     if ((sending || stream) && pinBottomRef.current) stickToBottom();
   }, [loading, messages, stream, sending, composerH, stickToBottom]);
 
+  useLayoutEffect(() => {
+    if (chatLayoutWidth == null || !pinBottomRef.current) return;
+    stickToBottom();
+  }, [chatLayoutWidth, stickToBottom]);
+
   useEffect(() => {
     if (loading || namedRef.current) return;
-    if (!needsAutoTitle(project.title)) {
+    const listed = project.listed === true;
+    const currentTitle = listed ? (threadTitle || PLACEHOLDER_CHAT_TITLE) : project.title;
+    if (!needsAutoTitle(currentTitle)) {
       namedRef.current = true;
       return;
     }
     const firstUser = messages.find((item) => item.role === "user" && isRealUserPrompt(item.content));
     if (!firstUser) return;
     namedRef.current = true;
-    void autoNameProject({
+    void autoNameChat({
       projectId: project.id,
+      threadId: chatThreadId,
       userId,
       prompt: firstUser.content,
-      currentTitle: project.title,
+      currentTitle,
+      listedProject: listed,
     })
       .then((title) => {
-        if (title) onProjectPatch?.({ title });
+        if (title && !listed) onProjectPatch?.({ title });
       })
       .catch(() => {
         namedRef.current = false;
       });
-  }, [loading, messages, project.id, project.title, userId, onProjectPatch]);
+  }, [loading, messages, project.id, project.title, project.listed, userId, onProjectPatch, chatThreadId, threadTitle]);
 
   useEffect(() => {
+    const startKey = publicChatId(project.id, chatThreadId);
     const key = `${project.id}:${chatThreadId}`;
     if (bootstrappedStarts.has(key) || bootstrapped.current) return;
-    if (!isMainThread) return;
-    const pending = peekOpeningPending(project.id) ?? takePendingStart(project.id);
-    const ingest = takeProjectStartIngest(project.id);
+    const pending =
+      (isMainThread ? peekOpeningPending(project.id) : null) ??
+      peekPendingStart(startKey) ??
+      (isMainThread ? peekPendingStart(project.id) : null);
+    const ingest = takeProjectStartIngest(startKey) ?? (isMainThread ? takeProjectStartIngest(project.id) : null);
     if (!pending && !ingest) return;
     bootstrapped.current = true;
     bootstrappedStarts.add(key);
-    if (pending) takePendingStart(project.id);
+    if (pending) {
+      takePendingStart(startKey);
+      if (isMainThread) takePendingStart(project.id);
+    }
     void (async () => {
       try {
         await waitForOpeningProject(project.id);
@@ -578,8 +699,16 @@ export function ProjectChat({
   }, [project.id, isMainThread, chatThreadId]);
 
   async function addChip(start: ComposerChip, work: () => Promise<string>) {
-    setChips((current) => [...current, start]);
+    setChips((current) =>
+      current.some((chip) => chip.id === start.id)
+        ? patchComposerChip(current, start.id, { ...start, status: "uploading", error: undefined })
+        : [...current, start],
+    );
     setError(null);
+    retryRef.current = () => {
+      void addChip(start, work);
+    };
+    setCanRetry(true);
     try {
       const materialId = await work();
       const latest = await listMaterials(project.id);
@@ -591,12 +720,15 @@ export function ProjectChat({
             : chip,
         ),
       );
+      retryRef.current = null;
+      setCanRetry(false);
     } catch (err) {
       const message = err instanceof Error && err.message.trim() ? err.message : "Upload failed.";
-      setError(message);
-      setChips((current) =>
-        current.map((chip) => (chip.id === start.id ? { ...chip, status: "error" } : chip)),
-      );
+      setChips((current) => patchComposerChip(current, start.id, { status: "error", error: message }));
+    } finally {
+      setChips((current) => current.some((chip) => chip.id === start.id && chip.status === "uploading")
+        ? patchComposerChip(current, start.id, { status: "error", error: "Upload failed." })
+        : current);
     }
   }
 
@@ -668,7 +800,7 @@ export function ProjectChat({
   async function streamChat(input: {
     prompt: string;
     history: ChatTurn[];
-    materialExcerpts: { id: string; name: string; excerpt: string }[];
+    materialIds: string[];
     figures?: { name: string; page: number; path: string; mime: string; data: string }[];
     confirmed?: boolean;
     acceptedTool?: AcceptedChatTool;
@@ -679,7 +811,7 @@ export function ProjectChat({
     examAsk?: boolean;
     onFirstToken?: () => void;
     signal?: AbortSignal;
-  }): Promise<{ text: string; tool: ChatToolCall; memory: Promise<boolean>; aborted?: boolean }> {
+  }): Promise<{ text: string; tool: ChatToolCall; memory: Promise<boolean>; sources: NonNullable<ChatMessage["sources"]>; aborted?: boolean }> {
     const facts = artifactFacts(messages);
     const latest = latestArtifact(messages);
     const active = resolveActive();
@@ -700,6 +832,9 @@ export function ProjectChat({
           memories,
           personalization,
           history: input.history,
+          projectId: project.id,
+          projectMemory: project.projectMemory,
+          onProjectMemory: (lines) => onProjectPatch?.({ projectMemory: lines }),
         });
     void memory.then((saved) => {
       if (!saved || !turnId) return;
@@ -722,14 +857,17 @@ export function ProjectChat({
       body: JSON.stringify({
         prompt: input.prompt,
         mode: chatModeRef.current,
-        provider: model,
+        provider: "gemini",
+        model,
         history: input.history,
         context: {
           projectId: project.id,
           projectTitle: project.title,
           projectDescription: project.description,
+          projectMemory: project.projectMemory,
           goal: sessionGoalRef.current ?? DEFAULT_PROJECT_GOAL,
-          materials: input.materialExcerpts,
+          materialIds: input.materialIds,
+          materials: [],
           figures: input.figures,
           knowledgeItems: [],
           memories,
@@ -737,7 +875,7 @@ export function ProjectChat({
           artifacts: facts,
           latestArtifact: latest,
           activeArtifact: activeContext(active),
-          hasMaterials: poolFrom().length > 0 || input.materialExcerpts.length > 0,
+          hasMaterials: poolFrom().length > 0,
           confirmed: input.confirmed,
           acceptedTool: input.acceptedTool,
           priorClarify: pending.priorClarify,
@@ -749,11 +887,13 @@ export function ProjectChat({
           path: pathForModel,
           hintAsk: input.hintAsk,
           examAsk: input.examAsk,
+          threadPaper: papersInTurns(messages).length > 0,
         },
       }),
     });
 
     let tool: ChatToolCall = { name: "answer", args: {} };
+    let sources: NonNullable<ChatMessage["sources"]> = [];
     const chunks = createChunkBuffer((text) => {
       if (!toolStreamsText(tool.name)) return;
       startTransition(() => {
@@ -770,6 +910,10 @@ export function ProjectChat({
           input.onFirstToken?.();
           chunks.push(delta);
         },
+        onSources: (list) => {
+          sources = list;
+          setStream((current) => (current ? { ...current, sources: list } : current));
+        },
         onTool: (next) => {
           input.onFirstToken?.();
           tool = next;
@@ -783,13 +927,14 @@ export function ProjectChat({
           }
         },
       });
+      await chunks.drain();
       const full = chunks.finish();
       tool = result.tool ?? tool;
       const text = full.trim() || tool.args.question || "";
       if (toolStreamsText(tool.name) && !text && tool.name !== "search_images" && !chunks.raw.trim()) {
         throw new Error("The model returned an empty reply.");
       }
-      return { text, tool, memory };
+      return { text, tool, memory, sources };
     } catch (err) {
       const partial = chunks.finish();
       if (
@@ -797,25 +942,24 @@ export function ProjectChat({
         (err instanceof DOMException && err.name === "AbortError") ||
         (err instanceof Error && err.name === "AbortError")
       ) {
-        return { text: partial, tool, memory, aborted: true };
+        return { text: partial, tool, memory, sources, aborted: true };
       }
       throw err;
     }
   }
 
   function poolFrom(override?: Material[]) {
-    const source = override ?? materials;
-    return selectedIds.length > 0 ? source.filter((item) => selectedIds.includes(item.id)) : source;
+    return override ?? materials;
   }
 
   async function materialsForTurn(attachments: ChatAttachment[], override?: Material[]): Promise<Material[]> {
     const attachedIds = attachments.flatMap((item) => (item.materialId ? [item.materialId] : []));
     let source = override ?? materials;
-    if (attachedIds.some((id) => !source.some((item) => item.id === id))) {
+    const missingAttached = attachedIds.some((id) => !source.some((item) => item.id === id));
+    if (missingAttached || source.length === 0) {
       source = await listMaterials(project.id);
     }
-    if (selectedIds.length === 0) return source;
-    return source.filter((item) => selectedIds.includes(item.id) || attachedIds.includes(item.id));
+    return source;
   }
 
   function applyInferredGoal(text: string) {
@@ -904,6 +1048,7 @@ export function ProjectChat({
     let previewIds = guest ? [] : (options?.waitForPreview ?? []).filter(Boolean);
     const analysing = Boolean(ingest) || previewIds.length > 0;
     const assistantId = allocateChatMessageId(project.id, chatThreadId);
+    const firstReply = !options?.skipUser && !messages.some((item) => item.role === "assistant");
 
     sendingRef.current = true;
     const controller = new AbortController();
@@ -911,22 +1056,23 @@ export function ProjectChat({
     setSending(true);
     setStoppable(true);
     setError(null);
+    retryRef.current = () => {
+      void sendPrompt(prompt, options);
+    };
+    setCanRetry(true);
     setSuggest(null);
+    setSuggestedFollowups(null);
     setFollowup(null);
     setStream({
       id: assistantId,
       content: "",
       intent: "ask",
       status: options?.leadPath
-        ? promptIsKa(modelPrompt)
-          ? "ვასწავლი…"
-          : "Teaching…"
+        ? "Teaching…"
         : options?.examAsk
           ? thinkingStatus(promptIsKa(modelPrompt))
           : options?.hintAsk
-            ? promptIsKa(modelPrompt)
-              ? "მინიშნება…"
-              : "Hint…"
+            ? "Hint…"
             : analysing
               ? analysingStatus([
                   ...attachments,
@@ -956,7 +1102,6 @@ export function ProjectChat({
           attachments,
           threadId: chatThreadId,
         });
-        trackEvent({ userId, projectId: project.id, type: "chat_message_sent" });
         setChips((current) => {
           for (const chip of current) {
             if (chip.previewUrl) URL.revokeObjectURL(chip.previewUrl);
@@ -999,8 +1144,9 @@ export function ProjectChat({
 
       const startedAt = performance.now();
       const mappingPath = options?.acceptedTool === "create_path" || wantsPath(modelPrompt);
-      const materialExcerpts = pool.length > 0 ? excerptsForChat(modelPrompt, pool) : [];
-      const excerptChars = materialExcerpts.reduce((sum, item) => sum + item.excerpt.length, 0);
+      // Passages come from the server-side index. Only the selection travels with the request.
+      const attachedIds = attachments.flatMap((item) => (item.materialId ? [item.materialId] : []));
+      const sourceIds = selectedIds.length > 0 ? [...new Set([...selectedIds, ...attachedIds])] : [];
       const attachFigures = !mappingPath && shouldAttachChatFigures(modelPrompt, pool, attachments);
       const picked = attachFigures
         ? await pickChatFigures(modelPrompt, pool, attachments)
@@ -1018,7 +1164,7 @@ export function ProjectChat({
       const streamed = await streamChat({
         prompt: modelPrompt,
         history,
-        materialExcerpts,
+        materialIds: sourceIds,
         figures,
         confirmed: options?.confirmed,
         acceptedTool: guest ? undefined : options?.acceptedTool,
@@ -1115,7 +1261,6 @@ export function ProjectChat({
         return attach ? [attach] : [];
       });
       console.info("[chat-send]", {
-        excerptChars,
         imageAttaches,
         fileGets,
         msUntilFirstToken,
@@ -1130,10 +1275,9 @@ export function ProjectChat({
               images: dispatched.images,
               options: dispatched.options,
               promptAsk,
+              blocks: dispatched.blocks,
               status: artifact
-                ? promptIsKa(modelPrompt)
-                  ? "მზადაა"
-                  : "Done"
+                ? "Done"
                 : undefined,
             }
           : current,
@@ -1152,6 +1296,8 @@ export function ProjectChat({
         pendingKind: dispatched.pendingKind,
         images: dispatched.images,
         promptAsk,
+        blocks: dispatched.blocks,
+        sources: toolStreamsText(tool.name) ? usedSources(content, streamed.sources) : undefined,
         memorized: memorizedRef.current.has(assistantId) || undefined,
         threadId: chatThreadId,
       });
@@ -1160,7 +1306,6 @@ export function ProjectChat({
         markMemorized(id);
         void patchChatMessage(project.id, id, { memorized: true }, chatThreadId).catch(() => undefined);
       });
-      void incrementUsage(userId, "chatTurns");
       if (guest) {
         recordGuestAssistantTurn();
         if (guestCapReached()) setNeedGoogle(true);
@@ -1180,6 +1325,19 @@ export function ProjectChat({
       if (dispatched.suggest && !guest && chatModeRef.current !== "fast" && !isSimpleChatTask(modelPrompt)) {
         setSuggest({ messageId: id, kind: dispatched.suggest });
       }
+      const responseFollowups =
+        streamed.tool.name === "answer" && !promptAsk && !artifact && !dispatched.suggest
+          ? (streamed.tool.args.options ?? [])
+              .map((item) => item.trim())
+              .filter(Boolean)
+              .slice(0, 2)
+          : [];
+      const prompts = responseFollowups.length > 0
+        ? responseFollowups
+        : firstReply
+          ? ["How can I help you today?", "What topics interest you?"]
+          : [];
+      if (prompts.length > 0) setSuggestedFollowups({ messageId: id, prompts });
       if (!guest && dispatched.artifact?.kind === "sheet") {
         setFollowup({ kind: "sheet", ka: promptIsKa(modelPrompt), since: Date.now() });
       }
@@ -1190,8 +1348,10 @@ export function ProjectChat({
       }
       settleWorked(assistantId);
       setStream(null);
+      retryRef.current = null;
+      setCanRetry(false);
       if (dispatched.openThreadId && dispatched.openThreadId !== chatThreadId) {
-        router.push(`/project/${project.id}/${dispatched.openThreadId}`);
+        router.push(chatPath(dispatched.openThreadId));
       } else if (dispatched.leadTopic && !options?.leadPath && !guest) {
         followTopic = dispatched.leadTopic;
         followTeach = dispatched.leadTeach;
@@ -1215,13 +1375,24 @@ export function ProjectChat({
             memorized: memorizedRef.current.has(assistantId) || undefined,
             threadId: chatThreadId,
           }).catch(() => undefined);
+          setStoppedIds((current) => {
+            if (current.has(assistantId)) return current;
+            const next = new Set(current);
+            next.add(assistantId);
+            return next;
+          });
         }
+        setSuggestedFollowups(null);
         setError(null);
+        retryRef.current = null;
+        setCanRetry(false);
         onNotesLive?.(null);
         onPathLive?.(null);
       } else if (err instanceof GuestCapError) {
         setNeedGoogle(true);
         setError(null);
+        retryRef.current = null;
+        setCanRetry(false);
       } else {
         setError(err instanceof Error ? err.message : "Could not send message.");
         onNotesLive?.(null);
@@ -1377,6 +1548,22 @@ export function ProjectChat({
   }
 
   useEffect(() => {
+    if (!studioRequest || guest || sending || loading) return;
+    onStudioRequestHandled?.(studioRequest.id);
+    void sendPrompt(studioRequest.prompt, {
+      ...(studioRequest.tool
+        ? { acceptedTool: studioRequest.tool, openWhenReady: studioRequest.tool === "create_sheet" }
+        : {}),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studioRequest, sending, loading]);
+
+  useEffect(() => {
+    onBusyChange?.(sending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sending]);
+
+  useEffect(() => {
     if (!finishedSet) return;
     const key = `${finishedSet.setId}:${finishedSet.mode}:${finishedSet.correct}/${finishedSet.total}`;
     if (finishedKeyRef.current === key) return;
@@ -1397,6 +1584,27 @@ export function ProjectChat({
     [...messages].reverse().find((item) => item.role === "user")?.content ?? nowTitle,
   );
 
+  const uploadingChip = chips.find((chip) => chip.status === "uploading" || chip.status === "reading");
+  const generateKind =
+    sending && (stream?.intent === "study" || stream?.intent === "rewrite_sheet")
+      ? "notes"
+      : sending && stream?.intent === "practice"
+        ? "practice"
+        : sending && stream?.intent === "plan"
+          ? "path"
+          : null;
+  const composerStatus: ComposerStatusState | null = uploadingChip
+    ? {
+        text: uploadStatusText(
+          uploadingChip.title,
+          uploadingChip.type === "url" ? "url" : "file",
+          threadKa,
+        ),
+      }
+    : generateKind
+      ? { text: generateStatusText(generateKind, threadKa) }
+      : null;
+
   useLayoutEffect(() => {
     if (loading || sending || stream) return;
     const examId = latestAsk?.messageId;
@@ -1405,21 +1613,49 @@ export function ProjectChat({
     stickToBottom();
   }, [loading, sending, stream, latestAsk?.messageId, stickToBottom]);
 
+  async function sendDislike(message: ChatMessage, reason: string, note: string) {
+    if (feedbackBusy) return;
+    setFeedbackBusy(true);
+    try {
+      await submitAssistantDislike({
+        projectId: project.id,
+        messageId: message.id,
+        reason,
+        note,
+      });
+      setTurnReaction((current) => ({ ...current, [message.id]: "dislike" }));
+      setDislikeOpen(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send feedback.");
+    } finally {
+      setFeedbackBusy(false);
+    }
+  }
+
   function assistantInner(message: ChatMessage, prev: ChatMessage | undefined, index: number, live: StreamState | null) {
     const content = stripArtifactMarkup(live ? live.content : message.content);
     const artifact = live?.artifact ?? message.artifact;
     const images = live?.images ?? message.images;
     const options = live?.options ?? message.options;
     const promptAsk = live?.promptAsk ?? message.promptAsk;
+    const blocks = live?.blocks ?? message.blocks;
+    const turnSources = live?.sources ?? message.sources;
     const streaming = Boolean(live && !artifact && content && !messages.some((item) => item.id === live.id));
+    const exerciseOpen = exerciseStillOpen(messages, index, stream?.id, sending);
+    const priorPapers = papersBefore(messages, index);
     const split = splitTeachingExam(content, promptAsk?.question);
     const taught = split.taught;
     const examText = split.exam;
-    const view: ChatMessage = { ...message, content: taught, artifact, images, options, promptAsk };
-    const sources = sourcesForTurn(view);
+    const visibleCopyText = [taught, examText, !taught && !examText ? promptAsk?.question : ""]
+      .map((item) => item?.trim() ?? "")
+      .filter(Boolean)
+      .join("\n\n");
+    const view: ChatMessage = { ...message, content: taught, artifact, images, options, promptAsk, blocks };
+    const citedSources = turnSources?.length ? usedSources(content, turnSources) : [];
     const ka = promptIsKa(prev?.role === "user" ? prev.content : "") || threadKa;
     const orientKa = ka || promptIsKa(taught);
     const showOrient = Boolean(nowTitle && taught && !artifact && message.id === teachId);
+    const stopped = stoppedIds.has(message.id);
 
     const showRetry = Boolean(images && images.length === 0 && !sending);
     const showClarify =
@@ -1433,6 +1669,9 @@ export function ProjectChat({
       !sending &&
       chatMode !== "fast";
     const memorized = Boolean(live?.memorized || message.memorized || memorizedIds.has(message.id));
+    const likeActive = turnReaction[message.id] === "like";
+    const dislikeActive = turnReaction[message.id] === "dislike";
+    const dislikeHighlighted = dislikeActive || dislikeOpen === message.id;
     const latestAssistant = [...messages].reverse().find((item) => item.role === "assistant");
     const waiting =
       Boolean(followup) &&
@@ -1443,23 +1682,26 @@ export function ProjectChat({
         (followup?.kind === "practice" && artifact?.kind === "practice"));
     const waitLabel =
       followup?.kind === "practice"
-        ? followup.ka
-          ? "გაიარე…"
-          : "Have a look…"
-        : followup?.ka
-          ? "გადახედე…"
-          : "Looking this over…";
+        ? "Have a look…"
+        : "Looking this over…";
 
     return (
+      <ChatExerciseProvider priorPapers={priorPapers} interactive={exerciseOpen}>
       <div className="flex w-full flex-col">
-        <div className="flex flex-col gap-2">
-          {memorized ? <MemorizedMark onOpen={() => openSettings("memory")} /> : null}
-          {live?.status ? (
-            <StatusWait label={live.status} />
-          ) : waiting ? (
-            <StatusWait label={waitLabel} since={followup?.since} timer />
-          ) : workedMs[message.id] != null ? (
-            <StatusWait label={formatWorked(workedMs[message.id], ka)} settled />
+        <div className="flex flex-col gap-4">
+          {memorized || live?.status || waiting || stopped || workedMs[message.id] != null ? (
+            <div className="flex flex-col gap-2">
+              {memorized ? <MemorizedMark onOpen={() => openSettings("memory")} /> : null}
+              {live?.status ? (
+                <StatusWait label={live.status} />
+              ) : waiting ? (
+                <StatusWait label={waitLabel} since={followup?.since} timer />
+              ) : stopped ? (
+                <StatusWait label="Stopped" settled />
+              ) : workedMs[message.id] != null ? (
+                <StatusWait label={formatWorked(workedMs[message.id], ka)} settled savedStep={message.artifact?.step ?? artifactStepsRef.current.get(message.id)} />
+              ) : null}
+            </div>
           ) : null}
           {artifact ? (
             <>
@@ -1487,15 +1729,18 @@ export function ProjectChat({
               )}
             </>
           ) : taught ? (
-            <>
+            <div className="flex flex-col gap-2">
               {showOrient ? (
                 <p className="text-[13px] text-muted">
-                  {orientKa ? "ახლა განვიხილავთ" : "Now looking at"}
+                  Now looking at
                   {nowTitle ? ` · ${nowTitle}` : ""}
                 </p>
               ) : null}
-              <RichContent text={taught} streaming={streaming} />
-            </>
+              <CitationProvider sources={turnSources} onOpen={onOpenMaterial}>
+                <RichContent text={taught} streaming={streaming} />
+              </CitationProvider>
+              <IllustrationBlocks blocks={blocks} />
+            </div>
           ) : null}
           {promptAsk?.question && !waiting && !taught ? (
             <ExamCard question={promptAsk.question} ka={orientKa} />
@@ -1506,13 +1751,13 @@ export function ProjectChat({
             <ImageGallery
               images={images}
               ka={ka}
-              moreLabel={ka ? "მეტი" : "More"}
+              moreLabel="More"
               onOpenUpload={(image) => {
                 if (image.materialId) onOpenMaterial?.(image.materialId);
               }}
             />
           ) : null}
-          {sources.length ? <SourcesChip items={sources} /> : null}
+          {citedSources.length && !streaming ? <CitedSources sources={citedSources} onOpen={onOpenMaterial} /> : null}
           {showRetry ? (
             <button
               type="button"
@@ -1545,13 +1790,7 @@ export function ProjectChat({
                   onClick={() => void confirmSuggestion(suggest.kind === "exam" ? "exam" : "practice")}
                   className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
                 >
-                  {suggest.kind === "exam"
-                    ? ka
-                      ? "გამოცდა"
-                      : "Take exam"
-                    : ka
-                      ? "ვარჯიში"
-                      : "Practice this"}
+                  {suggest.kind === "exam" ? "Take exam" : "Practice this"}
                 </button>
               ) : suggest.kind === "path" ? (
                 <button
@@ -1559,7 +1798,7 @@ export function ProjectChat({
                   onClick={() => void confirmSuggestion("path")}
                   className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
                 >
-                  {ka ? "გეგმა" : "Make a plan"}
+                  Make a plan
                 </button>
               ) : (
                 <button
@@ -1567,7 +1806,7 @@ export function ProjectChat({
                   onClick={() => void confirmSuggestion("sheet")}
                   className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
                 >
-                  {ka ? "კონსპექტი" : "Make notes"}
+                  Make notes
                 </button>
               )}
             </div>
@@ -1578,14 +1817,10 @@ export function ProjectChat({
               followup={Boolean(followup)}
               pathStart={Boolean(isMainThread && path && !pathIsStarted(path))}
               teaching={teachingHere}
-              hintLabel={threadKa || promptIsKa(latestAsk?.question ?? "") ? "მინიშნება" : "Hint"}
+              hintLabel="Hint"
               askQuestion={Boolean(latestAsk?.question)}
               options={latestAsk?.options ?? []}
               onAction={(id) => {
-                if (id === "new-chat") {
-                  router.push("/new");
-                  return;
-                }
                 if (id === "continue") {
                   if (followup) {
                     void continueFollowup();
@@ -1607,9 +1842,93 @@ export function ProjectChat({
               }}
             />
           ) : null}
+          {!live && !sending && latestAssistant?.id === message.id && suggestedFollowups?.messageId === message.id ? (
+            <SuggestedFollowups
+              prompts={suggestedFollowups.prompts}
+              onPick={(prompt) => {
+                setSuggestedFollowups(null);
+                keepComposerFocus();
+                void sendPrompt(prompt).finally(keepComposerFocus);
+              }}
+            />
+          ) : null}
+          {!live ? (
+            <div className="relative -mt-2 flex items-center gap-0.5">
+              <button
+                type="button"
+                aria-label="Copy response"
+                title="Copy"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await navigator.clipboard.writeText(visibleCopyText);
+                      setCopiedMessageId(message.id);
+                      window.setTimeout(() => setCopiedMessageId((current) => current === message.id ? null : current), 1200);
+                    } catch {
+                      setError("Could not copy response.");
+                    }
+                  })();
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <UiIcon name="copy" size={16} />
+              </button>
+              {copiedMessageId === message.id ? <span role="status" className="px-1 text-[12px] text-muted">Copied</span> : null}
+              <button
+                type="button"
+                aria-label="Like"
+                aria-pressed={turnReaction[message.id] === "like"}
+                disabled={turnReaction[message.id] === "dislike"}
+                onClick={() => {
+                  setDislikeOpen(null);
+                  setTurnReaction((current) => ({ ...current, [message.id]: "like" }));
+                }}
+                className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-surface-2 hover:text-foreground disabled:cursor-default disabled:opacity-50 ${turnReaction[message.id] === "like" ? "text-foreground" : "text-muted"}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-4 w-4"
+                  style={{
+                    backgroundColor: likeActive ? "var(--accent)" : "var(--text-muted)",
+                    mask: `url("${likeActive ? "/icons/like-filled.svg" : "/icons/like.svg"}") center / contain no-repeat`,
+                    WebkitMask: `url("${likeActive ? "/icons/like-filled.svg" : "/icons/like.svg"}") center / contain no-repeat`,
+                    opacity: likeActive ? 1 : 0.58,
+                  }}
+                />
+              </button>
+              <button
+                type="button"
+                aria-label="Dislike"
+                aria-pressed={turnReaction[message.id] === "dislike"}
+                onClick={() => {
+                  setDislikeOpen((current) => current === message.id ? null : message.id);
+                }}
+                className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-surface-2 hover:text-foreground ${turnReaction[message.id] === "dislike" ? "text-foreground" : "text-muted"}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-4 w-4"
+                  style={{
+                    backgroundColor: dislikeHighlighted ? "var(--accent)" : "var(--text-muted)",
+                    mask: `url("${dislikeHighlighted ? "/icons/deslike-filled.svg" : "/icons/deslike.svg"}") center / contain no-repeat`,
+                    WebkitMask: `url("${dislikeHighlighted ? "/icons/deslike-filled.svg" : "/icons/deslike.svg"}") center / contain no-repeat`,
+                    opacity: dislikeHighlighted ? 1 : 0.58,
+                  }}
+                />
+              </button>
+              {dislikeOpen === message.id ? (
+                <ReportContentModal
+                  snippet={visibleCopyText}
+                  busy={feedbackBusy}
+                  onClose={() => setDislikeOpen(null)}
+                  onSubmit={(reason, note) => sendDislike(message, reason, note)}
+                />
+              ) : null}
+            </div>
+          ) : null}
         </div>
-        <div className="message-actions" />
       </div>
+      </ChatExerciseProvider>
     );
   }
 
@@ -1666,16 +1985,11 @@ export function ProjectChat({
         ref={scrollerRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
-        <div className="mx-auto w-full max-w-3xl px-6">
-          <div className="chat-thread flex flex-col pt-3" style={{ paddingBottom: composerH }}>
+        <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
+          <div className="chat-thread flex flex-col pt-8 max-md:pt-6" style={{ paddingBottom: composerH }}>
             {loading && messages.length === 0 && !stream && !sending && (
               <p className="text-sm text-muted">Loading chat…</p>
             )}
-            {emptyThread ? (
-              <p className="pb-2 text-sm text-muted">
-                {guest ? "Ask anything." : "Ask anything. Attach a file if you want."}
-              </p>
-            ) : null}
             {messages.map((message, index) => {
               const prev = messages[index - 1];
               const live = stream && message.id === stream.id ? stream : null;
@@ -1688,13 +2002,20 @@ export function ProjectChat({
               >
                 {message.role === "user" ? (
                   <div className="flex w-fit max-w-[min(100%,36rem)] flex-col items-end gap-2">
-                    <MessageAttachments items={message.attachments} />
+                    <MessageAttachments items={message.attachments} onOpenMaterial={onOpenMaterial} />
                     {message.content.trim() ? (
-                      <div className="chat-body rounded-2xl bg-surface-2 px-4 py-3 text-foreground">
+                      <button
+                        type="button"
+                        aria-expanded={expandedUserMessages[message.id] === true}
+                        onClick={() => setExpandedUserMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}
+                        className={`chat-body rounded-2xl bg-surface-2 px-4 py-2.5 text-left text-foreground ${
+                          message.content.length > 280 && !expandedUserMessages[message.id] ? "chat-prompt-collapsed" : ""
+                        }`}
+                      >
                         <p className="whitespace-pre-wrap">
                           <LinkifiedText text={message.content} />
                         </p>
-                      </div>
+                      </button>
                     ) : null}
                   </div>
                 ) : (
@@ -1729,6 +2050,7 @@ export function ProjectChat({
                     images: stream.images,
                     createdAt: null,
                     promptAsk: stream.promptAsk,
+                    blocks: stream.blocks,
                   },
                   messages[messages.length - 1],
                   messages.length,
@@ -1742,9 +2064,23 @@ export function ProjectChat({
         </div>
       </div>
 
+      {emptyThread ? (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-[1] flex items-center justify-center px-5"
+          style={{ bottom: composerH }}
+        >
+          <h1 className="text-center text-[32px] font-medium leading-[1.2] tracking-tight text-foreground max-sm:text-[26px]">
+            <span className="sr-only">What should we learn?</span>
+            <span aria-hidden="true" className="whitespace-nowrap">
+              What should we <HeadlineVerb />?
+            </span>
+          </h1>
+        </div>
+      ) : null}
+
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-        <div className="pointer-events-auto mx-auto w-full max-w-3xl bg-gradient-to-t from-surface from-[28px] via-surface/95 to-transparent pt-8">
-          <div ref={composerBoxRef}>
+        <div ref={composerBoxRef} className="pointer-events-auto mx-auto w-full max-w-3xl bg-gradient-to-t from-background from-[28px] via-background/95 to-transparent px-8 pt-10 max-md:px-4">
+          <div>
             <ChatComposer
               ref={composerRef}
               draft={draft}
@@ -1752,9 +2088,19 @@ export function ProjectChat({
               sending={sending}
               locked={composerLocked}
               error={needGoogle ? null : error}
+              status={needGoogle ? null : composerStatus}
+              onRetry={
+                canRetry
+                  ? () => {
+                      retryRef.current?.();
+                    }
+                  : undefined
+              }
               chips={guest ? [] : chips}
               allowAttach={!guest}
-              placeholder={!sending && latestAsk?.question ? (threadKa || promptIsKa(latestAsk.question) ? "პასუხი" : "Your answer") : undefined}
+              placeholder={!sending && latestAsk?.question ? "Your answer" : undefined}
+              pad={false}
+              className="composer-pad"
               onRemoveChip={(id) => {
                 const chip = chips.find((item) => item.id === id);
                 setChips((current) => current.filter((item) => item.id !== id));

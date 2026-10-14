@@ -1,16 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useShell, type SettingsSection } from "@/components/workspace/shell-context";
 import { ThemePicker } from "@/components/workspace/theme-picker";
 import { ParametersPanel } from "@/components/workspace/parameters-panel";
-import { BillingCard } from "@/components/account/billing-card";
-import { UsageMeters } from "@/components/account/usage-meters";
+import { PlanUsage } from "@/components/account/plan-usage";
 import { AccountDataControls } from "@/components/account/data-controls";
 import { MemoriesPanel } from "@/components/account/memories-panel";
 import { useUserProfile } from "@/components/account/use-user-profile";
-import { emptyUsage } from "@/lib/account/plan";
 import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
 
 const NAV: { id: SettingsSection; label: string; group: string; icon: UiIconName }[] = [
@@ -18,8 +15,7 @@ const NAV: { id: SettingsSection; label: string; group: string; icon: UiIconName
   { id: "appearance", label: "Appearance", group: "General", icon: "appearance" },
   { id: "parameters", label: "Parameters", group: "General", icon: "sliders" },
   { id: "help", label: "Help", group: "TobyVerse", icon: "help" },
-  { id: "billing", label: "Billing", group: "Payments", icon: "billing" },
-  { id: "usage", label: "Usage", group: "Payments", icon: "usage" },
+  { id: "planUsage", label: "Plan & usage", group: "Payments", icon: "usage" },
   { id: "memory", label: "Memory", group: "Data & Information", icon: "brain" },
   { id: "data", label: "Data", group: "Data & Information", icon: "data" },
 ];
@@ -27,7 +23,6 @@ const NAV: { id: SettingsSection; label: string; group: string; icon: UiIconName
 const GROUPS = ["General", "TobyVerse", "Payments", "Data & Information"];
 
 export function SettingsModal() {
-  const router = useRouter();
   const { settingsOpen, settingsSection, openSettings, closeSettings } = useShell();
   const { profile } = useUserProfile();
 
@@ -44,8 +39,7 @@ export function SettingsModal() {
 
   function onNav(id: SettingsSection) {
     if (id === "account") {
-      closeSettings();
-      router.push("/account");
+      window.open("/account", "_blank", "noopener,noreferrer");
       return;
     }
     openSettings(id);
@@ -65,15 +59,15 @@ export function SettingsModal() {
             <div key={group} className="mb-4">
               <p className="px-2.5 pb-1.5 text-[11px] text-muted">{group}</p>
               {NAV.filter((item) => item.group === group).map((item) => {
-                const active = settingsSection === item.id;
-                return (
-                  <button
+                  const active = item.id !== "account" && settingsSection === item.id;
+                  return (
+                    <button
                     key={item.id}
                     type="button"
                     onClick={() => onNav(item.id)}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] ${
-                      active ? "bg-surface-2 text-foreground" : "text-foreground/90 hover:bg-surface-2/70"
-                    }`}
+                    aria-current={active ? "page" : undefined}
+                    data-active={active}
+                    className={`settings-section-item flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] ${active ? "text-foreground" : "text-foreground/90"}`}
                   >
                     <span className="accent-symbol">
                       <UiIcon name={item.icon} size={18} />
@@ -103,8 +97,7 @@ export function SettingsModal() {
               <button
                 type="button"
                 onClick={() => {
-                  closeSettings();
-                  router.push("/account");
+                  window.open("/account", "_blank", "noopener,noreferrer");
                 }}
                 className="mt-6 rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background"
               >
@@ -139,21 +132,10 @@ export function SettingsModal() {
             </div>
           )}
 
-          {settingsSection === "billing" && (
+          {settingsSection === "planUsage" && (
             <div>
-              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Billing</h2>
-              <div className="mt-8 max-w-sm">
-                <BillingCard />
-              </div>
-            </div>
-          )}
-
-          {settingsSection === "usage" && (
-            <div>
-              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Usage</h2>
-              <div className="mt-8 max-w-md">
-                <UsageMeters usage={profile?.usage ?? emptyUsage()} />
-              </div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Plan & usage</h2>
+              <div className="mt-8"><PlanUsage profile={profile} /></div>
             </div>
           )}
 

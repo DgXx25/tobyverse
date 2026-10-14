@@ -1,12 +1,20 @@
 import {
+  arrayRemove,
+  arrayUnion,
   collection,
+  deleteField,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
+  limit,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 import { asChatMode } from "@/lib/core/chat-modes";
@@ -18,8 +26,99 @@ import { parseChatArtifact, compactChatArtifact } from "@/lib/artifacts/active";
 import { getFirebaseDb } from "@/lib/firebase";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { isComposerIntent } from "@/lib/composer/intent";
-import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole, ChatThread, ChatThreadKind, PendingKind } from "@/types/chat";
+import { chatPath, nestedThreadId, publicChatId } from "@/lib/workspace/routes";
+import { parseNoteBlocks } from "@/lib/visuals/validate";
+import { collectThreadReferences } from "@/lib/sharing/thread-references";
+import type { VisualBlock } from "@/types/visual";
+import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole, ChatSourceRef, ChatThread, ChatThreadKind, PendingKind } from "@/types/chat";
 import type { ExerciseType } from "@/types/exercise";
+
+function isPermissionDenied(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  return code === "permission-denied" || code === "firestore/permission-denied" || /insufficient permissions/i.test(message);
+}
+
+async function getDocSafe(ref: Parameters<typeof getDoc>[0]) {
+  try {
+    return await getDoc(ref);
+  } catch (error) {
+    if (isPermissionDenied(error)) return null;
+    throw error;
+  }
+}
+
+function chatIndexRef(chatId: string) {
+  return doc(getFirebaseDb(), COLLECTIONS.chats, chatId);
+}
+
+function newShareId(): string {
+  if (typeof crypto === "undefined" || !crypto.getRandomValues) {
+    throw new Error("Secure sharing is unavailable in this browser.");
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+export async function setChatSharing(
+  projectId: string,
+  threadId: string | undefined,
+  enabled: boolean,
+): Promise<{ public: boolean; shareId?: string }> {
+  const ref = chatIndexRef(publicChatId(projectId, threadId ?? DEFAULT_CHAT_THREAD_ID));
+  const actualThreadId = threadId ?? DEFAULT_CHAT_THREAD_ID;
+  const indexSnapshot = await getDoc(ref);
+  const indexData = indexSnapshot.data() ?? {};
+  const messageDocs = await getDocs(messagesCollection(projectId, actualThreadId));
+  const references = collectThreadReferences(messageDocs.docs.map((message) => message.data()));
+  const priorMaterials = Array.isArray(indexData.sharedMaterialIds)
+    ? indexData.sharedMaterialIds.filter((id): id is string => typeof id === "string") : references.materialIds;
+  const priorSheets = Array.isArray(indexData.sharedSheetIds)
+    ? indexData.sharedSheetIds.filter((id): id is string => typeof id === "string") : references.sheetIds;
+  const syncMetadata = async (materialIds: string[], sheetIds: string[], shareId: string, operation: "add" | "remove") => {
+    const metadataRefs = [
+      ...materialIds.map((id) => doc(getFirebaseDb(), COLLECTIONS.projects, projectId, COLLECTIONS.materials, id)),
+      ...sheetIds.map((id) => doc(getFirebaseDb(), COLLECTIONS.projects, projectId, COLLECTIONS.studySheets, id)),
+    ];
+    const metadata = await Promise.all(metadataRefs.map((item) => getDoc(item)));
+    await Promise.all(metadata.flatMap((item, index) => item.exists()
+      ? [updateDoc(metadataRefs[index], { sharedShareIds: operation === "add" ? arrayUnion(shareId) : arrayRemove(shareId) })]
+      : []));
+  };
+  if (!enabled) {
+    const priorShareId = indexData.shareId;
+    if (typeof priorShareId === "string") {
+      await syncMetadata(priorMaterials, priorSheets, priorShareId, "remove");
+    }
+    await updateDoc(ref, {
+      public: false,
+      shareId: deleteField(),
+      sharedMaterialIds: deleteField(),
+      sharedSheetIds: deleteField(),
+    });
+    return { public: false };
+  }
+  if (references.materialIds.length > 250 || references.sheetIds.length > 250) {
+    throw new Error("This chat references too many files to share.");
+  }
+  const existingShareId = indexData.public === true && typeof indexData.shareId === "string"
+    && /^[A-Za-z0-9_-]{32,128}$/.test(indexData.shareId) ? indexData.shareId : null;
+  const shareId = existingShareId ?? newShareId();
+  if (existingShareId) {
+    const nextMaterials = new Set(references.materialIds);
+    const nextSheets = new Set(references.sheetIds);
+    await syncMetadata(priorMaterials.filter((id) => !nextMaterials.has(id)), priorSheets.filter((id) => !nextSheets.has(id)), shareId, "remove");
+  }
+  await syncMetadata(references.materialIds, references.sheetIds, shareId, "add");
+  await updateDoc(ref, {
+    public: true,
+    shareId,
+    sharedMaterialIds: references.materialIds,
+    sharedSheetIds: references.sheetIds,
+  });
+  return { public: true, shareId };
+}
 
 function chatRef(projectId: string, threadId = DEFAULT_CHAT_THREAD_ID) {
   return doc(
@@ -89,6 +188,8 @@ function mapMessage(
         ? data.pendingKind
         : undefined,
     images: asImages(data.images),
+    blocks: parseNoteBlocks(data.blocks),
+    sources: asSources(data.sources),
     memorized: data.memorized === true ? true : undefined,
     createdAt: toIsoDate(data.createdAt) ?? toIsoDate(data.createdAtClient),
   };
@@ -126,6 +227,27 @@ function asPromptAsk(value: unknown): ChatMessage["promptAsk"] {
     ? row.options.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
     : undefined;
   return { question, options: options?.length ? options : undefined };
+}
+
+function asSources(value: unknown): ChatSourceRef[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const list = value.flatMap((item): ChatSourceRef[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    if (typeof row.n !== "number" || typeof row.materialId !== "string" || !row.materialId) return [];
+    return [
+      {
+        n: row.n,
+        materialId: row.materialId,
+        title: typeof row.title === "string" ? row.title : "Source",
+        page: typeof row.page === "number" ? row.page : 0,
+        pageEnd: typeof row.pageEnd === "number" ? row.pageEnd : 0,
+        section: typeof row.section === "string" ? row.section : "",
+        snippet: typeof row.snippet === "string" ? row.snippet : "",
+      },
+    ];
+  });
+  return list.length > 0 ? list : undefined;
 }
 
 function asImages(value: unknown): ChatImageHit[] | undefined {
@@ -208,6 +330,7 @@ export async function ensureChatThread(input: {
   kind?: ChatThreadKind;
   title?: string;
   pathId?: string | null;
+  created?: boolean;
 }): Promise<void> {
   const threadId = input.threadId ?? DEFAULT_CHAT_THREAD_ID;
   const kind = input.kind ?? (threadId === DEFAULT_CHAT_THREAD_ID ? "main" : "path");
@@ -222,9 +345,167 @@ export async function ensureChatThread(input: {
       kind,
       title: input.title,
       pathId: input.pathId ?? null,
+      ...(input.created ? { createdAt: serverTimestamp() } : {}),
       updatedAt: serverTimestamp(),
     }),
     { merge: true },
+  );
+  await upsertChatIndex({
+    projectId: input.projectId,
+    threadId,
+    userId: input.userId,
+    kind,
+    title: input.title,
+    created: input.created,
+  }).catch(() => undefined);
+}
+
+async function upsertChatIndex(input: {
+  projectId: string;
+  threadId: string;
+  userId: string;
+  kind: ChatThreadKind;
+  title?: string;
+  created?: boolean;
+}): Promise<void> {
+  const chatId = publicChatId(input.projectId, input.threadId);
+  await setDoc(
+    chatIndexRef(chatId),
+    omitUndefined({
+      projectId: input.projectId,
+      nestedId: input.threadId,
+      userId: input.userId,
+      kind: input.kind,
+      title: input.title,
+      ...(input.created ? { createdAt: serverTimestamp() } : {}),
+      updatedAt: serverTimestamp(),
+    }),
+    { merge: true },
+  );
+}
+
+export function reserveChatId(projectId: string): string {
+  return doc(threadsCollection(projectId)).id;
+}
+
+export async function createChatThread(input: {
+  projectId: string;
+  userId: string;
+  mode: ChatMode;
+  title?: string;
+  kind?: ChatThreadKind;
+  pathId?: string | null;
+}): Promise<string> {
+  const threadId = reserveChatId(input.projectId);
+  await ensureChatThread({
+    ...input,
+    threadId,
+    kind: input.kind ?? "main",
+    created: true,
+  });
+  return threadId;
+}
+
+export async function updateChatTitle(
+  projectId: string,
+  threadId: string,
+  title: string,
+): Promise<void> {
+  const next = title.trim();
+  if (!next) return;
+  await setDoc(
+    chatRef(projectId, threadId),
+    { title: next, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  await setDoc(
+    chatIndexRef(publicChatId(projectId, threadId)),
+    { title: next, updatedAt: serverTimestamp() },
+    { merge: true },
+  ).catch(() => undefined);
+}
+
+export async function resolveChatRoute(
+  chatId: string,
+  userId: string,
+): Promise<{ projectId: string; threadId: string } | null> {
+  const index = await getDocSafe(chatIndexRef(chatId));
+  if (index?.exists()) {
+    const data = (index.data() ?? {}) as Record<string, unknown>;
+    if (asString(data.userId) !== userId) return null;
+    const projectId = asString(data.projectId);
+    if (!projectId) return null;
+    const nestedId = asString(data.nestedId) || nestedThreadId(projectId, chatId);
+    return { projectId, threadId: nestedId };
+  }
+  const projectSnap = await getDocSafe(doc(getFirebaseDb(), COLLECTIONS.projects, chatId));
+  if (projectSnap?.exists()) {
+    const data = (projectSnap.data() ?? {}) as Record<string, unknown>;
+    const owner = asString(data.userId) || asString(data.ownerId);
+    if (owner !== userId) return null;
+    return { projectId: chatId, threadId: DEFAULT_CHAT_THREAD_ID };
+  }
+  const owned = await getDocs(
+    query(collection(getFirebaseDb(), COLLECTIONS.projects), where("userId", "==", userId)),
+  );
+  for (const item of owned.docs) {
+    const threads = await listChatThreads(item.id);
+    const hit = threads.find((thread) => thread.id === chatId);
+    if (hit) return { projectId: item.id, threadId: hit.id };
+  }
+  return null;
+}
+
+export async function latestChatPath(projectId: string): Promise<string | null> {
+  const threads = await listChatThreads(projectId);
+  if (threads.length === 0) return null;
+  const latest = [...threads].sort((a, b) => {
+    const left = a.updatedAt ?? a.createdAt ?? "";
+    const right = b.updatedAt ?? b.createdAt ?? "";
+    return right.localeCompare(left);
+  })[0];
+  return chatPath(publicChatId(projectId, latest.id));
+}
+
+export type ChatIndexRow = {
+  id: string;
+  projectId: string;
+  nestedId: string;
+  userId: string;
+  title?: string;
+  kind?: ChatThreadKind;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+function mapIndex(id: string, data: Record<string, unknown>): ChatIndexRow {
+  const projectId = asString(data.projectId);
+  return {
+    id,
+    projectId,
+    nestedId: asString(data.nestedId) || nestedThreadId(projectId, id),
+    userId: asString(data.userId),
+    title: typeof data.title === "string" ? data.title : undefined,
+    kind: asThreadKind(data.kind),
+    createdAt: toIsoDate(data.createdAt),
+    updatedAt: toIsoDate(data.updatedAt) ?? toIsoDate(data.createdAt),
+  };
+}
+
+export function subscribeChatsForUser(
+  userId: string,
+  onChange: (chats: ChatIndexRow[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(getFirebaseDb(), COLLECTIONS.chats), where("userId", "==", userId)),
+    (snapshot) => {
+      const chats = snapshot.docs
+        .map((item) => mapIndex(item.id, item.data()))
+        .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+      onChange(chats);
+    },
+    (error) => onError?.(error),
   );
 }
 
@@ -303,6 +584,8 @@ export async function addChatMessage(input: {
   promptAsk?: ChatMessage["promptAsk"];
   pendingKind?: PendingKind;
   images?: ChatImageHit[];
+  blocks?: VisualBlock[];
+  sources?: ChatSourceRef[];
   memorized?: boolean;
 }): Promise<string> {
   const threadId = input.threadId ?? DEFAULT_CHAT_THREAD_ID;
@@ -336,6 +619,9 @@ export async function addChatMessage(input: {
       ...(input.promptAsk ? { promptAsk: input.promptAsk } : {}),
       ...(input.pendingKind ? { pendingKind: input.pendingKind } : {}),
       ...(images !== undefined ? { images } : {}),
+      ...(input.blocks?.length ? { blocks: input.blocks } : {}),
+      ...(input.sources?.length ? { sources: input.sources } : {}),
+      ...(input.sources?.length ? { sources: input.sources } : {}),
       ...(input.memorized ? { memorized: true } : {}),
     }),
   );
@@ -343,6 +629,11 @@ export async function addChatMessage(input: {
   await updateDoc(chatRef(input.projectId, threadId), {
     updatedAt: serverTimestamp(),
   }).catch(() => undefined);
+  await setDoc(
+    chatIndexRef(publicChatId(input.projectId, threadId)),
+    { updatedAt: serverTimestamp() },
+    { merge: true },
+  ).catch(() => undefined);
 
   return ref.id;
 }
@@ -387,7 +678,7 @@ export function subscribeChatMessages(
   threadId = DEFAULT_CHAT_THREAD_ID,
 ): Unsubscribe {
   return onSnapshot(
-    messagesCollection(projectId, threadId),
+    query(messagesCollection(projectId, threadId), orderBy("createdAt", "desc"), limit(40)),
     (snapshot) => {
       const messages = snapshot.docs
         .map((item) => mapMessage(item.id, projectId, threadId, item.data()))
@@ -408,4 +699,5 @@ export async function deleteChatMessages(
   const snapshot = await getDocs(messagesCollection(projectId, threadId));
   await Promise.all(snapshot.docs.map((item) => deleteDoc(item.ref)));
   await deleteDoc(chatRef(projectId, threadId)).catch(() => undefined);
+  await deleteDoc(chatIndexRef(publicChatId(projectId, threadId))).catch(() => undefined);
 }

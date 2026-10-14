@@ -1,6 +1,7 @@
 import type { EntityId, IsoDateString } from "@/types/common";
 import type { ExerciseType } from "@/types/exercise";
 import type { ChatMemoryContext } from "@/types/memory";
+import type { VisualBlock } from "@/types/visual";
 
 export const CHAT_MODES = ["auto", "fast", "teacher"] as const;
 
@@ -82,10 +83,28 @@ export type ChatMessage = {
   options?: string[];
   pendingKind?: PendingKind;
   images?: ChatImageHit[];
+  /** Typed catalog visuals rendered directly under the answer. */
+  blocks?: VisualBlock[];
+  /** Passages from the project's materials this answer was grounded in. */
+  sources?: ChatSourceRef[];
   /** True when this turn saved a long-term memory fact. */
   memorized?: boolean;
   createdAt: IsoDateString | null;
 };
+
+/** A passage retrieved from the project's materials for one answer. [S{n}] in the reply points here. */
+export type ChatSource = {
+  n: number;
+  materialId: string;
+  title: string;
+  page: number;
+  pageEnd: number;
+  section: string;
+  text: string;
+};
+
+/** What is kept on the message and sent to the browser: the locator and a short snippet, not the passage. */
+export type ChatSourceRef = Omit<ChatSource, "text"> & { snippet: string };
 
 export type ChatImageHit = {
   url: string;
@@ -173,9 +192,13 @@ export type ChatGenerationContext = {
     inPathThread?: boolean;
   } | null;
   materials: ChatMaterialContext[];
+  /** Server-retrieved passages, numbered for [S#] citations. */
+  sources?: ChatSource[];
   figures?: ChatFigureContext[];
   knowledgeItems: ChatKnowledgeContext[];
   memories?: ChatMemoryContext[];
+  /** Subject facts from the parent project. Ask injects a relevant subset only. */
+  projectMemory?: string[];
   personalization?: string;
   /** Hidden hint on the current exam — never reveal the answer. */
   hintAsk?: boolean;
@@ -183,6 +206,8 @@ export type ChatGenerationContext = {
   examAsk?: boolean;
   /** Current user / hidden tutor prompt — used to pick 0–2 native block cards. */
   prompt?: string;
+  /** A paper sheet already exists in this thread — reuse instead of rewriting. */
+  threadPaper?: boolean;
 };
 
 export type ChatTurn = {

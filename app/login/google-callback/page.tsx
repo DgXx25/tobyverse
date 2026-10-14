@@ -25,7 +25,10 @@ export default function GoogleCallbackPage() {
     } catch {
       /* ignore */
     }
-    window.location.replace("/");
+    const target = new URL("/", window.location.origin);
+    target.search = window.location.search;
+    target.hash = window.location.hash;
+    window.location.replace(target.toString());
   }, []);
 
   return <p className="p-6 text-sm text-muted">Signing in…</p>;

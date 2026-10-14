@@ -1,4 +1,4 @@
-import { isArtifactTool, type ChatToolCall, type ChatToolName } from "@/lib/ai/tools";
+import { chatToolDefinition, isArtifactTool, type ChatToolCall, type ChatToolName } from "@/lib/ai/tools";
 import {
   extractAppendCount,
   intentFromTool,
@@ -76,6 +76,7 @@ export type ChatDispatchResult = {
   leadTeach?: string;
   promptAsk?: { question: string; options?: string[] };
   openThreadId?: string;
+  blocks?: VisualBlock[];
 };
 
 export type ChatToolHandler = {
@@ -193,6 +194,10 @@ async function runAnswer(ctx: ChatDispatchContext): Promise<ChatDispatchResult> 
   });
 }
 
+async function runIllustrate(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
+  return textResult(ctx, { blocks: ctx.tool.args.blocks ?? [] });
+}
+
 function looksLikeBlank(text: string): boolean {
   const t = text.trim();
   if (!t || t.length > 280) return false;
@@ -229,7 +234,7 @@ async function runSuggestPath(ctx: ChatDispatchContext): Promise<ChatDispatchRes
 async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const mode = practiceModeOf(ctx.prompt, ctx.tool.args.mode);
   const ka = promptIsKa(ctx.prompt);
-  ctx.onStatus?.(mode === "exam" ? (ka ? "ვამზადებ გამოცდას" : "Generating exam") : (ka ? "ვამზადებ ვარჯიშს" : "Generating practice"));
+  ctx.onStatus?.(mode === "exam" ? "Generating exam" : "Generating practice");
   const set = await generatePracticeSet({
     project: ctx.project,
     userId: ctx.userId,
@@ -239,7 +244,7 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
     onStatus: ctx.onStatus,
   });
   const path = ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
-  ctx.onStatus?.(ka ? "მზადაა" : "Done");
+  ctx.onStatus?.("Done");
   if (path?.currentNodeId) {
     const next = bindPracticeSet(path, path.currentNodeId, set.ids[0]);
     await patchStudyPath(ctx.project.id, path.id, { courses: next.courses }).catch(() => undefined);
@@ -544,6 +549,7 @@ async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResul
 export const CHAT_TOOL_HANDLERS: Record<ChatToolName, ChatToolHandler> = {
   answer: { run: runAnswer },
   clarify: { run: runClarify },
+  illustrate: { run: runIllustrate },
   suggest_practice: { run: runSuggestPractice },
   suggest_sheet: { run: runSuggestSheet },
   suggest_path: { run: runSuggestPath },
@@ -567,23 +573,22 @@ export function toolProducesArtifact(name: ChatToolName): boolean {
   return Boolean(CHAT_TOOL_HANDLERS[name]?.artifactKind) || isArtifactTool(name);
 }
 
-export function thinkingStatus(ka = false): string {
-  return ka ? "ვფიქრობ" : "Thinking";
+export function thinkingStatus(_ka = false): string {
+  return "Thinking";
 }
 
-export function dispatchStatus(intent: ComposerIntent, toolName?: ChatToolName, ka = false): string {
-  if (toolName === "search_images") return ka ? "ვეძებ ფოტოებს…" : "Searching photos…";
-  if (toolName === "clarify") return ka ? "ვგეგმავ…" : "Planning…";
-  if (intent === "study") return ka ? "ვწერ კონსპექტს…" : CREATING_NOTES_STATUS;
-  if (intent === "rewrite_sheet") return ka ? "ვაახლებ კონსპექტს…" : "Updating notes…";
-  if (intent === "practice") return ka ? "ვამზადებ ვარჯიშს" : "Generating practice";
-  if (toolName === "advance_path") return ka ? "გადავდივართ…" : "Moving on…";
-  if (toolName === "restart_path") return ka ? "თავიდან…" : "Starting at the beginning…";
-  if (toolName === "start_path") return ka ? "ვიწყებთ…" : "Starting…";
-  if (toolName === "create_path") return ka ? "ვგეგმავ გზას…" : "Mapping the path…";
-  if (intent === "plan") return ka ? "ვგეგმავ გზას…" : "Mapping the path…";
-  if (isMutationIntent(intent)) return ka ? "ვაახლებ…" : "Updating…";
-  return thinkingStatus(ka);
+export function dispatchStatus(intent: ComposerIntent, toolName?: ChatToolName, _ka = false): string {
+  if (toolName === "search_images") return "Searching photos…";
+  if (toolName === "clarify") return "Planning…";
+  if (intent === "study") return CREATING_NOTES_STATUS;
+  if (intent === "rewrite_sheet") return "Updating notes…";
+  if (intent === "practice") return "Generating practice";
+  if (toolName === "advance_path") return "Moving on…";
+  if (toolName === "restart_path") return "Starting at the beginning…";
+  if (toolName === "start_path") return "Starting…";
+  if (toolName === "create_path" || intent === "plan") return "Mapping the path…";
+  if (isMutationIntent(intent)) return "Updating…";
+  return thinkingStatus();
 }
 
 /** Run the registered handler. Unknown names stay text — never practice. */
@@ -592,5 +597,8 @@ export async function dispatchChatTool(ctx: ChatDispatchContext): Promise<ChatDi
   if (!handler) {
     return { intent: "ask", content: ctx.text };
   }
-  return handler.run(ctx);
+  return chatToolDefinition(ctx.tool.name).execute({
+    call: ctx.tool,
+    invoke: async () => handler.run(ctx),
+  }) as Promise<ChatDispatchResult>;
 }

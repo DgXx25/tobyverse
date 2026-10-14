@@ -1,4 +1,5 @@
 import { generateText } from "@/lib/ai/gemini";
+import type { AiUsageReporter } from "@/types/billing";
 
 const FIGURE_NOISE = /^(diagram|illustration|schematic|photo|image|picture|chart|graph|plot|structure|model)$/i;
 
@@ -106,7 +107,7 @@ function parsePlan(text: string, seed: ImageSearchPlan): ImageSearchPlan {
   }
 }
 
-export async function planImageSearch(query: string): Promise<ImageSearchPlan> {
+export async function planImageSearch(query: string, options: { usage?: AiUsageReporter } = {}): Promise<ImageSearchPlan> {
   const raw = query.trim();
   if (!raw) return { query: "", must: [], avoid: [] };
   const key = `plan6:${raw.toLowerCase()}`;
@@ -127,6 +128,7 @@ ${raw}`,
       {
         json: true,
         systemInstruction: "JSON only. No markdown.",
+        usage: options.usage,
       },
     );
     plan = parsePlan(text, seed);
@@ -139,8 +141,8 @@ ${raw}`,
   return plan;
 }
 
-export async function englishImageQuery(query: string): Promise<string> {
-  return (await planImageSearch(query)).query;
+export async function englishImageQuery(query: string, options: { usage?: AiUsageReporter } = {}): Promise<string> {
+  return (await planImageSearch(query, options)).query;
 }
 
 export function expandEnglishImageQuery(english: string): string {

@@ -4,8 +4,10 @@ import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { FREE_CAPS } from "@/lib/account/plan";
 import { PERSONALIZATION_MAX } from "@/lib/memory/constants";
 import { asMemoryFacts, parseMemoryOps, parsePersonalizationPatch, sanitizePersonalization } from "@/lib/memory/normalize";
+import { parseProjectFacts } from "@/lib/memory/project";
 import { MEMORY_EXTRACT_SYSTEM, memoryExtractPrompt } from "@/lib/memory/prompt";
 import type { ChatTurn } from "@/types/chat";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +23,7 @@ const extractSchema = z.object({
     )
     .max(4),
   personalization: z.string().max(PERSONALIZATION_MAX).nullable().optional(),
+  projectMemory: z.array(z.string().max(200)).max(4).optional(),
 });
 
 function asHistory(value: unknown): ChatTurn[] {
@@ -44,10 +47,16 @@ export async function POST(request: Request) {
   }
 
   if (session.anonymous) {
-    return Response.json({ operations: [], personalization: null });
+    return Response.json({ operations: [], personalization: null, projectMemory: [] });
   }
 
-  let body: { prompt?: unknown; memories?: unknown; history?: unknown; personalization?: unknown };
+  let body: {
+    prompt?: unknown;
+    memories?: unknown;
+    history?: unknown;
+    personalization?: unknown;
+    projectMemory?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -56,24 +65,35 @@ export async function POST(request: Request) {
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) {
-    return Response.json({ operations: [], personalization: null });
+    return Response.json({ operations: [], personalization: null, projectMemory: [] });
   }
 
   const memories = asMemoryFacts(body.memories, FREE_CAPS.memories);
   const personalization = sanitizePersonalization(body.personalization);
+  const projectMemory = Array.isArray(body.projectMemory)
+    ? body.projectMemory.filter((item): item is string => typeof item === "string")
+    : [];
+  let usage;
+  try {
+    usage = await startAiUsageSession(session.uid);
+  } catch (error) {
+    return aiUsageErrorResponse(error);
+  }
   const result = await generateJson(
-    memoryExtractPrompt({ prompt, memories, personalization, history: asHistory(body.history) }),
+    memoryExtractPrompt({ prompt, memories, personalization, history: asHistory(body.history), projectMemory }),
     extractSchema,
-    { systemInstruction: MEMORY_EXTRACT_SYSTEM },
+    { systemInstruction: MEMORY_EXTRACT_SYSTEM, usage: usage.report },
   );
+  await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
 
   if (!result.ok) {
-    return Response.json({ operations: [], personalization: null });
+    return Response.json({ operations: [], personalization: null, projectMemory: [] });
   }
 
   const known = new Set(memories.map((item) => item.id));
   return Response.json({
     operations: parseMemoryOps(result.data, known),
     personalization: parsePersonalizationPatch(result.data, personalization) ?? null,
+    projectMemory: parseProjectFacts(result.data),
   });
 }

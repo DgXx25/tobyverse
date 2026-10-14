@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { useShell } from "@/components/workspace/shell-context";
 import { GuestGoogleCta } from "@/components/guest-google-cta";
 import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
+import { HeadlineVerb } from "@/components/workspace/headline-verb";
 import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
 import { newChipId } from "@/lib/composer/attach";
 import { ensureSessionUser } from "@/lib/auth";
 import { guestCapReached, GuestCapError, isGuestUser } from "@/lib/guest";
-import { startProjectFromPrompt } from "@/lib/workspace/start-project";
+import { startChatInProject, startProjectFromPrompt } from "@/lib/workspace/start-project";
 import { urlsInText } from "@/lib/materials/ingest-client";
-import { type ComposerIntent } from "@/lib/composer/intent";
+import { promptIsKa, type ComposerIntent } from "@/lib/composer/intent";
+import { uploadStatusText } from "@/components/workspace/composer-status";
 import {
   COMPOSER_SKILL_META,
   consumeSlashCommand,
@@ -20,6 +23,10 @@ import {
 import { loadSavedChatMode, saveChatMode } from "@/lib/workspace/chat-mode";
 import type { ChatMode } from "@/types/chat";
 import type { PendingAttachment } from "@/lib/workspace/pending-start";
+import { chatPath } from "@/lib/workspace/routes";
+import { subscribeProjectsForUser } from "@/lib/projects";
+import type { Project } from "@/types/project";
+import { CreateProjectModal } from "@/components/create-project-modal";
 
 type StartMode = "practice" | "sheet" | "materials" | "explain";
 
@@ -86,6 +93,7 @@ function usePrefersReducedMotion() {
 export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   const router = useRouter();
   const { user } = useAuth();
+  const { selectedProjectId, setSelectedProjectId } = useShell();
   const composerRef = useRef<ChatComposerHandle>(null);
   const firstActionRef = useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = useState("");
@@ -99,6 +107,11 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   const [skill, setSkill] = useState<ComposerSkill | null>(null);
   const [chatMode, setChatMode] = useState<ChatMode>("auto");
   const [needGoogle, setNeedGoogle] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState("");
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const projectPickerRef = useRef<HTMLSpanElement>(null);
   const guest = publicHome || isGuestUser(user);
   const reducedMotion = usePrefersReducedMotion();
 
@@ -107,7 +120,28 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   }, []);
 
   useEffect(() => {
-    router.prefetch("/project/_");
+    if (!user?.uid || guest) {
+      setProjects([]);
+      return;
+    }
+    return subscribeProjectsForUser(
+      user.uid,
+      (next) => setProjects(next.filter((project) => project.listed !== false && !project.hidden)),
+      () => setProjects([]),
+    );
+  }, [guest, user?.uid]);
+
+  useEffect(() => {
+    if (!projectPickerOpen) return;
+    function closeOutside(event: PointerEvent) {
+      if (!projectPickerRef.current?.contains(event.target as Node)) setProjectPickerOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [projectPickerOpen]);
+
+  useEffect(() => {
+    router.prefetch("/c/_");
   }, [router]);
 
   useEffect(() => {
@@ -204,12 +238,11 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
     setSending(true);
     setIngestPhase(packed.length > 0 ? "uploading" : null);
     setError(null);
+    let navigated = false;
     try {
       const signedIn = user ?? (await ensureSessionUser());
       if (isGuestUser(signedIn) && guestCapReached()) {
         setNeedGoogle(true);
-        setSending(false);
-        setIngestPhase(null);
         return;
       }
       const slash = consumeSlashCommand(prompt);
@@ -220,26 +253,36 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
       const nextSkill = slash.skill ?? skill;
       const nextMode = slash.mode ?? chatMode;
       const nextPrompt = slash.skill || slash.mode ? slash.prompt.trim() : prompt;
-      const id = await startProjectFromPrompt({
-        userId: signedIn.uid,
-        prompt: nextPrompt || prompt,
-        attachments: packed,
-        intent: guest ? undefined : nextSkill ? COMPOSER_SKILL_META[nextSkill].intent : activeMode?.intent,
-        skill: guest ? undefined : nextSkill ?? undefined,
-        mode: nextMode,
-      });
+      const id = !guest && selectedProjectId
+        ? await startChatInProject({
+            projectId: selectedProjectId,
+            userId: signedIn.uid,
+            prompt: nextPrompt || prompt,
+            attachments: packed,
+            intent: guest ? undefined : nextSkill ? COMPOSER_SKILL_META[nextSkill].intent : activeMode?.intent,
+            skill: guest ? undefined : nextSkill ?? undefined,
+            mode: nextMode,
+          })
+        : await startProjectFromPrompt({
+            userId: signedIn.uid,
+            prompt: nextPrompt || prompt,
+            attachments: packed,
+            intent: guest ? undefined : nextSkill ? COMPOSER_SKILL_META[nextSkill].intent : activeMode?.intent,
+            skill: guest ? undefined : nextSkill ?? undefined,
+            mode: nextMode,
+          });
       if (!id) throw new Error("Could not start.");
-      router.replace(`/project/${id}`);
+      navigated = true;
+      router.replace(chatPath(id));
     } catch (err) {
       if (err instanceof GuestCapError) {
         setNeedGoogle(true);
-        setSending(false);
-        setIngestPhase(null);
         return;
       }
       setError(err instanceof Error && err.message.trim() ? err.message : "Could not start.");
-      setSending(false);
+    } finally {
       setIngestPhase(null);
+      if (!navigated) setSending(false);
     }
   }
 
@@ -284,12 +327,23 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
     }
   }
 
-  const fieldStart = !guest && activeMode ? (
-    <span className="start-action-prefix pointer-events-none inline-flex shrink-0 select-none items-center gap-1.5 whitespace-nowrap pt-3 text-[15px] leading-6 text-foreground">
-      <UiIcon name={activeMode.icon} size={18} className="accent-symbol" />
-      <span>{activeMode.label}</span>
-    </span>
-  ) : null;
+  const prefixMeta = activeMode
+    ? { icon: activeMode.icon, label: activeMode.label }
+    : skill
+      ? { icon: COMPOSER_SKILL_META[skill].icon, label: COMPOSER_SKILL_META[skill].label }
+      : null;
+  const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const selectedProjectTitle = selectedProject?.title ?? "project";
+  const matchingProjects = projects.filter((project) =>
+    project.title.toLocaleLowerCase().includes(projectSearch.trim().toLocaleLowerCase()),
+  );
+  const fieldStart =
+    !guest && prefixMeta ? (
+      <span className="start-action-prefix pointer-events-none inline-flex shrink-0 select-none items-center gap-1.5 whitespace-nowrap pt-3 text-[15px] leading-6 text-foreground">
+        <UiIcon name={prefixMeta.icon} size={18} className="accent-symbol" />
+        <span>{prefixMeta.label}</span>
+      </span>
+    ) : null;
 
   const composer = (
     <>
@@ -299,10 +353,17 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
         onDraft={setDraft}
         sending={sending}
         error={needGoogle ? null : error}
+        status={
+          needGoogle || error || ingestPhase !== "uploading" || chips.length === 0
+            ? null
+            : {
+                text: uploadStatusText(chips[0].title, chips[0].type === "url" ? "url" : "file", promptIsKa(draft)),
+              }
+        }
         chips={guest ? [] : chips}
         placeholder={guest ? "Ask anything" : (activeMode?.placeholder ?? "Ask anything")}
-        fieldStart={fieldStart}
         fadePlaceholder={!guest}
+        fieldStart={fieldStart}
         dropActive={dragging}
         pad={false}
         allowAttach={!guest}
@@ -340,15 +401,126 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   );
 
   const heading = (
-    <h1 className="text-center text-[32px] font-medium tracking-tight text-foreground">What should we learn?</h1>
+    <h1 className="flex flex-wrap items-center justify-center gap-x-2 text-center text-[32px] font-medium leading-[1.2] tracking-tight text-foreground max-md:text-[26px]">
+      {selectedProjectId && !guest ? (
+        <>
+          <span>What should we <HeadlineVerb /> in</span>
+          <span ref={projectPickerRef} className="relative inline-flex max-w-full">
+            <button
+              type="button"
+              aria-label={`Project: ${selectedProjectTitle}`}
+              aria-haspopup="listbox"
+              aria-expanded={projectPickerOpen}
+              onClick={() => {
+                setProjectSearch("");
+                setProjectPickerOpen((open) => !open);
+              }}
+              className="max-w-[min(40vw,360px)] truncate border-b border-dotted border-foreground/40 text-left hover:border-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {selectedProjectTitle}
+            </button>
+            {projectPickerOpen ? (
+              <div className="absolute left-1/2 top-full z-30 mt-3 w-[260px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 text-left text-[13px] text-foreground shadow-xl">
+                <label className="flex h-8 items-center gap-2 border-b border-border px-2 text-muted">
+                  <UiIcon name="search" size={14} />
+                  <input
+                    autoFocus
+                    aria-label="Search projects"
+                    placeholder="Search projects"
+                    value={projectSearch}
+                    onChange={(event) => setProjectSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setProjectPickerOpen(false);
+                    }}
+                    className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted"
+                  />
+                </label>
+                <div role="listbox" aria-label="Projects" className="my-1 max-h-52 overflow-y-auto">
+                  {matchingProjects.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      role="option"
+                      aria-selected={project.id === selectedProjectId}
+                      onClick={() => {
+                        setSelectedProjectId(project.id);
+                        setProjectPickerOpen(false);
+                      }}
+                      className={`flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-foreground/10 ${project.id === selectedProjectId ? "bg-foreground/10" : ""}`}
+                    >
+                      <UiIcon name="projectFolder" size={15} className="shrink-0 text-muted" />
+                      <span className="min-w-0 flex-1 truncate">{project.title}</span>
+                      {project.id === selectedProjectId ? <UiIcon name="check" size={14} /> : null}
+                    </button>
+                  ))}
+                  {matchingProjects.length === 0 ? <p className="px-2 py-2 text-muted">No projects found</p> : null}
+                </div>
+                <div className="border-t border-border pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProjectPickerOpen(false);
+                      setCreateProjectOpen(true);
+                    }}
+                    className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-foreground/10"
+                  >
+                    <UiIcon name="plus" size={14} className="text-muted" />
+                    New project
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedProjectId(null);
+                      setProjectPickerOpen(false);
+                    }}
+                    className="flex h-8 w-full items-center rounded-lg px-2 text-left hover:bg-foreground/10"
+                  >
+                    Don&apos;t work in a project
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </span>
+          <span>?</span>
+        </>
+      ) : (
+        <>
+          <span className="sr-only">What should we learn?</span>
+          <span aria-hidden="true" className="whitespace-nowrap">
+            What should we <HeadlineVerb />?
+          </span>
+        </>
+      )}
+    </h1>
   );
 
   if (publicHome || guest) {
     return (
-      <div className="relative flex h-full min-h-0 flex-col items-center justify-center px-6 pb-16">
-        <div className="mb-8">{heading}</div>
-        <div className="mx-auto w-full max-w-[850px] composer-pad">{composer}</div>
+      <div className="relative flex h-full min-h-0 flex-col items-center justify-center pb-20">
+        <div className="mb-10">{heading}</div>
+        <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4 composer-pad">{composer}</div>
       </div>
+    );
+  }
+
+  if (selectedProjectId) {
+    return (
+      <>
+        <div className="relative flex h-full min-h-0 flex-col">
+          <div className="flex min-h-0 flex-1 items-center justify-center">{heading}</div>
+          <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4 composer-pad">{composer}</div>
+        </div>
+        {createProjectOpen && user?.uid ? (
+          <CreateProjectModal
+            userId={user.uid}
+            onClose={() => setCreateProjectOpen(false)}
+            onCreated={(projectId) => {
+              setSelectedProjectId(projectId);
+              setCreateProjectOpen(false);
+            }}
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -370,20 +542,12 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
         if (file) addFile(file);
       }}
     >
-      {dragging && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/80">
-          <p className="rounded-xl border border-dashed border-white/20 px-6 py-4 text-sm text-foreground">
-            Drop a file or image
-          </p>
-        </div>
-      )}
+      <div className="flex min-h-0 flex-1 items-center justify-center px-8 md:hidden">{heading}</div>
 
-      <div className="flex min-h-0 flex-1 items-center justify-center px-6 md:hidden">{heading}</div>
-
-      <div className="start-stage-pin mx-auto w-[min(850px,calc(100%-32px))] composer-pad max-md:mt-auto">
+      <div className="start-stage-pin mx-auto w-full max-w-3xl px-8 max-md:px-4 composer-pad max-md:mt-auto">
         <div className="start-stage-title hidden md:block">{heading}</div>
         {composer}
-        <div className="start-suggest-list mt-6" aria-live="polite">
+        <div className="start-suggest-list mt-8" aria-live="polite">
           {shownRows.map((item, index) => (
             <button
               key={item.id}

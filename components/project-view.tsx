@@ -4,7 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEv
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { asChatMode } from "@/lib/core/chat-modes";
-import { loadSavedChatMode, saveChatMode } from "@/lib/workspace/chat-mode";
+import { DEFAULT_CHAT_THREAD_ID } from "@/lib/core/constants";
+import { loadSavedChatMode, saveChatMode, writeLocalChatMode } from "@/lib/workspace/chat-mode";
 import { peekOpeningProject, waitForOpeningProject } from "@/lib/workspace/start-project";
 import {
   deleteProject,
@@ -12,8 +13,8 @@ import {
   updateProjectActiveArtifact,
   updateProjectChatMode,
 } from "@/lib/projects";
+import { setChatSharing, subscribeChatThreads } from "@/lib/chats";
 import { subscribeMaterials } from "@/lib/materials";
-import { trackEvent } from "@/lib/analytics/track";
 import {
   loadWorkspacePrefs,
   saveWorkspacePrefs,
@@ -21,15 +22,19 @@ import {
 } from "@/lib/workspace/prefs";
 import { useAuth } from "@/components/auth-provider";
 import { ProjectChat } from "@/components/project-chat";
-import { ArtifactPanel, type ArtifactFocus } from "@/components/workspace/artifact-panel";
+import { ProjectLoading } from "@/components/project-loading";
+import { ArtifactPanel, type ArtifactFocus, type ArtifactTabId } from "@/components/workspace/artifact-panel";
+import { SourcesPane } from "@/components/workspace/sources-pane";
+import { LibraryFilePreview } from "@/components/library-file-preview";
+import type { LibraryItem } from "@/lib/library/items";
+import type { StudioRequest, StudioTile } from "@/lib/workspace/studio";
 import { useShell } from "@/components/workspace/shell-context";
 import { QuietIconCluster, type QuietIconAction } from "@/components/workspace/quiet-icon-cluster";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
-import type { ChatArtifact, ChatMode } from "@/types/chat";
 import type { ActiveArtifactStatus } from "@/types/project";
 import type { Material } from "@/types/material";
-import type { Project } from "@/types";
+import type { ChatArtifact, ChatMessage, ChatMode, Project } from "@/types";
 import type { PathLiveState } from "@/types/path";
 import type { NotesLiveState } from "@/types/study-sheet";
 import type { NotesGenerateEvent } from "@/lib/study-sheets/generate-client";
@@ -37,29 +42,79 @@ import type { PathGenerateEvent } from "@/lib/paths/generate-client";
 import { CREATING_NOTES_STATUS } from "@/lib/chat/dispatch";
 import type { SetResult } from "@/lib/exercises/session";
 
-const MIN_ARTIFACT = 400;
-const MIN_NOTES = 560;
-const MIN_CHAT = 240;
-const WIDTH_EASE =
-  "transition-[width,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
+const MIN_ARTIFACT = 300;
+const MAX_ARTIFACT = 520;
+const MIN_NOTES = 360;
+const MIN_CHAT = 420;
+const SOURCES_MIN = 260;
+const SOURCES_MAX = 440;
+const SOURCES_DEFAULT = 320;
+const SOURCES_KEY = "tv.sources.open";
+const SOURCES_WIDTH_KEY = "tv.sources.width";
+const STUDIO_KEY = "tv.studio.open";
+
+function readWidth(key: string, fallback: number, min: number, max: number): number {
+  if (typeof window === "undefined") return fallback;
+  const value = Number(window.localStorage.getItem(key));
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function readFlag(key: string): boolean | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const value = window.localStorage.getItem(key);
+    return value === "1" ? true : value === "0" ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeFlag(key: string, value: boolean) {
+  try {
+    window.localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    /* private mode */
+  }
+}
+
+function isDesktop() {
+  return typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
+}
 
 function focusFromPending(pending: {
-  kind: "material" | "sheet" | "plan" | "practice" | "path";
+  kind: "material" | "sheet" | "plan" | "practice" | "path" | "settings";
   id: string;
   title?: string;
 }): ArtifactFocus {
   if (pending.kind === "material") return { kind: "material", id: pending.id };
+  if (pending.kind === "settings") return { kind: "settings", id: pending.id };
   if (pending.kind === "practice") return { kind: "practice", id: pending.id, title: pending.title || "Practice" };
   if (pending.kind === "path") return { kind: "path", id: pending.id, title: pending.title || "Path" };
   if (pending.kind === "plan") return { kind: "plan", id: pending.id, title: pending.title || "Study plan" };
   return { kind: "sheet", id: pending.id, title: pending.title || "Notes" };
 }
 
-export function ProjectView({ projectId, threadId }: { projectId: string; threadId?: string }) {
+export function ProjectView({
+  projectId,
+  threadId,
+  initialProject,
+  initialMessages,
+  initialOlderCursor,
+}: {
+  projectId: string;
+  threadId?: string;
+  initialProject?: Project;
+  initialMessages?: ChatMessage[];
+  initialOlderCursor?: string | null;
+}) {
   const { user } = useAuth();
   const router = useRouter();
-  const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setMobileTopActions } = useShell();
+  const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setMobileTopActions, setProjectShare } = useShell();
   const [project, setProject] = useState<Project | null>(null);
+  const [bootstrapMessages, setBootstrapMessages] = useState<ChatMessage[]>(initialMessages ?? []);
+  const [olderCursor, setOlderCursor] = useState<string | null>(initialOlderCursor ?? null);
+  const [threadTitle, setThreadTitle] = useState<string | undefined>();
   const [materials, setMaterials] = useState<Material[]>([]);
   const [mode, setMode] = useState<ChatMode>(() => loadSavedChatMode());
   const { model } = usePreferredModel();
@@ -69,36 +124,73 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [panelExpanded, setPanelExpanded] = useState(false);
+  const [panelOwnChrome, setPanelOwnChrome] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(128);
   const [focus, setFocus] = useState<ArtifactFocus | null>(null);
   const [session, setSession] = useState<{ setId: string; ids: string[]; mode?: "practice" | "exam" } | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(420);
+  const [sourcesWidth, setSourcesWidth] = useState(SOURCES_DEFAULT);
   const [resizing, setResizing] = useState(false);
-  const [panelView, setPanelView] = useState<"materials" | "sheets" | "practice" | "path">("materials");
+  const [panelView, setPanelView] = useState<ArtifactTabId>("studio");
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [mobileSourcesOpen, setMobileSourcesOpen] = useState(false);
+  const [studioRequest, setStudioRequest] = useState<StudioRequest | null>(null);
+  const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  const studioSeq = useRef(0);
+  const sourcesWidthRef = useRef(0);
   const [notesLive, setNotesLive] = useState<NotesLiveState | null>(null);
   const [pathLive, setPathLive] = useState<PathLiveState | null>(null);
   const [finishedSet, setFinishedSet] = useState<SetResult | null>(null);
+  const [shareNotice, setShareNotice] = useState<"copied" | "error" | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  const [shareActive, setShareActive] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const openedAt = useRef(Date.now());
   const prefsRef = useRef<WorkspacePrefs | null>(null);
   const widthRef = useRef(420);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const savedLayout = useRef<{ width: number } | null>(null);
+  const materialReturn = useRef<{ focus: ArtifactFocus | null; panelOpen: boolean } | null>(null);
   widthRef.current = artifactWidth;
-
-  function ensureMinWidth(min: number) {
-    const max =
-      typeof window === "undefined" ? min : Math.max(min, window.innerWidth - MIN_CHAT);
-    const floor = typeof window === "undefined" ? min : Math.min(min, window.innerWidth - MIN_CHAT);
-    setArtifactWidth((current) => (current < floor ? Math.min(floor, max) : current));
-  }
+  sourcesWidthRef.current = sourcesOpen ? sourcesWidth : 0;
 
   useEffect(() => {
-    openedAt.current = Date.now();
-    return () => {
-      if (!user) return;
-      if (Date.now() - openedAt.current < 20_000) {
-        trackEvent({ userId: user.uid, projectId, type: "dropped_off", value: "chat" });
-      }
-    };
-  }, [projectId, user]);
+    if (!shareNotice) return;
+    const timeout = window.setTimeout(() => setShareNotice(null), shareNotice === "copied" ? 2600 : 5000);
+    return () => window.clearTimeout(timeout);
+  }, [shareNotice]);
+
+  const getWorkspaceWidth = useCallback(() => {
+    const total = workspaceRef.current?.clientWidth || (typeof window === "undefined" ? 0 : window.innerWidth);
+    return Math.max(0, total - sourcesWidthRef.current);
+  }, []);
+
+  const ensureMinWidth = useCallback((min: number) => {
+    const max = Math.max(min, getWorkspaceWidth() - MIN_CHAT);
+    const floor = Math.min(min, max);
+    setArtifactWidth((current) => Math.min(max, Math.max(floor, current)));
+  }, [getWorkspaceWidth]);
+
+  useLayoutEffect(() => {
+    const desktop = isDesktop();
+    setSourcesOpen(desktop && (readFlag(SOURCES_KEY) ?? true));
+    setPanelOpen(desktop && (readFlag(STUDIO_KEY) ?? true));
+    setSourcesWidth(readWidth(SOURCES_WIDTH_KEY, SOURCES_DEFAULT, SOURCES_MIN, SOURCES_MAX));
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!prefsReady) return;
+    function clampPanelWidth() {
+      const max = Math.max(MIN_ARTIFACT, getWorkspaceWidth() - MIN_CHAT);
+      setArtifactWidth((current) => Math.min(current, max));
+    }
+    clampPanelWidth();
+    window.addEventListener("resize", clampPanelWidth);
+    return () => window.removeEventListener("resize", clampPanelWidth);
+  }, [prefsReady, getWorkspaceWidth]);
 
   useLayoutEffect(() => {
     const seeded = peekOpeningProject(projectId);
@@ -107,14 +199,32 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
       setError(null);
       return;
     }
+    if (initialProject?.id === projectId) {
+      setProject(initialProject);
+      setError(null);
+      setPrefsReady(false);
+      return;
+    }
     setProject(null);
     setPrefsReady(false);
-  }, [projectId]);
+  }, [projectId, initialProject]);
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
+      if (initialProject?.id === projectId && initialProject.userId === user.uid) {
+        const prefs = loadWorkspacePrefs(projectId, asChatMode(initialProject.preferredChatMode));
+        if (cancelled) return;
+        setProject(initialProject);
+        prefsRef.current = prefs;
+        setMode(prefs.mode);
+        writeLocalChatMode(prefs.mode);
+        setSelectedIds(prefs.selectedMaterialIds);
+        setArtifactWidth(prefs.artifactWidth);
+        setPrefsReady(true);
+        return;
+      }
       try {
         await waitForOpeningProject(projectId);
       } catch (err: unknown) {
@@ -134,7 +244,7 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
         const prefs = loadWorkspacePrefs(projectId, asChatMode(item.preferredChatMode));
         prefsRef.current = prefs;
         setMode(prefs.mode);
-        saveChatMode(prefs.mode);
+        writeLocalChatMode(prefs.mode);
         setSelectedIds(prefs.selectedMaterialIds);
         setArtifactWidth(prefs.artifactWidth);
         setPrefsReady(true);
@@ -145,11 +255,30 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
     return () => {
       cancelled = true;
     };
-  }, [projectId, user]);
+  }, [initialProject, projectId, user, threadId]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!user || !olderCursor) return [] as ChatMessage[];
+    const token = await user.getIdToken();
+    const response = await fetch(`/api/projects/bootstrap?projectId=${encodeURIComponent(projectId)}&threadId=${encodeURIComponent(threadId || DEFAULT_CHAT_THREAD_ID)}&beforeId=${encodeURIComponent(olderCursor)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const payload = (await response.json()) as { messages?: ChatMessage[]; olderCursor?: string | null };
+    if (!response.ok) throw new Error("Could not load older messages.");
+    setOlderCursor(payload.olderCursor ?? null);
+    return payload.messages ?? [];
+  }, [olderCursor, projectId, threadId, user]);
 
   useEffect(() => {
     return subscribeMaterials(projectId, setMaterials, (err) => setError(err.message));
   }, [projectId]);
+
+  useEffect(() => {
+    return subscribeChatThreads(projectId, (threads) => {
+      const id = threadId || DEFAULT_CHAT_THREAD_ID;
+      setThreadTitle(threads.find((item) => item.id === id)?.title);
+    });
+  }, [projectId, threadId]);
 
   useEffect(() => {
     const valid = new Set(materials.map((item) => item.id));
@@ -189,12 +318,17 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
   useEffect(() => {
     if (!pendingPanel || pendingPanel.projectId !== projectId) return;
     const next = focusFromPending(pendingPanel);
+    if (next.kind === "material") {
+      setSourcePreviewId(next.id);
+      setPendingPanel(null);
+      return;
+    }
     setFocus(next);
     setPanelOpen(true);
     if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     if (next.kind !== "material" && "title" in next) rememberActive(next, "open");
     setPendingPanel(null);
-  }, [pendingPanel, projectId, setPendingPanel, rememberActive]);
+  }, [pendingPanel, projectId, setPendingPanel, rememberActive, ensureMinWidth]);
 
   async function onDelete() {
     if (!user || !project) return;
@@ -202,7 +336,7 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
     setDeleteError(null);
     try {
       await deleteProject(project.id, user.uid);
-      router.replace("/");
+      router.replace("/new");
     } catch (err) {
       setDeleting(false);
       setDeleteError(err instanceof Error ? err.message : "Could not delete project.");
@@ -238,6 +372,21 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
     setPanelOpen(true);
     if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     rememberActive(next, "open");
+  }
+
+  function openMaterial(id: string) {
+    setSourcePreviewId(id);
+  }
+
+  function closeMaterial() {
+    const previous = materialReturn.current;
+    materialReturn.current = null;
+    if (previous?.panelOpen) {
+      setFocus(previous.focus);
+      setPanelOpen(true);
+      return;
+    }
+    closePanel();
   }
 
   function handleNotesLive(event: NotesGenerateEvent | "start" | null) {
@@ -306,11 +455,37 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
   }
 
   async function copyShare() {
+    if (sharing) return;
+    setSharing(true);
     try {
-      const url = `${window.location.origin}/project/${projectId}`;
+      const body = await setChatSharing(projectId, threadId, true);
+      if (!body.shareId) throw new Error("Could not create a share link.");
+      setShareActive(true);
+      const url = `${window.location.origin}/s/${body.shareId}`;
       await navigator.clipboard.writeText(url);
-    } catch {
-      // Ignore clipboard failures.
+      setShareError(null);
+      setShareNotice("copied");
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : "Could not share chat.");
+      setShareNotice("error");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function unshare() {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      await setChatSharing(projectId, threadId, false);
+      setShareActive(false);
+      setShareError(null);
+      setShareNotice(null);
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : "Could not unshare chat.");
+      setShareNotice("error");
+    } finally {
+      setSharing(false);
     }
   }
 
@@ -335,67 +510,138 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
     }
   }
 
+  function setSources(open: boolean) {
+    setSourcesOpen(open);
+    writeFlag(SOURCES_KEY, open);
+  }
+
+  function setStudio(open: boolean) {
+    setPanelOpen(open);
+    if (isDesktop()) writeFlag(STUDIO_KEY, open);
+  }
+
+  function createFromStudio(tile: StudioTile, run?: { prompt: string; tool?: StudioTile["tool"] }) {
+    studioSeq.current += 1;
+    setStudioRequest({
+      id: studioSeq.current,
+      label: tile.label,
+      prompt: run?.prompt ?? tile.prompt,
+      tool: run && !run.tool ? undefined : run?.tool ?? tile.tool,
+    });
+    if (!isDesktop()) setPanelOpen(false);
+  }
+
   function closePanel() {
     if (session) exitSession();
-    setPanelOpen(false);
+    setPanelExpanded(false);
+    setPanelOwnChrome(false);
+    setStudio(false);
   }
-
-  function openPanel(next?: ArtifactFocus) {
-    if (next) setFocus(next);
-    setPanelOpen(true);
-    if (next && (next.kind === "sheet" || next.kind === "plan" || next.kind === "path")) ensureMinWidth(MIN_NOTES);
-  }
-
-  const onPanelViewChange = useCallback((view: "materials" | "sheets" | "practice" | "path") => {
-    setPanelView(view);
-    if (view === "sheets" || view === "path") ensureMinWidth(MIN_NOTES);
-  }, []);
-
-  const headerActions: QuietIconAction[] = [
-    {
-      id: "share",
-      label: "Share",
-      icon: "share",
-      onClick: () => void copyShare(),
-    },
-    ...(!panelOpen
-      ? [
-          {
-            id: "panel",
-            label: "Panel",
-            icon: "panel" as const,
-            onClick: () => openPanel(),
-          },
-        ]
-      : []),
-  ];
 
   useEffect(() => {
-    setMobileTopActions(<QuietIconCluster size={20} actions={headerActions} />);
+    if (!panelOpen) {
+      setPanelExpanded(false);
+      setPanelOwnChrome(false);
+    }
+  }, [panelOpen]);
+
+  const onPanelViewChange = useCallback((view: ArtifactTabId) => {
+    setPanelView(view);
+    if (view === "sheets" || view === "path") ensureMinWidth(MIN_NOTES);
+  }, [ensureMinWidth]);
+
+  const panelToggleAction: QuietIconAction = {
+    id: "panel",
+    label: panelOpen ? "Hide Studio" : "Show Studio",
+    icon: "panelRight",
+    onClick: () => setStudio(!panelOpen),
+  };
+  const sourcesToggleAction: QuietIconAction = {
+    id: "sources",
+    label: sourcesOpen || mobileSourcesOpen ? "Hide sources" : "Show sources",
+    icon: "panelLeft",
+    onClick: () => {
+      if (isDesktop()) setSources(!sourcesOpen);
+      else setMobileSourcesOpen((open) => !open);
+    },
+  };
+  const paneToggles = [sourcesToggleAction, panelToggleAction];
+
+  useEffect(() => {
+    setMobileTopActions(<QuietIconCluster size={18} actions={paneToggles} />);
     return () => setMobileTopActions(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setMobileTopActions, panelOpen, projectId]);
+  }, [setMobileTopActions, projectId, panelOpen, sourcesOpen, mobileSourcesOpen]);
 
-  function onResizeStart(event: ReactMouseEvent) {
+  useEffect(() => {
+    setProjectShare({
+      active: shareActive,
+      busy: sharing,
+      onToggle: () => void (shareActive ? unshare() : copyShare()),
+    });
+    return () => setProjectShare(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setProjectShare, shareActive, sharing, projectId, threadId]);
+
+  function clampPane(width: number, min: number, max: number, other: number) {
+    const workspace = workspaceRef.current?.clientWidth || window.innerWidth;
+    const room = Math.max(min, workspace - other - MIN_CHAT);
+    const cap = Math.min(max, room);
+    return Math.min(cap, Math.max(Math.min(min, cap), width));
+  }
+
+  function paintWidth(reserve: HTMLDivElement | null, slot: HTMLDivElement | null, inner: HTMLDivElement | null, width: number) {
+    const px = `${width}px`;
+    if (reserve) reserve.style.width = px;
+    if (slot) slot.style.width = px;
+    if (inner) {
+      inner.style.width = px;
+      inner.style.minWidth = px;
+    }
+  }
+
+  function onSourcesResizeStart(event: ReactMouseEvent) {
     event.preventDefault();
-    setResizing(true);
     const startX = event.clientX;
-    const startW = widthRef.current;
+    const startW = sourcesWidth;
+    const reserve = event.currentTarget.parentElement?.previousElementSibling as HTMLDivElement | null;
+    const slot = event.currentTarget.parentElement as HTMLDivElement | null;
+    const inner = slot?.firstElementChild as HTMLDivElement | null;
+    setResizing(true);
     function move(ev: MouseEvent) {
-      const max = session || panelView === "sheets"
-        ? Math.max(MIN_ARTIFACT, window.innerWidth - MIN_CHAT)
-        : Math.round(window.innerWidth * 0.55);
-      const desiredMin = session
-        ? Math.round(window.innerWidth * 0.42)
-        : panelView === "sheets"
-          ? MIN_NOTES
-          : MIN_ARTIFACT;
-      const min = Math.min(desiredMin, max);
-      const next = Math.min(max, Math.max(min, startW + (startX - ev.clientX)));
-      setArtifactWidth(next);
+      const next = clampPane(startW + (ev.clientX - startX), SOURCES_MIN, SOURCES_MAX, panelOpen ? widthRef.current : 0);
+      sourcesWidthRef.current = next;
+      paintWidth(reserve, slot, inner, next);
     }
     function up() {
       setResizing(false);
+      const next = sourcesWidthRef.current || startW;
+      setSourcesWidth(next);
+      try { window.localStorage.setItem(SOURCES_WIDTH_KEY, String(next)); } catch { /* private mode */ }
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    }
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+
+  function onResizeStart(event: ReactMouseEvent) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startW = widthRef.current;
+    const slot = (event.currentTarget.closest(".artifact-panel-slot") as HTMLDivElement | null);
+    const reserve = slot?.previousElementSibling as HTMLDivElement | null;
+    const inner = slot?.firstElementChild as HTMLDivElement | null;
+    const min = session ? Math.round(window.innerWidth * 0.42) : panelView === "sheets" || panelView === "path" ? MIN_NOTES : MIN_ARTIFACT;
+    setResizing(true);
+    function move(ev: MouseEvent) {
+      const next = clampPane(startW + (startX - ev.clientX), min, MAX_ARTIFACT, sourcesOpen ? sourcesWidthRef.current : 0);
+      widthRef.current = next;
+      paintWidth(reserve, slot, inner, next);
+    }
+    function up() {
+      setResizing(false);
+      setArtifactWidth(widthRef.current);
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
     }
@@ -410,26 +656,87 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
       return (
         <div className="mx-auto max-w-3xl px-8 py-10">
           <p className="text-sm text-muted">{error}</p>
-          <Link href="/" className="mt-4 inline-block text-sm text-muted hover:text-foreground">
+          <Link href="/new" className="mt-4 inline-block text-sm text-muted hover:text-foreground">
             Back
           </Link>
         </div>
       );
     }
-    return <div className="project-workspace relative flex h-full min-h-0 flex-1 overflow-hidden bg-transparent" />;
+    return <ProjectLoading />;
   }
 
   return (
-    <div className="project-workspace relative flex h-full min-h-0 flex-1 overflow-hidden bg-transparent">
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
-        <div className="pointer-events-none absolute right-3 top-3 z-20 hidden md:flex">
-          <QuietIconCluster className="pointer-events-auto" size={20} actions={headerActions} />
+    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 flex-1 overflow-hidden bg-transparent ${resizing ? "pane-resizing" : ""}`}>
+      <div
+        aria-hidden="true"
+        className="artifact-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
+        style={{ width: sourcesOpen ? sourcesWidth : 0 }}
+      />
+      <div
+        className={`artifact-panel-slot absolute inset-y-0 left-0 z-30 hidden max-w-full bg-surface shrink-0 overflow-hidden md:block ${
+          sourcesOpen ? "pointer-events-auto" : "pointer-events-none"
+        }`}
+        style={{ width: sourcesOpen ? sourcesWidth : 0 }}
+        aria-hidden={!sourcesOpen}
+        inert={sourcesOpen ? undefined : true}
+      >
+        <div
+          className={`h-full shrink-0 transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${sourcesOpen ? "opacity-100" : "opacity-0"}`}
+          style={{ width: sourcesWidth, minWidth: sourcesWidth }}
+        >
+          <SourcesPane
+            className="h-full bg-surface"
+            projectId={project.id}
+            userId={user.uid}
+            items={materials}
+            selectedIds={selectedIds}
+            onSelectedIds={setSelectedIds}
+            onOpenMaterial={openMaterial}
+          />
         </div>
+        <button type="button" aria-label="Resize sources" onMouseDown={onSourcesResizeStart} className="absolute inset-y-0 right-0 z-10 hidden w-2 cursor-col-resize md:block" />
+      </div>
+      {mobileSourcesOpen ? (
+        <SourcesPane
+          className="absolute inset-0 z-[35] md:hidden"
+          projectId={project.id}
+          userId={user.uid}
+          items={materials}
+          selectedIds={selectedIds}
+          onSelectedIds={setSelectedIds}
+          onOpenMaterial={(id) => {
+            setMobileSourcesOpen(false);
+            openMaterial(id);
+          }}
+          onClose={() => setMobileSourcesOpen(false)}
+        />
+      ) : null}
+      <div className="pointer-events-none absolute left-3 top-1 z-40 hidden md:flex">
+        <QuietIconCluster className="pointer-events-auto" size={18} actions={[sourcesToggleAction]} />
+      </div>
+      <div className="pointer-events-none absolute right-3 top-1 z-40 hidden md:flex">
+        <QuietIconCluster className="pointer-events-auto" size={18} actions={[panelToggleAction]} />
+      </div>
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
+        {shareNotice ? (
+          <div
+            role={shareNotice === "error" ? "alert" : "status"}
+            className="fixed bottom-4 right-4 z-[80] flex max-w-[min(92vw,420px)] items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-[14px] text-foreground shadow-lg"
+          >
+            <span>{shareNotice === "copied" ? "Public link copied" : shareError || "Could not update sharing."}</span>
+            <button type="button" aria-label="Dismiss" onClick={() => setShareNotice(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-foreground/10 hover:text-foreground">
+              <span aria-hidden className="text-[20px] leading-none">×</span>
+            </button>
+          </div>
+        ) : null}
         <ProjectChat
-          key={project.id}
+          key={`${project.id}:${threadId || DEFAULT_CHAT_THREAD_ID}`}
           project={project}
+          initialMessages={bootstrapMessages}
+          onLoadOlder={olderCursor ? loadOlderMessages : undefined}
           userId={user.uid}
           threadId={threadId}
+          threadTitle={threadTitle}
           chatMode={mode}
           onChatMode={(next) => {
             setMode(next);
@@ -442,38 +749,62 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
           onStartPractice={startPractice}
           onNotesLive={handleNotesLive}
           onPathLive={handlePathLive}
-          onOpenMaterial={(id) => {
-            setFocus({ kind: "material", id });
-            setPanelOpen(true);
-          }}
+          onOpenMaterial={openMaterial}
           onProjectPatch={(patch) => setProject((current) => (current ? { ...current, ...patch } : current))}
           finishedSet={finishedSet}
           onFinishedSetHandled={() => setFinishedSet(null)}
+          onComposerHeightChange={setComposerHeight}
+          chatLayoutWidth={panelOpen ? artifactWidth : 0}
+          studioRequest={studioRequest}
+          onStudioRequestHandled={(id) => setStudioRequest((current) => (current?.id === id ? null : current))}
+          onBusyChange={setChatBusy}
         />
       </div>
       <div
-        className={`h-full shrink-0 overflow-hidden max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30 max-md:bg-surface ${
-          resizing ? "" : WIDTH_EASE
-        } ${panelOpen ? "opacity-100 max-md:!w-full" : "pointer-events-none opacity-0 max-md:!w-0"}`}
+        aria-hidden="true"
+        className="artifact-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
+        style={{ width: panelOpen ? artifactWidth : 0 }}
+      />
+      <div
+        className={`artifact-panel-slot absolute inset-y-0 right-0 z-30 max-w-full bg-surface shrink-0 overflow-hidden ${
+          panelExpanded
+            ? "max-md:max-w-none"
+            : "max-md:top-0 max-md:bottom-0 max-md:h-auto max-md:!w-full max-md:max-w-none"
+        } ${
+          resizing ? "artifact-panel-resizing" : ""
+        } ${panelOpen ? "pointer-events-auto" : "pointer-events-none"}`}
         style={{
-          width: panelOpen ? artifactWidth : 0,
-          ["--artifact-expanded" as string]: `${artifactWidth}px`,
+          width: panelOpen ? (panelExpanded ? "100%" : artifactWidth) : 0,
+          ["--composer-height" as string]: `${composerHeight}px`,
         }}
         aria-hidden={!panelOpen}
+        inert={panelOpen ? undefined : true}
       >
-        <div className="ml-auto h-full w-[var(--artifact-expanded)] min-w-[var(--artifact-expanded)] shrink-0 max-md:!w-[100vw] max-md:!min-w-[100vw]">
+        <div
+          className={`h-full shrink-0 transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${panelOpen ? "opacity-100" : "opacity-0"}`}
+          style={{
+            width: panelExpanded ? "100%" : artifactWidth,
+            minWidth: panelExpanded ? undefined : artifactWidth,
+          }}
+        >
           <ArtifactPanel
             projectId={project.id}
             userId={user.uid}
+            listedProject
+            onStudioCreate={createFromStudio}
+            studioBusy={chatBusy || studioRequest !== null}
+            generatingLabel={studioRequest?.label ?? (chatBusy ? "Studio" : null)}
             focus={focus}
             session={session}
             onResizeStart={onResizeStart}
-            onClose={closePanel}
+            onClosePanel={closePanel}
+            onCloseMaterial={closeMaterial}
             onStartPractice={startPractice}
             onExitSession={exitSession}
             onPracticeComplete={setFinishedSet}
             onViewChange={onPanelViewChange}
             onActivate={(artifact) => rememberActive(artifact, "open")}
+            onPanelChromeChange={setPanelOwnChrome}
             liveNote={notesLive}
             livePath={pathLive}
             onLiveSettled={() => setNotesLive(null)}
@@ -481,6 +812,32 @@ export function ProjectView({ projectId, threadId }: { projectId: string; thread
           />
         </div>
       </div>
+      {sourcePreviewId ? (
+        <LibraryFilePreview
+          target={{ projectId: project.id, id: sourcePreviewId, title: materials.find((item) => item.id === sourcePreviewId)?.title }}
+          items={materials.map((item): LibraryItem => ({
+            key: `material:${item.projectId}:${item.id}`,
+            kind: "material",
+            id: item.id,
+            projectId: item.projectId,
+            projectTitle: project.title,
+            title: item.title,
+            preview: item.extractedTextPreview,
+            meta: item.type,
+            createdAt: item.createdAt,
+            materialType: item.type,
+            sizeBytes: item.sizeBytes,
+            pageCount: item.pageCount,
+            hasImages: item.hasImages,
+            images: item.images,
+            storagePath: item.storagePath,
+            previewPagePath: item.previewPagePath,
+          }))}
+          onSelect={(item) => setSourcePreviewId(item.id)}
+          onDeleted={() => setSourcePreviewId(null)}
+          onClose={() => setSourcePreviewId(null)}
+        />
+      ) : null}
     </div>
   );
 }

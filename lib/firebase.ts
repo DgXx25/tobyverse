@@ -7,7 +7,13 @@ import {
   initializeAuth,
   type Auth,
 } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 import { authPopupUnreliable } from "@/lib/standalone";
 
@@ -28,10 +34,10 @@ function envFirebaseConfig() {
 }
 
 function authDomainForOrigin(configured?: string): string | undefined {
-  if (typeof window === "undefined") return configured;
-  // Same-origin auth helper (proxied at /__/auth). Cross-origin firebaseapp.com
-  // loses the redirect session in Cursor/VS Code Simple Browser.
-  return window.location.host;
+  // Firebase's handler is always https://<authDomain>/__/auth/handler.
+  // Using localhost makes Chrome open https://localhost:3000, which this dev
+  // server does not speak, so sign-in dies with ERR_SSL_PROTOCOL_ERROR.
+  return configured;
 }
 
 function getFirebaseConfig() {
@@ -70,6 +76,7 @@ export function getFirebaseApp(): FirebaseApp {
 }
 
 let auth: Auth | undefined;
+let db: Firestore | undefined;
 
 export function getFirebaseAuth(): Auth {
   const app = getFirebaseApp();
@@ -94,7 +101,25 @@ export function getFirebaseAuth(): Auth {
 }
 
 export function getFirebaseDb(): Firestore {
-  return getFirestore(getFirebaseApp());
+  const app = getFirebaseApp();
+  if (db && db.app === app) return db;
+
+  if (typeof window !== "undefined") {
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+      return db;
+    } catch {
+      // Another Firebase module may have initialized Firestore already, or
+      // IndexedDB may be unavailable. Memory-backed Firestore is still safe.
+    }
+  }
+
+  db = getFirestore(app);
+  return db;
 }
 
 export function getFirebaseStorage(): FirebaseStorage {

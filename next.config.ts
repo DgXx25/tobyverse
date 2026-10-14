@@ -25,7 +25,7 @@ const nextConfig: NextConfig = {
     },
   },
   experimental: {
-    optimizePackageImports: ["lucide-react"],
+    optimizePackageImports: ["lucide-react", "@hugeicons/react"],
     middlewareClientMaxBodySize: "202mb",
     serverActions: {
       bodySizeLimit: "202mb",

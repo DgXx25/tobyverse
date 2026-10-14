@@ -1,4 +1,4 @@
-import { ProjectView } from "@/components/project-view";
+import { ProjectRedirect } from "@/components/project-redirect";
 
 export default async function ProjectPage({
   params,
@@ -6,5 +6,5 @@ export default async function ProjectPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  return <ProjectView projectId={id} />;
+  return <ProjectRedirect projectId={id} />;
 }

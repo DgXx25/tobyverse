@@ -1,5 +1,6 @@
 import type { ChatToolCall } from "@/lib/ai/tools";
 import { parseToolCall } from "@/lib/ai/tools";
+import type { ChatSourceRef } from "@/types/chat";
 import { GUEST_CAP_CODE, GuestCapError } from "@/lib/guest";
 
 export async function readSseStream(
@@ -15,6 +16,7 @@ export async function readChatSse(
   handlers?: {
     onDelta?: (delta: string) => void;
     onTool?: (tool: ChatToolCall) => void;
+    onSources?: (sources: ChatSourceRef[]) => void;
   },
 ): Promise<{ text: string; tool: ChatToolCall | null }> {
   if (!response.body) {
@@ -48,6 +50,7 @@ export async function readChatSse(
       const payload = JSON.parse(line.slice(6)) as {
         delta?: string;
         tool?: { name?: unknown; args?: unknown };
+        sources?: ChatSourceRef[];
         error?: string;
         done?: boolean;
       };
@@ -55,6 +58,8 @@ export async function readChatSse(
       if (payload.error) {
         throw new Error(payload.error);
       }
+
+      if (Array.isArray(payload.sources)) handlers?.onSources?.(payload.sources);
 
       if (payload.delta) {
         text += payload.delta;

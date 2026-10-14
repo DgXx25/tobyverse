@@ -24,7 +24,7 @@ const PENDING_REDIRECT_KEY = "tv.auth-redirect";
 const GOOGLE_OIDC_KEY = "tv.google-oidc";
 const GOOGLE_ID_TOKEN_KEY = "tv.google-id-token";
 const GOOGLE_OAUTH_ERROR_KEY = "tv.google-oauth-error";
-const REDIRECT_RESULT_MS = 2500;
+const REDIRECT_RESULT_MS = 15000;
 
 function googleProvider() {
   const provider = new GoogleAuthProvider();
@@ -109,6 +109,22 @@ let redirectResultPromise:
   | Promise<{ credential: UserCredential | null; error: string | null; attempted: boolean }>
   | undefined;
 
+function resolveRedirectResult(auth: ReturnType<typeof getFirebaseAuth>) {
+  return new Promise<UserCredential | null>((resolve, reject) => {
+    const timer = window.setTimeout(() => resolve(null), REDIRECT_RESULT_MS);
+    getRedirectResult(auth, browserPopupRedirectResolver).then(
+      (credential) => {
+        window.clearTimeout(timer);
+        resolve(credential);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function consumeRedirectResult(): Promise<{
   credential: UserCredential | null;
   error: string | null;
@@ -120,12 +136,7 @@ export function consumeRedirectResult(): Promise<{
 
   if (!redirectResultPromise) {
     const auth = getFirebaseAuth();
-    redirectResultPromise = Promise.race([
-      getRedirectResult(auth, browserPopupRedirectResolver),
-      new Promise<null>((resolve) => {
-        window.setTimeout(() => resolve(null), REDIRECT_RESULT_MS);
-      }),
-    ])
+    redirectResultPromise = resolveRedirectResult(auth)
       .then((next) => ({ credential: next ?? null, error: null as string | null, attempted: false }))
       .catch((error) => {
         const message = authErrorMessage(error);

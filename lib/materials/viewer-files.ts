@@ -30,8 +30,8 @@ export function extractedStoredName(material: Material): string | null {
 
 export function viewerTitle(material: Material): string {
   const title = material.title?.trim() || "";
-  if (title && title !== "extracted.txt") return title;
-  return originalStoredName(material) || "Material";
+  if (title && title !== "extracted.txt") return displayFileTitle(title);
+  return displayFileTitle(originalStoredName(material) || "Material");
 }
 
 export function pageFromStoredName(name: string | null): number | null {
@@ -75,6 +75,10 @@ function pickPrimaryImage(images: MaterialImage[], page: number): MaterialImage 
 
 /** Only objects named on the material record. Never pads to pageCount or invents slide-N.png. */
 export function slidesFromImages(images: MaterialImage[], _pageCount = 0): ViewerSlide[] {
+  // Only page renders and complete slide renders are valid visual pages.
+  images = images.filter((image) => {
+    return image.kind === "page" || (image.kind === "slide" && image.complete !== false);
+  });
   const pages = new Set<number>();
   for (const image of images) {
     const name = storedObjectName(image.path);
@@ -91,11 +95,25 @@ export function slidesFromImages(images: MaterialImage[], _pageCount = 0): Viewe
   return slides;
 }
 
+export function mergeViewerPages(images: ViewerSlide[], textPages: Iterable<number>): ViewerSlide[] {
+  const byPage = new Map<number, ViewerSlide>();
+  for (const slide of images) byPage.set(slide.page, slide);
+  for (const page of textPages) {
+    if (!byPage.has(page)) byPage.set(page, { page, fileName: null, storagePath: null });
+  }
+  return [...byPage.values()].sort((a, b) => a.page - b.page);
+}
+
 export function slidesFromMaterial(material: Material): ViewerSlide[] {
   const original = originalStoredName(material);
-  return slidesFromImages(material.images ?? []).filter((slide) => {
+  const slides = slidesFromImages(material.images ?? []).filter((slide) => {
     return Boolean(slide.fileName) && isPreviewImageName(slide.fileName || "", original);
   });
+  const preview = storedObjectName(material.previewPagePath);
+  if (preview && IMAGE_NAME.test(preview) && !slides.some((slide) => slide.page === 1)) {
+    slides.unshift({ page: 1, fileName: preview, storagePath: material.previewPagePath! });
+  }
+  return slides;
 }
 
 export function slidesFromListedNames(names: string[], originalName: string | null): ViewerSlide[] {
@@ -103,10 +121,13 @@ export function slidesFromListedNames(names: string[], originalName: string | nu
   for (const raw of names) {
     const name = storedObjectName(raw);
     if (!name || !isPreviewImageName(name, originalName)) continue;
+    if (/\.pptx?$/i.test(originalName || "") && !/^slide-\d+\.(png|jpe?g|webp|gif)$/i.test(name)) continue;
     images.push({
       page: pageFromStoredName(name) ?? images.length + 1,
       path: name,
       mime: "image/*",
+      kind: /\.pptx?$/i.test(originalName || "") ? "slide" : "page",
+      complete: /\.pptx?$/i.test(originalName || "") ? true : undefined,
     });
   }
   return slidesFromImages(images);
@@ -127,4 +148,31 @@ export function splitSlideText(text: string): Map<number, string> {
     map.set(page, text.slice(start, end).trim());
   }
   return map;
+}
+
+export function paginateText(text: string, pageSize = 2400): Map<number, string> {
+  const pages: string[] = [];
+  for (const section of text.split("\f")) {
+    let remaining = section.trim();
+    while (remaining.length > pageSize) {
+      let end = remaining.lastIndexOf("\n", pageSize);
+      if (end < pageSize / 2) end = remaining.lastIndexOf(" ", pageSize);
+      if (end < pageSize / 2) end = pageSize;
+      pages.push(remaining.slice(0, end).trim());
+      remaining = remaining.slice(end).trim();
+    }
+    if (remaining) pages.push(remaining);
+  }
+  return new Map(pages.map((page, index) => [index + 1, page]));
+}
+
+export function decodeHtmlEntities(title: string): string {
+  return title.replace(/&#(x[0-9a-f]+|\d+);/gi, (match, value: string) => {
+    const code = value[0].toLowerCase() === "x" ? parseInt(value.slice(1), 16) : Number(value);
+    return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : match;
+  }).replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#x20;/gi, " ");
+}
+
+export function displayFileTitle(title: string): string {
+  return decodeHtmlEntities(title);
 }

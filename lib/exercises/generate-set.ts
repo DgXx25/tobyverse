@@ -1,5 +1,4 @@
 import { authHeaders } from "@/lib/api/client";
-import { incrementUsage } from "@/lib/account/store";
 import {
   choosePracticeSetSize,
   createExercise,
@@ -118,6 +117,5 @@ export async function generatePracticeSet(input: {
     throw error;
   }
 
-  await incrementUsage(input.userId, "practiceGenerated");
   return { ids, count: ids.length };
 }

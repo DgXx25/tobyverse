@@ -1,5 +1,5 @@
 export const MATERIAL_PATH_PATTERN =
-  /^users\/([^/]+)\/projects\/([^/]+)\/materials\/([^/]+)\/([^/]+)$/;
+  /^users\/([^/]+)\/projects\/([^/]+)\/materials\/([^/]+)\/((?:pages\/\d{4,6}\.txt|pages\/\d{4,6}\.png)|[^/]+)$/;
 
 export function parseMaterialStoragePath(path: string): {
   userId: string;

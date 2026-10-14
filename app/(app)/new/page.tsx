@@ -1,5 +1,5 @@
-import { StartScreen } from "@/components/start-screen";
+import { NewRoute } from "@/components/new-route";
 
 export default function NewPage() {
-  return <StartScreen />;
+  return <NewRoute />;
 }

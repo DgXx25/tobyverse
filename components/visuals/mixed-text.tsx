@@ -16,7 +16,7 @@ export function MixedText({ text, streaming = false }: { text: string; streaming
         if (part.kind === "latex") {
           if (part.display) {
             return (
-              <div key={index} className="my-3 w-full overflow-x-auto">
+              <div key={index} className="my-5 w-full overflow-x-auto">
                 {renderFormula(part.value, true) ?? part.value}
               </div>
             );
@@ -120,7 +120,7 @@ export function TableCellRich({ text, pair }: { text: string; pair?: boolean }) 
 
 function PlainTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
   return (
-    <div className="chat-table my-3">
+    <div className="chat-table my-5">
       <table>
         <thead>
           <tr>

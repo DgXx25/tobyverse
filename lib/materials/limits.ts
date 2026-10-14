@@ -1,5 +1,5 @@
 export const PREVIEW_MAX_CHARS = 300;
-export const EXTRACT_MAX_CHARS = 120_000;
+export const EXTRACT_MAX_CHARS = 20_000_000;
 export const CHAT_EXCERPT_CHARS = 420;
 export const CHAT_MATERIAL_LIMIT = 3;
 export const SHEET_EXCERPT_CHARS = 2_000;
@@ -8,13 +8,13 @@ export const SHEET_TOTAL_CHARS = 6_000;
 export const PATH_EXCERPT_CHARS = 3_500;
 export const PATH_TOTAL_CHARS = 16_000;
 export const PATH_SOURCE_LIMIT = 5;
-export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
-export const MAX_UPLOAD_LABEL = "200 MB";
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_UPLOAD_LABEL = "100 MB";
 /** Multipart form overhead on top of the file cap. */
 export const MAX_UPLOAD_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
 
 export function uploadTooLargeMessage(): string {
-  return `File is larger than ${MAX_UPLOAD_LABEL}.`;
+  return `File exceeds the ${MAX_UPLOAD_LABEL} upload limit`;
 }
 
 export const MAX_SLIDE_IMAGES = 16;

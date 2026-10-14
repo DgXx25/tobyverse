@@ -1,15 +1,14 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { isMobileWidth, MOBILE_MQ } from "@/lib/workspace/media";
 
-export type SettingsSection = "account" | "appearance" | "parameters" | "help" | "billing" | "usage" | "data" | "memory";
-export type AccountSheetPage = "root" | "appearance" | "parameters" | "billing" | "usage" | "data" | "memory";
+export type SettingsSection = "account" | "appearance" | "parameters" | "help" | "planUsage" | "billing" | "usage" | "data" | "memory";
+export type AccountSheetPage = "root" | "appearance" | "parameters" | "planUsage" | "billing" | "usage" | "data" | "memory";
 
 export type PendingPanel = {
   projectId: string;
-  kind: "material" | "sheet" | "plan" | "practice" | "path";
+  kind: "material" | "sheet" | "plan" | "practice" | "path" | "settings";
   id: string;
   title?: string;
 };
@@ -21,7 +20,16 @@ export type ProjectSettingsBridge = {
   onDelete: () => void;
 };
 
+/** The open notebook's share control. The top bar shows it; the notebook owns the behaviour. */
+export type ProjectShareBridge = {
+  active: boolean;
+  busy: boolean;
+  onToggle: () => void;
+};
+
 type ShellContextValue = {
+  projectShare: ProjectShareBridge | null;
+  setProjectShare: (value: ProjectShareBridge | null) => void;
   sidebarHidden: boolean;
   setSidebarHidden: (value: boolean) => void;
   mobileNavOpen: boolean;
@@ -41,6 +49,8 @@ type ShellContextValue = {
   setPendingPanel: (value: PendingPanel | null) => void;
   mobileTopActions: ReactNode;
   setMobileTopActions: (value: ReactNode) => void;
+  selectedProjectId: string | null;
+  setSelectedProjectId: (value: string | null) => void;
 };
 
 const ShellContext = createContext<ShellContextValue | null>(null);
@@ -54,18 +64,30 @@ function sectionToSheetPage(section?: SettingsSection): AccountSheetPage {
   if (
     section === "appearance" ||
     section === "parameters" ||
+    section === "planUsage" ||
     section === "billing" ||
     section === "usage" ||
     section === "data" ||
     section === "memory"
   ) {
-    return section;
+    return section === "billing" || section === "usage" ? "planUsage" : section;
   }
   return "root";
 }
 
+const SELECTED_PROJECT_KEY = "tv.selectedProject";
+
+function readSelectedProject(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const value = window.sessionStorage.getItem(SELECTED_PROJECT_KEY);
+    return value?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function ShellProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpenState] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -75,6 +97,18 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   const [projectSettings, setProjectSettings] = useState<ProjectSettingsBridge | null>(null);
   const [pendingPanel, setPendingPanel] = useState<PendingPanel | null>(null);
   const [mobileTopActions, setMobileTopActions] = useState<ReactNode>(null);
+  const [projectShare, setProjectShare] = useState<ProjectShareBridge | null>(null);
+  const [selectedProjectId, setSelectedProjectIdState] = useState<string | null>(readSelectedProject);
+
+  const setSelectedProjectId = useCallback((value: string | null) => {
+    setSelectedProjectIdState(value);
+    try {
+      if (value) window.sessionStorage.setItem(SELECTED_PROJECT_KEY, value);
+      else window.sessionStorage.removeItem(SELECTED_PROJECT_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
 
   const setMobileNavOpen = useCallback((value: boolean) => {
     if (!value) blurActive();
@@ -110,10 +144,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
 
   const openSettings = useCallback((section?: SettingsSection) => {
     if (section === "account") {
-      setSettingsOpen(false);
-      setAccountSheetOpen(false);
-      setAccountSheetPage("root");
-      router.push("/account");
+      window.open("/account", "_blank", "noopener,noreferrer");
       return;
     }
     if (isMobileWidth()) {
@@ -125,12 +156,14 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     }
     setSettingsSection(section ?? "appearance");
     setSettingsOpen(true);
-  }, [router]);
+  }, []);
 
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   const value = useMemo(
     () => ({
+      projectShare,
+      setProjectShare,
       sidebarHidden,
       setSidebarHidden,
       mobileNavOpen,
@@ -150,8 +183,11 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       setPendingPanel,
       mobileTopActions,
       setMobileTopActions,
+      selectedProjectId,
+      setSelectedProjectId,
     }),
     [
+      projectShare,
       sidebarHidden,
       mobileNavOpen,
       setMobileNavOpen,
@@ -166,6 +202,8 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       projectSettings,
       pendingPanel,
       mobileTopActions,
+      selectedProjectId,
+      setSelectedProjectId,
     ],
   );
 

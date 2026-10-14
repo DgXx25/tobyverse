@@ -1,5 +1,7 @@
-export const ADMIN_EMAIL = "davit.gvakharia@gmail.com";
+export function adminUids(): Set<string> {
+  return new Set((process.env.ADMIN_UIDS ?? "").split(",").map((uid) => uid.trim()).filter(Boolean));
+}
 
-export function isAdminEmail(email: string | null | undefined): boolean {
-  return email?.trim().toLowerCase() === ADMIN_EMAIL;
+export function isAdminUid(uid: string | null | undefined): boolean {
+  return Boolean(uid && adminUids().has(uid));
 }

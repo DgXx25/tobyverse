@@ -3,6 +3,7 @@ import { generateJson } from "@/lib/ai/json";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { clipText } from "@/lib/materials/limits";
 import { PROBLEM_EXERCISE_TYPES, THEORY_EXERCISE_TYPES, type ExerciseType } from "@/types/exercise";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 
@@ -23,8 +24,9 @@ function asType(value: unknown): ExerciseType | null {
 }
 
 export async function POST(request: Request) {
+  let session;
   try {
-    await assertSignedInRequest(request);
+    session = await assertSignedInRequest(request);
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -55,6 +57,12 @@ export async function POST(request: Request) {
 
   const socratic = mode === "socratic" && !reveal;
   const paper = type === "paper";
+  let usage;
+  try {
+    usage = await startAiUsageSession(session.uid);
+  } catch (error) {
+    return aiUsageErrorResponse(error);
+  }
   const result = await generateJson(
     `Exercise type: ${type}\nItem: ${clipText(prompt, 1500)}\nStudent: ${clipText(answer, paper ? 3500 : 1500)}\nMode: ${socratic ? "socratic" : "normal"}`,
     feedbackSchema,
@@ -64,8 +72,10 @@ export async function POST(request: Request) {
         : socratic
           ? "JSON only. Give a short hint. Never reveal the final answer."
           : "JSON only. Give concise feedback. You may confirm the answer.",
+      usage: usage.report,
     },
   );
+  await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
 
   if (!result.ok) {
     return Response.json({ error: result.error }, { status: 422 });

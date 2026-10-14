@@ -14,42 +14,51 @@ export type MaterialFileErr = {
 };
 
 export type MaterialFileResult = MaterialFileOk | MaterialFileErr;
+export type MaterialFileAccess = { shareId: string };
 
 const memory = new Map<string, Promise<MaterialFileResult>>();
-const missing = new Set<string>();
+const missing = new Map<string, number>();
 const blobUrls = new Map<string, string>();
 const listed = new Map<string, Promise<{ ok: boolean; names: string[] }>>();
 
-export function cacheKey(projectId: string, materialId: string, name: string): string {
-  return `${projectId}/${materialId}/${name}`;
+export function cacheKey(projectId: string, materialId: string, name: string, access?: MaterialFileAccess): string {
+  return `${access?.shareId ? `share:${access.shareId}/` : ""}${projectId}/${materialId}/${name}`;
 }
 
 export function storedFileName(path: string | undefined | null): string | null {
   return storedObjectName(path);
 }
 
-export function isMissingMaterialName(projectId: string, materialId: string, name: string): boolean {
-  return missing.has(cacheKey(projectId, materialId, name));
+export function isMissingMaterialName(projectId: string, materialId: string, name: string, access?: MaterialFileAccess): boolean {
+  const key = cacheKey(projectId, materialId, name, access);
+  const expires = missing.get(key);
+  if (expires && expires > Date.now()) return true;
+  missing.delete(key);
+  return false;
 }
 
 function markMissing(key: string) {
-  missing.add(key);
+  missing.set(key, Date.now() + 5000);
 }
 
 export async function listMaterialFiles(
   projectId: string,
   materialId: string,
+  access?: MaterialFileAccess,
 ): Promise<{ ok: boolean; names: string[] }> {
-  const key = `${projectId}/${materialId}`;
+  const key = cacheKey(projectId, materialId, "__list__", access);
   const pending = listed.get(key);
   if (pending) return pending;
 
   const request = (async (): Promise<{ ok: boolean; names: string[] }> => {
     const query = new URLSearchParams({ projectId, materialId, list: "1" });
+    const endpoint = access?.shareId
+      ? `/api/share/${encodeURIComponent(access.shareId)}/file?${query}`
+      : `/api/materials/file?${query}`;
     let response: Response;
     try {
-      response = await fetch(`/api/materials/file?${query}`, {
-        headers: await authHeaders(false),
+      response = await fetch(endpoint, {
+        headers: access?.shareId ? undefined : await authHeaders(false),
       });
     } catch {
       return { ok: false, names: [] };
@@ -70,7 +79,7 @@ export async function listMaterialFiles(
 
   listed.set(key, request);
   const result = await request;
-  if (!result.ok) listed.delete(key);
+  listed.delete(key);
   return result;
 }
 
@@ -78,23 +87,27 @@ export async function getMaterialFile(
   projectId: string,
   materialId: string,
   name: string,
+  access?: MaterialFileAccess,
 ): Promise<MaterialFileResult> {
   if (!name || name.includes("/") || name.includes("..")) {
-    return { ok: false, status: 400, message: "ფაილი ვერ მოიძებნა" };
+    return { ok: false, status: 400, message: "File not found." };
   }
-  const key = cacheKey(projectId, materialId, name);
-  if (missing.has(key)) {
-    return { ok: false, status: 404, message: "ფაილი ვერ მოიძებნა" };
+  const key = cacheKey(projectId, materialId, name, access);
+  if (isMissingMaterialName(projectId, materialId, name, access)) {
+    return { ok: false, status: 404, message: "File not found." };
   }
   const pending = memory.get(key);
   if (pending) return pending;
 
   const request = (async (): Promise<MaterialFileResult> => {
     const query = new URLSearchParams({ projectId, materialId, name });
+    const endpoint = access?.shareId
+      ? `/api/share/${encodeURIComponent(access.shareId)}/file?${query}`
+      : `/api/materials/file?${query}`;
     let response: Response;
     try {
-      response = await fetch(`/api/materials/file?${query}`, {
-        headers: await authHeaders(false),
+      response = await fetch(endpoint, {
+        headers: access?.shareId ? undefined : await authHeaders(false),
       });
     } catch {
       return { ok: false, status: 0, message: "Could not read file." };
@@ -104,7 +117,7 @@ export async function getMaterialFile(
     }
     if (response.status === 404) {
       markMissing(key);
-      return { ok: false, status: 404, message: "ფაილი ვერ მოიძებნა" };
+      return { ok: false, status: 404, message: "File not found." };
     }
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -123,7 +136,7 @@ export async function getMaterialFile(
 
   memory.set(key, request);
   const result = await request;
-  if (!result.ok && result.status !== 404 && result.status !== 401) {
+  if (!result.ok) {
     memory.delete(key);
   }
   return result;
@@ -142,14 +155,15 @@ export async function downloadMaterialFile(
   materialId: string,
   name: string,
   downloadAs?: string,
+  access?: MaterialFileAccess,
 ): Promise<MaterialFileErr | null> {
   if (!name || name === "extracted.txt") {
-    return { ok: false, status: 400, message: "ფაილი ვერ მოიძებნა" };
+    return { ok: false, status: 400, message: "File not found." };
   }
   const saveAs = (downloadAs && downloadAs !== "extracted.txt" ? downloadAs : name) || name;
-  const key = cacheKey(projectId, materialId, name);
-  if (missing.has(key)) {
-    return { ok: false, status: 404, message: "ფაილი ვერ მოიძებნა" };
+  const key = cacheKey(projectId, materialId, name, access);
+  if (isMissingMaterialName(projectId, materialId, name, access)) {
+    return { ok: false, status: 404, message: "File not found." };
   }
   const pending = memory.get(key);
   if (pending) {
@@ -160,11 +174,14 @@ export async function downloadMaterialFile(
   }
 
   const query = new URLSearchParams({ projectId, materialId, name, download: "1", filename: saveAs });
+  const endpoint = access?.shareId
+    ? `/api/share/${encodeURIComponent(access.shareId)}/file?${query}`
+    : `/api/materials/file?${query}`;
   const request = (async (): Promise<MaterialFileResult> => {
     let response: Response;
     try {
-      response = await fetch(`/api/materials/file?${query}`, {
-        headers: await authHeaders(false),
+      response = await fetch(endpoint, {
+        headers: access?.shareId ? undefined : await authHeaders(false),
       });
     } catch {
       return { ok: false, status: 0, message: "Could not read file." };
@@ -172,7 +189,7 @@ export async function downloadMaterialFile(
     if (response.status === 401) return { ok: false, status: 401, message: "Sign in." };
     if (response.status === 404) {
       markMissing(key);
-      return { ok: false, status: 404, message: "ფაილი ვერ მოიძებნა" };
+      return { ok: false, status: 404, message: "File not found." };
     }
     if (!response.ok) {
       return { ok: false, status: response.status, message: "Could not read file." };
@@ -186,7 +203,7 @@ export async function downloadMaterialFile(
   memory.set(key, request);
   const result = await request;
   if (!result.ok) {
-    if (result.status !== 404 && result.status !== 401) memory.delete(key);
+    memory.delete(key);
     return result;
   }
   saveBlob(result.bytes, result.contentType, saveAs);

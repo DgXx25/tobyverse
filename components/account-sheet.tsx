@@ -10,12 +10,10 @@ import { useShell, type AccountSheetPage } from "@/components/workspace/shell-co
 import { useTheme } from "@/components/workspace/theme-provider";
 import { ThemePicker } from "@/components/workspace/theme-picker";
 import { ParametersPanel } from "@/components/workspace/parameters-panel";
-import { BillingCard } from "@/components/account/billing-card";
-import { UsageMeters } from "@/components/account/usage-meters";
+import { PlanUsage } from "@/components/account/plan-usage";
 import { AccountDataControls } from "@/components/account/data-controls";
 import { MemoriesPanel } from "@/components/account/memories-panel";
 import { useUserProfile } from "@/components/account/use-user-profile";
-import { emptyUsage } from "@/lib/account/plan";
 import {
   Drawer,
   DrawerContent,
@@ -66,7 +64,7 @@ export function AccountSheet() {
                 type="button"
                 onClick={() => {
                   closeAccountSheet();
-                  router.push("/account");
+                  window.open("/account", "_blank", "noopener,noreferrer");
                 }}
                 className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-surface-2"
               >
@@ -84,7 +82,7 @@ export function AccountSheet() {
                 label="Account"
                 onClick={() => {
                   closeAccountSheet();
-                  router.push("/account");
+                  window.open("/account", "_blank", "noopener,noreferrer");
                 }}
               />
               <SheetRow
@@ -101,14 +99,9 @@ export function AccountSheet() {
 
               <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Payments</p>
               <SheetRow
-                icon={<UiIcon name="billing" size={18} />}
-                label="Billing"
-                onClick={() => setAccountSheetPage("billing")}
-              />
-              <SheetRow
                 icon={<UiIcon name="usage" size={18} />}
-                label="Usage"
-                onClick={() => setAccountSheetPage("usage")}
+                label="Plan & usage"
+                onClick={() => setAccountSheetPage("planUsage")}
               />
 
               <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Data & Information</p>
@@ -147,14 +140,9 @@ export function AccountSheet() {
                   <ParametersPanel />
                 </div>
               )}
-              {accountSheetPage === "billing" && (
+              {accountSheetPage === "planUsage" && (
                 <div className="px-4 pb-8">
-                  <BillingCard />
-                </div>
-              )}
-              {accountSheetPage === "usage" && (
-                <div className="px-4 pb-8">
-                  <UsageMeters usage={profile?.usage ?? emptyUsage()} />
+                  <PlanUsage profile={profile} />
                 </div>
               )}
               {accountSheetPage === "memory" && (
@@ -178,8 +166,7 @@ export function AccountSheet() {
 function pageTitle(page: AccountSheetPage): string {
   if (page === "appearance") return "Appearance";
   if (page === "parameters") return "Parameters";
-  if (page === "billing") return "Billing";
-  if (page === "usage") return "Usage";
+  if (page === "planUsage" || page === "billing" || page === "usage") return "Plan & usage";
   if (page === "memory") return "Memory";
   if (page === "data") return "Data";
   return "Account";

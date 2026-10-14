@@ -3,6 +3,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  getDoc,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -16,7 +17,7 @@ import { extractedTextPath } from "@/lib/materials/storage";
 import { storedObjectName } from "@/lib/materials/storage-path";
 import { mimeFromName } from "@/lib/materials/types";
 import { asString, toIsoDate } from "@/lib/timestamps";
-import { MATERIAL_TYPES, type Material, type MaterialImage, type MaterialStatus, type MaterialType } from "@/types/material";
+import { MATERIAL_TYPES, type Material, type MaterialImage, type MaterialIndex, type MaterialStatus, type MaterialType } from "@/types/material";
 
 function materialsRef(projectId: string) {
   return collection(
@@ -60,7 +61,7 @@ function asImages(value: unknown): MaterialImage[] {
       ];
     }
     if (!item || typeof item !== "object") return [];
-    const row = item as { page?: unknown; path?: unknown; mime?: unknown };
+    const row = item as { page?: unknown; path?: unknown; mime?: unknown; kind?: unknown };
     if (typeof row.path !== "string" || !row.path) return [];
     const namedPage = pageFromName(row.path);
     return [
@@ -71,6 +72,7 @@ function asImages(value: unknown): MaterialImage[] {
             : namedPage,
         path: row.path,
         mime: typeof row.mime === "string" && row.mime ? row.mime : mimeFromName(storedObjectName(row.path) || row.path),
+        ...(row.kind === "page" || row.kind === "figure" ? { kind: row.kind } : {}),
       },
     ];
   });
@@ -88,6 +90,13 @@ function mergeImages(images: unknown, imagePaths: unknown): MaterialImage[] {
     return true;
   });
   return extra.length ? [...fromImages, ...extra] : fromImages;
+}
+
+function asIndex(value: unknown): MaterialIndex | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as { status?: unknown; chunks?: unknown };
+  const status = row.status === "ready" || row.status === "failed" ? row.status : "indexing";
+  return { status, chunks: typeof row.chunks === "number" ? row.chunks : 0 };
 }
 
 function mapMaterial(id: string, projectId: string, data: Record<string, unknown>): Material {
@@ -111,11 +120,13 @@ function mapMaterial(id: string, projectId: string, data: Record<string, unknown
     extractedPath,
     extractedTextPreview: asString(data.extractedTextPreview).slice(0, 300),
     previewHtml: asString(data.previewHtml).slice(0, PREVIEW_HTML_MAX) || undefined,
+    previewPagePath: asString(data.previewPagePath) || undefined,
     sizeBytes: typeof data.sizeBytes === "number" ? data.sizeBytes : 0,
     pageCount: typeof data.pageCount === "number" ? data.pageCount : 0,
     hasImages: data.hasImages === true,
     textChars: typeof data.textChars === "number" ? data.textChars : 0,
     images: mergeImages(data.images, data.imagePaths),
+    index: asIndex(data.index),
     status: asStatus(data.status),
     createdAt: toIsoDate(data.createdAt),
   };
@@ -151,7 +162,7 @@ export async function writeMaterialDoc(
     title: data.title,
     type: data.type,
     storagePath: data.storagePath,
-    textPath: data.textPath ?? extractedTextPath(data.userId, projectId, materialId),
+    ...(data.type === "pdf" && !data.textPath ? {} : { textPath: data.textPath ?? extractedTextPath(data.userId, projectId, materialId) }),
     extractedTextPreview: data.extractedTextPreview.slice(0, 300),
     sizeBytes: data.sizeBytes,
     pageCount: data.pageCount ?? 0,
@@ -179,6 +190,12 @@ export function subscribeMaterials(
     },
     (error) => onError?.(error),
   );
+}
+
+export async function getMaterial(projectId: string, materialId: string): Promise<Material | null> {
+  const snap = await getDoc(doc(materialsRef(projectId), materialId));
+  if (!snap.exists()) return null;
+  return mapMaterial(snap.id, projectId, snap.data());
 }
 
 export async function listMaterials(projectId: string): Promise<Material[]> {

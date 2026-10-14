@@ -3,9 +3,10 @@
 import { DialogueView } from "@/components/blocks/dialogue";
 import { GridView } from "@/components/blocks/grid";
 import { PaperView } from "@/components/blocks/paper";
+import { useChatExercise } from "@/components/workspace/chat-exercise-context";
+import { resolvePaperPayload } from "@/lib/blocks/paper-thread";
 import type { DialogueBlock } from "@/lib/blocks/kinds/dialogue";
 import type { GridBlock } from "@/lib/blocks/kinds/grid";
-import type { PaperPayload } from "@/types/exercise";
 import type { ParsedChatBlock } from "@/lib/blocks/types";
 
 export function TobyBlockView({
@@ -15,6 +16,7 @@ export function TobyBlockView({
   block: ParsedChatBlock;
   streaming?: boolean;
 }) {
+  const { priorPapers, interactive } = useChatExercise();
   if (block.type === "dialogue") {
     const data = block.data as DialogueBlock;
     if (!data || !Array.isArray(data.lines)) return null;
@@ -26,13 +28,9 @@ export function TobyBlockView({
     return <GridView block={data} />;
   }
   if (block.type === "paper") {
-    const data = block.data as PaperPayload;
-    return (
-      <PaperView
-        block={data?.form === "ganckhadeba" ? data : { form: "ganckhadeba", brief: data?.brief ?? "" }}
-        streaming={streaming}
-      />
-    );
+    const data = resolvePaperPayload(block.data, priorPapers);
+    if (!data) return null;
+    return <PaperView block={data} streaming={streaming} skipped={!interactive} />;
   }
   return null;
 }

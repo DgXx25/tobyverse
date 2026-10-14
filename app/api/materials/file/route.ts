@@ -12,6 +12,10 @@ function guessContentType(name: string): string {
   if (lower.endsWith(".webp")) return "image/webp";
   if (lower.endsWith(".gif")) return "image/gif";
   if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (lower.endsWith(".xls")) return "application/vnd.ms-excel";
+  if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (lower.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
   return "application/octet-stream";
 }
 
@@ -73,7 +77,7 @@ export async function GET(request: Request) {
       return Response.json({ names: objectNamesFromList(paths, prefix) });
     }
 
-    if (!name || name.includes("/") || name.includes("..")) {
+    if (!name || name.includes("..") || (name.includes("/") && !/^pages\/\d{4,6}\.(?:txt|png)$/.test(name))) {
       return Response.json({ error: "Invalid file request." }, { status: 400 });
     }
     const filename = storedObjectName(filenameRaw) || name;
@@ -93,7 +97,7 @@ export async function GET(request: Request) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (/\b404\b|not found|No such object/i.test(message)) {
-        return Response.json({ error: "ფაილი ვერ მოიძებნა" }, { status: 404 });
+        return Response.json({ error: "File not found." }, { status: 404 });
       }
       if (/\b401\b|\b403\b|unauthorized|forbidden|app check/i.test(message)) {
         return Response.json({ error: "Could not read file." }, { status: 403 });

@@ -1,5 +1,6 @@
 import type { ChatMode, ChatTurn } from "@/types/chat";
 import type { ChatStreamPart, ChatToolName } from "@/lib/ai/tools";
+import type { AiUsageReporter } from "@/types/billing";
 
 export type GenerateImagePart = {
   mimeType: string;
@@ -14,7 +15,10 @@ export type GenerateOptions = {
   json?: boolean;
   /** `true` = non-intercept tools. An array is that turn’s mode allowlist. Omit / false = no declarations. */
   tools?: boolean | readonly ChatToolName[];
+  /** Force one function only for an explicit slash/chip selection. */
+  toolChoice?: ChatToolName;
   images?: GenerateImagePart[];
+  usage?: AiUsageReporter;
 };
 
 export interface AIProvider {

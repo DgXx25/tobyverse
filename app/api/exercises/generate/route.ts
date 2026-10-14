@@ -7,6 +7,7 @@ import { isGenerableExerciseType, practiceSetBounds } from "@/lib/exercises/plan
 import { clipText, SHEET_TOTAL_CHARS } from "@/lib/materials/limits";
 import { EXERCISE_CATEGORIES, PROBLEM_EXERCISE_TYPES, THEORY_EXERCISE_TYPES, type ExerciseType } from "@/types/exercise";
 import { isProblemType } from "@/lib/exercises/templates";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 
@@ -85,8 +86,9 @@ function categoryFor(type: ExerciseType) {
 }
 
 export async function POST(request: Request) {
+  let session;
   try {
-    await assertAccountRequest(request);
+    session = await assertAccountRequest(request);
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -124,6 +126,14 @@ export async function POST(request: Request) {
     }
   }
 
+  let usage;
+  try {
+    usage = await startAiUsageSession(session.uid);
+  } catch (error) {
+    return aiUsageErrorResponse(error);
+  }
+  const commitUsage = () => usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
+
   const projectTitle = typeof body.projectTitle === "string" ? body.projectTitle : "Project";
   const shared = sourcePrompt({
     projectTitle,
@@ -148,11 +158,13 @@ export async function POST(request: Request) {
     const before = getGenerateTextCallCount();
     const result = await generateJson(shared, practiceSetEnvelopeSchema(minAccept, requested), {
       systemInstruction: `${exerciseSetSystemPrompt(types)}${knowledgeNote}`,
+      usage: usage.report,
     });
     const geminiCalls = getGenerateTextCallCount() - before;
 
     if (!result.ok) {
       console.info(`[practice-generate] geminiCalls before=${types.length} after=${geminiCalls} items=0`);
+      await commitUsage();
       return Response.json({ error: result.error, geminiCalls }, { status: 422 });
     }
 
@@ -172,27 +184,33 @@ export async function POST(request: Request) {
 
     if (items.length < minAccept) {
       console.info(`[practice-generate] geminiCalls before=${types.length} after=${geminiCalls} items=${items.length}`);
+      await commitUsage();
       return Response.json({ error: "Practice set was too small.", geminiCalls }, { status: 422 });
     }
 
     const capped = items.slice(0, requested);
     console.info(`[practice-generate] geminiCalls before=${types.length} after=${geminiCalls} items=${capped.length}`);
+    await commitUsage();
     return Response.json({ items: capped, geminiCalls });
   }
 
   const type = asType(body.type);
   if (!type) {
+    await commitUsage();
     return Response.json({ error: "Unknown exercise type." }, { status: 400 });
   }
 
   const result = await generateJson(`${shared}\n\nType: ${type}`, payloadSchemaFor(type), {
     systemInstruction: `${exerciseSystemPrompt(type)}${knowledgeNote}`,
+    usage: usage.report,
   });
 
   if (!result.ok) {
+    await commitUsage();
     return Response.json({ error: result.error }, { status: 422 });
   }
 
+  await commitUsage();
   return Response.json({
     type,
     category: categoryFor(type),

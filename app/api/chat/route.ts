@@ -1,16 +1,21 @@
 import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/gemini";
-import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
-import { DEFAULT_AI_PROVIDER, isEnabledProvider } from "@/lib/ai/catalog";
+import { eligibleChatToolNames, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
+import { DEFAULT_AI_PROVIDER, DEFAULT_GEMINI_MODEL, isAdminOnlyAiModel, isKnownAiModel, isEnabledProvider } from "@/lib/ai/catalog";
 import { FREE_CAPS } from "@/lib/account/plan";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
 import { parseChatArtifact } from "@/lib/artifacts/active";
-import { fallbackChatTool, forcedAdvancePath, forcedCreateTool, forcedPathTool, gateChatTool } from "@/lib/composer/intent";
+import { fallbackToolAfterProvider, forcedToolForRequest } from "@/lib/chat/tool-routing";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
 import { asMemoryFacts, sanitizePersonalization } from "@/lib/memory/normalize";
 import { asChatMode, chatModeSendsToolDeclarations, chatModeTools } from "@/lib/core/chat-modes";
-import { CHAT_MODES, type ChatArtifact, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
+import { retrieveChunks } from "@/lib/rag/server";
+import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
+import { papersInTurns } from "@/lib/blocks/paper-thread";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
+import { adminErrorResponse, assertAdminRequest } from "@/lib/admin/assert";
+import { CHAT_MODES, type ChatArtifact, type ChatSource, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +24,7 @@ type ChatRequestBody = {
   prompt?: unknown;
   mode?: unknown;
   provider?: unknown;
+  model?: unknown;
   history?: unknown;
   context?: unknown;
 };
@@ -124,6 +130,7 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     personalization: sanitizePersonalization(row.personalization) || undefined,
     hintAsk: row.hintAsk === true,
     examAsk: row.examAsk === true,
+    threadPaper: row.threadPaper === true,
   };
 }
 
@@ -205,31 +212,6 @@ function encodeSse(payload: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-function gateFromContext(
-  tool: ChatToolCall | null,
-  prompt: string,
-  context: ChatGenerationContext,
-  keywordFallback: boolean,
-): ChatToolCall {
-  return gateChatTool({
-    tool,
-    prompt,
-    hasMaterials: Boolean(context.hasMaterials || context.materials.length > 0),
-    confirmed: context.confirmed,
-    priorClarify: context.priorClarify,
-    pendingTopic: context.pendingTopic,
-    pendingKind: context.pendingKind,
-    active: context.activeArtifact,
-    accepted: context.acceptedTool,
-    pathTopic: context.pathTopic,
-    projectTitle: context.projectTitle,
-    hasPath: context.hasPath,
-    pathStarted: Boolean(context.hasPath && context.path && context.path.started !== false),
-    keywordFallback,
-    mode: context.mode,
-  });
-}
-
 export async function POST(request: Request) {
   let session;
   try {
@@ -276,6 +258,29 @@ export async function POST(request: Request) {
     });
   }
 
+  const requestedModel = typeof body.model === "string" ? body.model : DEFAULT_GEMINI_MODEL;
+  if (!isKnownAiModel(requestedModel)) {
+    return Response.json({ error: "That model is not available." }, { status: 400 });
+  }
+  if (isAdminOnlyAiModel(requestedModel)) {
+    try {
+      await assertAdminRequest(request);
+    } catch (error) {
+      return adminErrorResponse(error);
+    }
+  }
+  const modelId = requestedModel;
+
+  let usage: Awaited<ReturnType<typeof startAiUsageSession>> | null = null;
+  if (!session.anonymous) {
+    try {
+      usage = await startAiUsageSession(session.uid, { models: [modelId] });
+    } catch (error) {
+      return aiUsageErrorResponse(error);
+    }
+  }
+  const usageReporter = usage ? usage.report : undefined;
+
   const history = asHistory(body.history).slice(-20);
   if (session.anonymous) {
     const assistantTurns = history.filter((item) => item.role === "assistant").length;
@@ -284,7 +289,31 @@ export async function POST(request: Request) {
     }
   }
   const context = asContext(body.context, mode);
-  const withPrompt = { ...context, prompt };
+  const threadPaper = context.threadPaper || papersInTurns(history).length > 0;
+
+  // The answer is grounded in the user's own materials: retrieve server-side from the vector index.
+  let sources: ChatSource[] = [];
+  if (!session.anonymous && context.projectId && prompt.length >= 3) {
+    try {
+      const rawContext = body.context && typeof body.context === "object" ? (body.context as Record<string, unknown>) : {};
+      const materialIds = Array.isArray(rawContext.materialIds)
+        ? rawContext.materialIds.filter((id): id is string => typeof id === "string").slice(0, 200)
+        : [];
+      sources = numberSources(
+        await retrieveChunks({
+          uid: session.uid,
+          projectId: context.projectId,
+          query: retrievalQuery(prompt, history),
+          materialIds,
+          limit: mode === "fast" ? 5 : 8,
+        }),
+      );
+    } catch (error) {
+      console.warn("[rag] retrieval failed, answering without sources", error instanceof Error ? error.message : error);
+    }
+  }
+
+  const withPrompt = { ...context, prompt, threadPaper, sources };
   const guestContext = session.anonymous
     ? { ...withPrompt, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
     : withPrompt;
@@ -293,76 +322,34 @@ export async function POST(request: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        let raw: ChatToolCall | null = guestContext.acceptedTool
-          ? { name: guestContext.acceptedTool, args: {} }
-          : null;
+        if (sources.length > 0) controller.enqueue(encodeSse({ sources: sources.map(sourceRef) }));
+        let raw: ChatToolCall | null = null;
         let streamed = false;
-        let textChars = 0;
         const supportsTools =
           Boolean(getAIProvider().generateToolStream) &&
-          !guestContext.acceptedTool &&
           chatModeSendsToolDeclarations(mode);
-        let providerReturnedTool = Boolean(raw);
         let toolSent = false;
-
-        let forced = guestContext.hintAsk || guestContext.examAsk
+        let pendingProviderText = "";
+        const explicit = guestContext.hintAsk || guestContext.examAsk
           ? null
-          : forcedPathTool({
-            prompt,
-            hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
-            confirmed: guestContext.confirmed,
-            accepted: guestContext.acceptedTool,
-            pathTopic: guestContext.pathTopic,
-            hasPath: guestContext.hasPath,
-            pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
-          }) ??
-          forcedAdvancePath({
-            prompt,
-            hasPath: guestContext.hasPath,
-            pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
-          }) ??
-          forcedCreateTool({
-          prompt,
-          hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
-          confirmed: guestContext.confirmed,
-          priorClarify: guestContext.priorClarify,
-          pendingTopic: guestContext.pendingTopic,
-          pendingKind: guestContext.pendingKind,
-          accepted: guestContext.acceptedTool,
-          pathTopic: guestContext.pathTopic,
-          projectTitle: guestContext.projectTitle,
-        });
-        if (session.anonymous && forced) {
-          forced = gateGuestChatTool(forced);
-          if (forced.name === "answer") forced = null;
-        }
-        if (forced && (forced.name === "create_sheet" || forced.name === "create_practice" || forced.name === "create_path" || forced.name === "advance_path" || forced.name === "restart_path" || forced.name === "start_path")) {
-          controller.enqueue(encodeSse({ tool: forced }));
-          controller.enqueue(encodeSse({ done: true }));
-          controller.close();
-          return;
-        }
-        if (forced?.name === "clarify") {
-          const question = forced.args.question?.trim();
+          : forcedToolForRequest({
+              prompt,
+              mode,
+              accepted: guestContext.acceptedTool,
+              hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
+              priorClarify: guestContext.priorClarify,
+              pendingTopic: guestContext.pendingTopic,
+              pendingKind: guestContext.pendingKind,
+              active: guestContext.activeArtifact,
+              pathTopic: guestContext.pathTopic,
+              projectTitle: guestContext.projectTitle,
+              hasPath: guestContext.hasPath,
+              pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
+            });
+        if (explicit?.name === "clarify") {
+          const question = explicit.args.question?.trim();
           if (question) controller.enqueue(encodeSse({ delta: question }));
-          controller.enqueue(encodeSse({ tool: forced }));
-          controller.enqueue(encodeSse({ done: true }));
-          controller.close();
-          return;
-        }
-
-        if (guestContext.hintAsk) {
-          for await (const delta of generateTextStream(prompt, {
-            mode,
-            history,
-            systemInstruction,
-            images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
-          })) {
-            streamed = true;
-            textChars += delta.length;
-            controller.enqueue(encodeSse({ delta }));
-          }
-          controller.enqueue(encodeSse({ tool: { name: "answer", args: {} } }));
+          controller.enqueue(encodeSse({ tool: explicit }));
           controller.enqueue(encodeSse({ done: true }));
           controller.close();
           return;
@@ -370,16 +357,21 @@ export async function POST(request: Request) {
 
         if (supportsTools) {
           for await (const part of generateToolStream(prompt, {
+            model: modelId,
             mode,
             history,
             systemInstruction,
             tools: chatModeTools(mode),
+            toolChoice:
+              explicit && eligibleChatToolNames(mode).includes(explicit.name)
+                ? explicit.name
+                : undefined,
             images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+            usage: usageReporter,
           })) {
             if (part.tool && !raw) {
               raw = part.tool;
-              providerReturnedTool = true;
-              const preview = gateFromContext(raw, prompt, guestContext, false);
+              const preview = raw;
               if (
                 preview &&
                 !guestContext.examAsk &&
@@ -392,19 +384,26 @@ export async function POST(request: Request) {
                 controller.enqueue(encodeSse({ tool: preview }));
               }
             }
-            const preview = raw ? gateFromContext(raw, prompt, guestContext, !providerReturnedTool) : null;
+            const preview = raw;
             const waitForTool = Boolean(guestContext.priorClarify && guestContext.pendingKind);
             if (part.text && (!waitForTool || preview) && (!preview || toolStreamsText(preview.name))) {
-              streamed = true;
-              textChars += part.text.length;
-              controller.enqueue(encodeSse({ delta: part.text }));
+              if (preview) {
+                streamed = true;
+                controller.enqueue(encodeSse({ delta: part.text }));
+              } else {
+                pendingProviderText += part.text;
+              }
             }
           }
-        } else if (!raw) {
-          raw = fallbackChatTool({
+        }
+
+        if (!raw) {
+          raw = explicit ?? fallbackToolAfterProvider({
             prompt,
+            mode,
             active: guestContext.activeArtifact,
             accepted: guestContext.acceptedTool,
+            hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
             priorClarify: guestContext.priorClarify,
             pendingTopic: guestContext.pendingTopic,
             pendingKind: guestContext.pendingKind,
@@ -413,22 +412,26 @@ export async function POST(request: Request) {
             hasPath: guestContext.hasPath,
             pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
           });
-          const preview = gateFromContext(raw, prompt, guestContext, true);
-          if (toolStreamsText(preview.name)) {
+          const preview = raw;
+          if (toolStreamsText(preview.name) && pendingProviderText.trim()) {
+            streamed = true;
+            controller.enqueue(encodeSse({ delta: pendingProviderText }));
+          } else if (!supportsTools && toolStreamsText(preview.name)) {
             for await (const delta of generateTextStream(prompt, {
+              model: modelId,
               mode,
               history,
               systemInstruction,
               images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+              usage: usageReporter,
             })) {
               streamed = true;
-              textChars += delta.length;
               controller.enqueue(encodeSse({ delta }));
             }
           }
         }
 
-        let tool = gateFromContext(raw, prompt, guestContext, !providerReturnedTool);
+        let tool = raw ?? { name: "answer" as const, args: {} };
         if (session.anonymous) tool = gateGuestChatTool(tool);
         if (guestContext.hintAsk) {
           tool = { name: "answer", args: {} };
@@ -446,13 +449,14 @@ export async function POST(request: Request) {
                 ? `${systemInstruction}\n\nThis turn already called search_images. Write only one short line in the user's language introducing the photos. Nothing else. No URLs. No lists.`
                 : systemInstruction;
             for await (const delta of generateTextStream(prompt, {
+              model: modelId,
               mode,
               history,
               systemInstruction: captionSystem,
               images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
+              usage: usageReporter,
             })) {
               streamed = true;
-              textChars += delta.length;
               controller.enqueue(encodeSse({ delta }));
             }
           }
@@ -464,6 +468,8 @@ export async function POST(request: Request) {
         const message = error instanceof Error ? error.message : "Generation failed.";
         controller.enqueue(encodeSse({ error: message }));
         controller.close();
+      } finally {
+        if (usage) await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
       }
     },
   });

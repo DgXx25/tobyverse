@@ -11,7 +11,7 @@ export class ViewerBoundary extends Component<{ children: ReactNode }, { failed:
 
   render() {
     if (this.state.failed) {
-      return <p className="px-4 py-8 text-center text-[13px] text-muted">ფაილი ვერ მოიძებნა</p>;
+      return <p className="px-4 py-8 text-center text-[13px] text-muted">File not found.</p>;
     }
     return this.props.children;
   }

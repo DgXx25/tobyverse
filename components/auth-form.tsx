@@ -112,7 +112,7 @@ export function AuthForm({ variant = "default" }: { variant?: "default" | "marke
 
   const marketing = variant === "marketing";
   const buttonClass = marketing
-    ? "flex h-12 w-full items-center justify-center gap-3 rounded-[10px] border-[1px] border-white/[0.08] bg-[#1c1b1a] px-4 text-[15px] text-[#ececec] transition-colors hover:bg-[#262524] disabled:opacity-50"
+    ? "flex h-12 w-full items-center justify-center gap-3 rounded-[10px] border border-border bg-surface-2 px-4 text-[15px] text-foreground transition-colors hover:bg-surface disabled:opacity-50"
     : "flex h-12 w-full items-center justify-center gap-3 rounded-full border border-border bg-transparent px-4 text-[15px] text-foreground transition-colors hover:bg-surface-2 disabled:opacity-50";
 
   if (!configured) {

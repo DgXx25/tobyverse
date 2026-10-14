@@ -1,10 +1,12 @@
 import { extractDocxText } from "@/lib/materials/docx";
-import { EXTRACT_MAX_CHARS, MAX_SLIDE_IMAGES, clipText } from "@/lib/materials/limits";
+import { EXTRACT_MAX_CHARS, clipText } from "@/lib/materials/limits";
 import { extractPdf } from "@/lib/materials/pdf";
-import { extractPptx, type ExtractedSlideImage } from "@/lib/materials/pptx";
+import { extractPptx } from "@/lib/materials/pptx";
 import { extractTxtText } from "@/lib/materials/txt";
 import { inferMaterialType } from "@/lib/materials/types";
 import type { MaterialType } from "@/types/material";
+import { generateText } from "@/lib/ai/gemini";
+import type { AiUsageReporter } from "@/types/billing";
 
 export class MaterialExtractError extends Error {
   constructor(message: string) {
@@ -17,6 +19,8 @@ export type ExtractedImagePayload = {
   page: number;
   mime: string;
   data: string;
+  kind?: "figure" | "slide";
+  complete?: boolean;
 };
 
 export type ExtractResult = {
@@ -26,42 +30,11 @@ export type ExtractResult = {
   images: ExtractedImagePayload[];
 };
 
-function toPayload(images: ExtractedSlideImage[]): ExtractedImagePayload[] {
-  return images.slice(0, MAX_SLIDE_IMAGES).map((item) => ({
-    page: item.page,
-    mime: item.mime,
-    data: Buffer.from(item.bytes).toString("base64"),
-  }));
-}
-
-export async function extractImageText(buffer: Buffer, mime: string): Promise<string> {
-  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
-  if (!apiKey) {
-    throw new MaterialExtractError("GOOGLE_GENERATIVE_AI_API_KEY is not set.");
-  }
-
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const result = await new GoogleGenerativeAI(apiKey).getGenerativeModel({
-    model: "gemini-2.5-flash",
-  }).generateContent({
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: "Extract all readable text from this image. If it is a diagram, describe it briefly. Plain text only.",
-          },
-          {
-            inlineData: {
-              mimeType: mime || "image/jpeg",
-              data: buffer.toString("base64"),
-            },
-          },
-        ],
-      },
-    ],
-  });
-  const text = result.response.text().trim();
+export async function extractImageText(buffer: Buffer, mime: string, usage?: AiUsageReporter): Promise<string> {
+  const text = (await generateText(
+    "Extract all readable text from this image. If it is a diagram, describe it briefly. Plain text only.",
+    { images: [{ mimeType: mime || "image/jpeg", data: buffer.toString("base64") }], usage },
+  )).trim();
   if (!text) {
     throw new MaterialExtractError("Could not read that image.");
   }
@@ -74,16 +47,17 @@ export async function extractPlainText(input: {
   buffer: Buffer;
   type?: MaterialType;
   includeImages?: boolean;
+  usage?: AiUsageReporter;
 }): Promise<ExtractResult> {
   const type = input.type ?? inferMaterialType(input.filename, input.mime);
   if (!type || type === "paste" || type === "url") {
-    throw new MaterialExtractError("Only PDF, DOCX, PPTX, TXT, MD, and PNG/JPG/WEBP files are supported.");
+    throw new MaterialExtractError("Only PDF, DOCX, PPTX, XLS/XLSX, TXT, MD, and PNG/JPG/WEBP files are supported.");
   }
 
   try {
     if (type === "image") {
       const mime = input.mime.startsWith("image/") ? input.mime : "image/jpeg";
-      const text = await extractImageText(input.buffer, mime);
+      const text = await extractImageText(input.buffer, mime, input.usage);
       return { text, type, pageCount: 1, images: [] };
     }
 
@@ -97,14 +71,20 @@ export async function extractPlainText(input: {
       return { text: clipText(text, EXTRACT_MAX_CHARS), type, pageCount: 1, images: [] };
     }
 
+    if (type === "xlsx") {
+      const { read, utils } = await import("xlsx");
+      const book = read(input.buffer, { type: "buffer" });
+      const text = book.SheetNames.map((name) => `${name}\n${utils.sheet_to_csv(book.Sheets[name])}`).join("\n\n");
+      return { text: clipText(text, EXTRACT_MAX_CHARS), type, pageCount: book.SheetNames.length, images: [] };
+    }
+
     if (type === "pptx") {
-      const includeImages = input.includeImages !== false;
-      const pptx = await extractPptx(input.buffer, { includeImages });
+      const pptx = await extractPptx(input.buffer, { includeImages: false });
       return {
         text: clipText(pptx.text, EXTRACT_MAX_CHARS),
         type,
         pageCount: pptx.pageCount,
-        images: includeImages ? toPayload(pptx.images) : [],
+        images: [],
       };
     }
 

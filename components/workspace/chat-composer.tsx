@@ -12,12 +12,13 @@ import {
   type TransitionEvent,
 } from "react";
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
-import { attachFileKey, fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
-import { formatBytes } from "@/lib/format";
+import { attachFileKey } from "@/lib/composer/attach";
 import { LARGE_PASTE_CHARS, looksLikeUrl } from "@/lib/materials/ingest-client";
 import { COMPOSER_FILE_ACCEPT } from "@/lib/materials/types";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { ComposerParameters } from "@/components/workspace/composer-parameters";
+import { ComposerStatus, type ComposerStatusState } from "@/components/workspace/composer-status";
+import { MaterialChip } from "@/components/workspace/material-chip";
 import { LinkifiedText } from "@/components/workspace/linkified-text";
 import { SlashMenu } from "@/components/workspace/slash-menu";
 import {
@@ -53,6 +54,8 @@ export const ChatComposer = forwardRef<
     onDraft: (value: string) => void;
     sending: boolean;
     error: string | null;
+    status?: ComposerStatusState | null;
+    onRetry?: () => void;
     chips: ComposerChip[];
     onRemoveChip: (id: string) => void;
     onSend: () => void;
@@ -85,6 +88,8 @@ export const ChatComposer = forwardRef<
     onDraft,
     sending,
     error,
+    status,
+    onRetry,
     chips,
     onRemoveChip,
     onSend,
@@ -117,6 +122,8 @@ export const ChatComposer = forwardRef<
   const lastDropRef = useRef<{ at: number; keys: Set<string> }>({ at: 0, keys: new Set() });
   const [dropOver, setDropOver] = useState(false);
   const [slashActive, setSlashActive] = useState(0);
+  const [slashMounted, setSlashMounted] = useState(false);
+  const [chipsOn, setChipsOn] = useState(chips.length > 0);
   const hint = skill ? COMPOSER_SKILL_META[skill].placeholder : placeholder;
   const slashQuery = parseSlashQuery(draft);
   const [shownPlaceholder, setShownPlaceholder] = useState(placeholder);
@@ -157,21 +164,33 @@ export const ChatComposer = forwardRef<
   }));
 
   useEffect(() => {
+    setChipsOn(chips.length > 0);
+  }, [chips.length]);
+
+  useEffect(() => {
     const node = areaRef.current;
     if (!node) return;
     node.style.height = "auto";
     node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
   }, [draft]);
 
-  const hasPrefix = Boolean(fieldStart) || Boolean(skill);
-  const prefixHoldRef = useRef<ReactNode>(null);
-  const prefixInnerRef = useRef<HTMLDivElement>(null);
-  const skillPrefix = skill ? (
-    <span className="start-action-prefix pointer-events-none inline-flex shrink-0 select-none items-center gap-1.5 whitespace-nowrap pt-3 text-[15px] leading-6 text-foreground">
+  const skillPrefix = skill && onSkill && !fieldStart ? (
+    <span className="start-action-prefix inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap pt-3 text-[15px] leading-6 text-foreground">
       <UiIcon name={COMPOSER_SKILL_META[skill].icon} size={18} className="accent-symbol" />
       <span>{COMPOSER_SKILL_META[skill].label}</span>
+      <button
+        type="button"
+        aria-label={`Remove ${COMPOSER_SKILL_META[skill].label} tool`}
+        onClick={() => onSkill(null)}
+        className="ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-muted hover:bg-foreground/10 hover:text-foreground"
+      >
+        ×
+      </button>
     </span>
   ) : null;
+  const hasPrefix = Boolean(fieldStart || skillPrefix);
+  const prefixHoldRef = useRef<ReactNode>(null);
+  const prefixInnerRef = useRef<HTMLDivElement>(null);
   const prefixNode = fieldStart ?? skillPrefix;
   if (prefixNode) prefixHoldRef.current = prefixNode;
   const [prefixVisible, setPrefixVisible] = useState(hasPrefix);
@@ -240,6 +259,15 @@ export const ChatComposer = forwardRef<
   const slashOpen = slashQuery != null && Boolean(onChatMode || onSkill);
   const slashItems = slashOpen ? filterSlashItems(slashQuery, slashSkills && Boolean(onSkill)) : [];
   const slashIndex = slashItems.length ? Math.min(slashActive, slashItems.length - 1) : 0;
+
+  useEffect(() => {
+    if (slashOpen) {
+      setSlashMounted(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlashMounted(false), 160);
+    return () => window.clearTimeout(timer);
+  }, [slashOpen]);
 
   function applySlash(item: SlashItem) {
     if (item.kind === "mode") onChatMode?.(item.id as ChatMode);
@@ -386,73 +414,45 @@ export const ChatComposer = forwardRef<
       }}
       onDragLeave={() => setDropOver(false)}
       onDrop={onDrop}
-      className={`${pad ? "composer-pad px-4 pt-2" : "pt-2"} ${locked ? "pointer-events-none opacity-40" : ""} ${className}`.trim()}
+      className={`${pad ? "composer-pad px-4 pt-3" : "pt-3"} ${locked ? "pointer-events-none opacity-40" : ""} ${className}`.trim()}
     >
+      <ComposerStatus
+        status={
+          error
+            ? { text: error, error: true, onRetry }
+            : status ?? null
+        }
+      />
       <div
-        className={`relative rounded-[28px] border bg-surface-2 px-3 py-2 transition-[border-color,background-color] ${
-          isDrop ? "border-accent bg-foreground/[0.04]" : "border-border"
+        className={`relative rounded-[28px] bg-surface-2 px-3 py-2 ${
+          isDrop ? "bg-foreground/[0.04]" : ""
         }`}
       >
         <div
-          className={`pointer-events-none absolute inset-0 z-[1] rounded-[inherit] bg-foreground/[0.06] transition-opacity ${
+          className={`pointer-events-none absolute inset-0 z-[1] rounded-[inherit] bg-foreground/[0.06] transition-opacity duration-200 ease-out ${
             isDrop ? "opacity-100" : "opacity-0"
           }`}
         />
         {notice}
-        {chips.length > 0 && (
-          <div className="mb-1 flex flex-wrap gap-1.5 px-1 pt-1">
-            {chips.map((chip) => (
-              <span
-                key={chip.id}
-                className={`inline-flex h-8 max-w-[240px] items-center gap-1.5 overflow-hidden rounded-full border bg-surface pl-1 pr-1.5 text-[11px] leading-none ${
-                  chip.status === "error" ? "border-red-400/30" : "border-border"
-                }`}
-              >
-                <span className="relative flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-2">
-                  {chip.status === "uploading" ? (
-                    <span className="h-3 w-3 animate-spin rounded-full border border-muted/40 border-t-foreground" />
-                  ) : chip.previewUrl && isImageAttachment(chip.type, chip.title) ? (
-                    <img src={chip.previewUrl} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="font-mono text-[8px] font-medium uppercase tracking-wide text-muted">
-                      {fileTypeBadge(chip.type, chip.title)}
-                    </span>
-                  )}
+        <div className={`composer-chips${chipsOn ? " is-open" : ""}`}>
+          <div className="composer-chips-inner">
+            <div className="flex flex-wrap gap-2 px-1.5 pt-1.5">
+              {chips.map((chip) => (
+                <span key={chip.id} className="composer-chip-in inline-flex flex-col items-start">
+                  <MaterialChip
+                    title={chip.title}
+                    type={chip.type}
+                    previewUrl={chip.previewUrl}
+                    busy={chip.status === "uploading" || chip.status === "reading"}
+                    error={chip.status === "error"}
+                    onRemove={() => onRemoveChip(chip.id)}
+                  />
+                  {chip.error ? <span role="alert" className="max-w-[min(100vw-48px,280px)] px-2 pt-1 text-[11px] leading-4 text-red-400">{chip.error}</span> : null}
                 </span>
-                <span className="min-w-0 truncate">
-                  {looksLikeUrl(chip.title) ? (
-                    <a
-                      href={chip.title}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="chat-link block truncate"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {chip.title}
-                    </a>
-                  ) : (
-                    <span className="text-foreground">{chip.title}</span>
-                  )}
-                </span>
-                {chip.status === "uploading" ? (
-                  <span className="shrink-0 whitespace-nowrap text-muted">
-                    {chip.type === "url" || looksLikeUrl(chip.title) ? "Reading…" : "Uploading…"}
-                  </span>
-                ) : chip.size ? (
-                  <span className="shrink-0 whitespace-nowrap text-muted">{formatBytes(chip.size)}</span>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => onRemoveChip(chip.id)}
-                  className="flex h-5 w-5 shrink-0 items-center justify-center text-muted hover:text-foreground"
-                  aria-label="Remove attachment"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
+              ))}
+            </div>
           </div>
-        )}
+        </div>
         <div
           className={`flex px-1.5 ${
             showPrefix ? "items-start" : "items-center"
@@ -576,8 +576,8 @@ export const ChatComposer = forwardRef<
             </button>
           </div>
         </div>
-        {slashOpen ? (
-          <div className="absolute bottom-[calc(100%+8px)] left-2 z-50 w-[min(calc(100%-16px),320px)] rounded-2xl bg-surface-2 shadow-2xl ring-1 ring-border">
+        {slashMounted ? (
+          <div className={`absolute bottom-[calc(100%+8px)] left-2 z-50 w-[min(calc(100%-16px),320px)] rounded-2xl bg-surface-2 shadow-2xl ring-1 ring-border ${slashOpen ? "composer-menu-enter" : "composer-menu-exit"}`}>
             <SlashMenu
               items={slashItems}
               active={slashIndex}
@@ -588,7 +588,6 @@ export const ChatComposer = forwardRef<
           </div>
         ) : null}
       </div>
-      {error ? <p className="mt-2 px-1 text-xs text-red-400">{error}</p> : null}
     </form>
   );
 });

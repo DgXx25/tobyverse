@@ -1,5 +1,4 @@
 import { authHeaders } from "@/lib/api/client";
-import { trackEvent } from "@/lib/analytics/track";
 import { clipText, PATH_EXCERPT_CHARS, PATH_SOURCE_LIMIT, PATH_TOTAL_CHARS } from "@/lib/materials/limits";
 import { loadMaterialText } from "@/lib/materials/storage";
 import { excerptForPath } from "@/lib/paths/excerpt";
@@ -81,7 +80,6 @@ export async function generatePathFromPrompt(input: {
     sourceMaterialIds: input.materials.map((item) => item.id),
     started: false,
   });
-  trackEvent({ userId: input.userId, projectId: input.projectId, type: "path_generated" });
   input.onEvent?.({ title, courses: generated.courses, pathId: id, status: null });
   return {
     id,

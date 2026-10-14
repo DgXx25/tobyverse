@@ -1,6 +1,16 @@
 export const PLACEHOLDER_CHAT_TITLE = "New chat";
 
-const PLACEHOLDERS = new Set(["new chat", "new project", "untitled"]);
+/** What a notebook is called until its first real question names it. */
+export const UNTITLED_NOTEBOOK_TITLE = "Untitled notebook";
+
+const PLACEHOLDERS = new Set(["new chat", "new project", "untitled", "untitled notebook"]);
+
+/** What a notebook is called in lists. Unlike displayProjectTitle it never rewrites a real title. */
+export function notebookTitle(title: string | undefined | null): string {
+  const trimmed = (title ?? "").replace(/\s+/g, " ").trim();
+  if (!trimmed || PLACEHOLDERS.has(trimmed.toLowerCase())) return UNTITLED_NOTEBOOK_TITLE;
+  return trimmed;
+}
 
 export function wordCount(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;

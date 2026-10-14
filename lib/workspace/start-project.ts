@@ -1,11 +1,10 @@
 import {
-  createProject,
   deleteProject,
   markProjectHidden,
   rememberDiscardedProject,
   reserveProjectId,
 } from "@/lib/projects";
-import { allocateChatMessageId } from "@/lib/chats";
+import { allocateChatMessageId, createChatThread } from "@/lib/chats";
 import { asChatMode } from "@/lib/core/chat-modes";
 import { DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { recipeForGoal } from "@/lib/core/recipes";
@@ -18,7 +17,6 @@ import { requireSignedInUser } from "@/lib/auth";
 import {
   discardPreparedMaterials,
   commitMaterialText,
-  finalizeMaterialImages,
   prepareMaterialIngest,
   type IngestPhase,
   type PreparedMaterial,
@@ -35,6 +33,48 @@ type OpeningProject = {
 
 const openingByProject = new Map<string, OpeningProject>();
 
+async function createProjectViaApi(input: {
+  title: string;
+  id?: string;
+  listed?: boolean;
+  createThread?: boolean;
+  goal?: string;
+  preferredChatMode?: ChatMode;
+  timeoutMs?: number;
+}): Promise<string> {
+  const controller = new AbortController();
+  let timeoutId = 0;
+  try {
+    return await Promise.race([
+      (async () => {
+        const user = await requireSignedInUser();
+        const token = await user.getIdToken();
+        if (controller.signal.aborted) throw new Error("Could not reach the server. Disable ad blocker if this persists.");
+        const response = await fetch("/api/projects/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(input),
+          signal: controller.signal,
+        });
+        const data = (await response.json().catch(() => ({}))) as { projectId?: string; error?: string };
+        if (!response.ok || !data.projectId) throw new Error(data.error || "Could not create project.");
+        return data.projectId;
+      })(),
+      new Promise<string>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          controller.abort();
+          reject(new Error("Could not reach the server. Disable ad blocker if this persists."));
+        }, input.timeoutMs ?? 12_000);
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error("Could not reach the server. Disable ad blocker if this persists.");
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function openingProject(id: string, userId: string, mode?: ChatMode): Project {
   const goal = DEFAULT_PROJECT_GOAL;
   return {
@@ -46,6 +86,8 @@ function openingProject(id: string, userId: string, mode?: ChatMode): Project {
     recipe: recipeForGoal(goal),
     preferredChatMode: asChatMode(mode),
     activeArtifact: null,
+    projectMemory: [],
+    listed: false,
     createdAt: null,
     updatedAt: null,
   };
@@ -116,7 +158,6 @@ async function ingestAttachments(input: {
     for (const item of prepared) {
       materialIds.push(await commitMaterialText(item));
     }
-    void Promise.allSettled(prepared.map((item) => finalizeMaterialImages(item)));
     return materialIds;
   } catch (error) {
     await discardPreparedMaterials(prepared);
@@ -159,15 +200,14 @@ export async function startProjectFromPrompt(input: {
   stashPendingStart(projectId, pending);
 
   const ready = (async () => {
-    const signedIn = await requireSignedInUser();
     input.onPhase?.("uploading");
-    await createProject({
+    const createdId = await createProjectViaApi({
       id: projectId,
       title: PLACEHOLDER_CHAT_TITLE,
-      userId: signedIn.uid,
       goal: DEFAULT_PROJECT_GOAL,
       preferredChatMode: input.mode,
     });
+    if (createdId !== projectId) throw new Error("Project ID allocation changed unexpectedly.");
   })();
 
   openingByProject.set(projectId, { project, pending, ready });
@@ -214,4 +254,78 @@ export async function startProjectFromPrompt(input: {
   }
 
   return projectId;
+}
+
+export async function createListedProject(input: { userId: string; title: string }): Promise<string> {
+  const title = input.title.trim() || "New project";
+  return createProjectViaApi({
+    title,
+    listed: true,
+    createThread: false,
+    timeoutMs: 12_000,
+  });
+}
+
+export async function startChatInProject(input: {
+  projectId: string;
+  userId: string;
+  prompt: string;
+  attachments?: PendingAttachment[];
+  intent?: ComposerIntent;
+  skill?: ComposerSkill;
+  mode?: ChatMode;
+  title?: string;
+  onPhase?: (phase: IngestPhase) => void;
+}): Promise<string> {
+  const attachments = input.attachments ?? [];
+  const prompt = input.prompt.trim() || (attachments.length > 0 ? DEFAULT_FIRST_PROMPT : "");
+  if (!prompt && attachments.length === 0) {
+    throw new Error("Type a prompt or attach a source to start.");
+  }
+
+  const signedIn = await requireSignedInUser();
+  const threadId = await createChatThread({
+    projectId: input.projectId,
+    userId: signedIn.uid,
+    mode: asChatMode(input.mode),
+    title: input.title?.trim() || PLACEHOLDER_CHAT_TITLE,
+    kind: "main",
+  });
+  const userMessageId = allocateChatMessageId(input.projectId, threadId);
+  const pending: PendingStart = {
+    prompt,
+    materialIds: [],
+    awaitingIngest: attachments.length > 0,
+    intent: input.intent,
+    skill: input.skill,
+    mode: input.mode,
+    userMessageId,
+  };
+  stashPendingStart(threadId, pending);
+
+  if (attachments.length > 0) {
+    input.onPhase?.("uploading");
+    const ingest = ingestAttachments({
+      projectId: input.projectId,
+      userId: input.userId,
+      attachments,
+      onPhase: input.onPhase,
+    }).then((ids) => {
+      stashPendingStart(threadId, { ...pending, materialIds: ids, awaitingIngest: false });
+      return ids;
+    });
+    ingestByProject.set(threadId, ingest);
+    void ingest.finally(() => {
+      const clear = () => {
+        if (ingestByProject.get(threadId) === ingest) ingestByProject.delete(threadId);
+      };
+      if (typeof window === "undefined") {
+        clear();
+        return;
+      }
+      window.setTimeout(clear, 120_000);
+    });
+  }
+
+  return threadId;
 }

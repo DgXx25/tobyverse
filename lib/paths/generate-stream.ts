@@ -6,6 +6,7 @@ import { hydrateCourses, PATH_REVIEW_MAX_NODES } from "@/lib/paths/model";
 import { pathSystemPrompt } from "@/lib/paths/prompt";
 import { pathDraftSchema } from "@/lib/paths/schema";
 import type { PathCourse, PathKind } from "@/types/path";
+import type { AiUsageReporter } from "@/types/billing";
 
 export type PathStreamEvent =
   | { type: "status"; status: string }
@@ -124,7 +125,7 @@ function growingCourses(courses: PathCourse[]): PathCourse[][] {
   return frames;
 }
 
-export async function* streamPathDocument(userPrompt: string, kind: PathKind = "course"): AsyncGenerator<PathStreamEvent> {
+export async function* streamPathDocument(userPrompt: string, kind: PathKind = "course", options: { usage?: AiUsageReporter } = {}): AsyncGenerator<PathStreamEvent> {
   let raw = "";
   let title = "";
   let emittedUnits = 0;
@@ -133,6 +134,7 @@ export async function* streamPathDocument(userPrompt: string, kind: PathKind = "
     for await (const chunk of generateTextStream(userPrompt, {
       json: true,
       systemInstruction: pathSystemPrompt(kind),
+      usage: options.usage,
     })) {
       raw += chunk;
       const nextTitle = peekJsonString(raw, "title");
@@ -167,6 +169,7 @@ export async function* streamPathDocument(userPrompt: string, kind: PathKind = "
   if (!parsed) {
     const repaired = await generateJson(userPrompt, pathDraftSchema, {
       systemInstruction: pathSystemPrompt(kind),
+      usage: options.usage,
     });
     if (!repaired.ok) {
       yield { type: "error", error: repaired.error };

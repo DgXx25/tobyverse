@@ -1,19 +1,40 @@
 import { requireSignedInUser } from "@/lib/auth";
 import { authHeaders } from "@/lib/api/client";
-import { trackEvent } from "@/lib/analytics/track";
-import { adjustStorageBytes, reserveStorageBytes } from "@/lib/account/store";
-import { previewText, MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@/lib/materials/limits";
+import { previewText } from "@/lib/materials/limits";
 import { newMaterialRef, writeMaterialDoc } from "@/lib/materials/store";
 import {
   deleteStoragePath,
   extractedTextPath,
   originalStoragePath,
-  slideImagePath,
+  releaseStoragePool,
   uploadExtractedText,
   uploadMaterialBytes,
 } from "@/lib/materials/storage";
 import { inferMaterialType, materialFileName, mimeFromName } from "@/lib/materials/types";
 import type { MaterialImage, MaterialType } from "@/types/material";
+
+export type MaterialIngestFailurePhase = "storage" | "extract" | "network";
+
+export class MaterialIngestError extends Error {
+  readonly status?: number;
+  readonly phase: MaterialIngestFailurePhase;
+  readonly storageSaved: boolean;
+
+  constructor(
+    message: string,
+    options: {
+      phase: MaterialIngestFailurePhase;
+      status?: number;
+      storageSaved?: boolean;
+    },
+  ) {
+    super(message);
+    this.name = "MaterialIngestError";
+    this.status = options.status;
+    this.phase = options.phase;
+    this.storageSaved = options.storageSaved === true;
+  }
+}
 
 export type ExtractResponse = {
   text?: string;
@@ -23,12 +44,13 @@ export type ExtractResponse = {
   pageCount?: number;
   textChars?: number;
   textStored?: boolean;
-  images?: { page?: number; mime?: string; data?: string }[];
+  /** PDFs are indexed server-side while reading; there is no text to carry back. */
+  indexed?: boolean;
   error?: string;
 };
 
 export type IngestSource =
-  | { kind: "file"; file: File }
+  | { kind: "file"; file: File; title?: string }
   | { kind: "paste"; text: string; title?: string }
   | { kind: "url"; url: string; title?: string };
 
@@ -50,56 +72,75 @@ export type PreparedMaterial = {
   storageHeld: boolean;
 };
 
-function bytesFromBase64(data: string): Uint8Array {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
 async function deriveFromStorage(
   stored: { path: string; textPath: string },
-  phase: "text" | "images" | "all" = "text",
 ): Promise<ExtractResponse> {
-  const response = await fetch("/api/materials/extract", {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({ path: stored.path, textPath: stored.textPath, phase }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/materials/extract", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ path: stored.path, textPath: stored.textPath, phase: "text" }),
+    });
+  } catch {
+    throw new MaterialIngestError("Network error. Try again.", { phase: "network" });
+  }
   const data = (await response.json()) as ExtractResponse;
-  if (!response.ok) data.error = data.error ?? "Extraction failed.";
+  if (!response.ok) {
+    throw new MaterialIngestError(data.error ?? "Extraction failed.", {
+      phase: "extract",
+      status: response.status,
+    });
+  }
   return data;
 }
 
-async function deriveFromApi(
-  source: IngestSource,
-  phase: "text" | "images" | "all" = "text",
-): Promise<ExtractResponse> {
+async function deriveFromApi(source: IngestSource): Promise<ExtractResponse> {
   if (source.kind === "file") {
     const form = new FormData();
     form.set("file", source.file);
-    form.set("phase", phase);
-    const response = await fetch("/api/materials/extract", {
-      method: "POST",
-      headers: await authHeaders(false),
-      body: form,
-    });
+    form.set("phase", "text");
+    let response: Response;
+    try {
+      response = await fetch("/api/materials/extract", {
+        method: "POST",
+        headers: await authHeaders(false),
+        body: form,
+      });
+    } catch {
+      throw new MaterialIngestError("Network error. Try again.", { phase: "network" });
+    }
     const data = (await response.json()) as ExtractResponse;
-    if (!response.ok) data.error = data.error ?? "Extraction failed.";
+    if (!response.ok) {
+      throw new MaterialIngestError(data.error ?? "Extraction failed.", {
+        phase: "extract",
+        status: response.status,
+      });
+    }
     return data;
   }
 
-  const response = await fetch("/api/materials/extract", {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify(
-      source.kind === "paste"
-        ? { text: source.text, title: source.title }
-        : { url: source.url, title: source.title },
-    ),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/materials/extract", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(
+        source.kind === "paste"
+          ? { text: source.text, title: source.title }
+          : { url: source.url, title: source.title },
+      ),
+    });
+  } catch {
+    throw new MaterialIngestError("Network error. Try again.", { phase: "network" });
+  }
   const data = (await response.json()) as ExtractResponse;
-  if (!response.ok) data.error = data.error ?? "Extraction failed.";
+  if (!response.ok) {
+    throw new MaterialIngestError(data.error ?? "Extraction failed.", {
+      phase: "extract",
+      status: response.status,
+    });
+  }
   return data;
 }
 
@@ -112,16 +153,13 @@ function sourcePayload(source: IngestSource): {
   sizeBytes: number;
 } {
   if (source.kind === "file") {
-    if (source.file.size > MAX_UPLOAD_BYTES) {
-      throw new Error(uploadTooLargeMessage());
-    }
     const inferred = inferMaterialType(source.file.name, source.file.type);
     if (!inferred) {
-      throw new Error("Only PDF, DOCX, PPTX, TXT, MD, and PNG/JPG/WEBP files are supported.");
+      throw new Error("Only PDF, DOCX, PPTX, XLS/XLSX, TXT, MD, and PNG/JPG/WEBP files are supported.");
     }
     return {
       type: inferred,
-      title: source.file.name.replace(/\.[^.]+$/, "") || source.file.name,
+      title: source.title?.trim() || source.file.name.replace(/\.[^.]+$/, "") || source.file.name,
       originalName: materialFileName(inferred, source.file.name),
       originalBytes: source.file,
       originalMime: source.file.type || mimeFromName(source.file.name),
@@ -150,35 +188,87 @@ function sourcePayload(source: IngestSource): {
   };
 }
 
-/** Upload original + extract TEXT. Does not pack slide images unless includeImages. Does not write Firestore. */
+/**
+ * Upload original + read TEXT only (no slide or page images are kept). PDFs are indexed on the
+ * server while they are read. Other types return text that is indexed after the doc is committed.
+ */
 export async function prepareMaterialIngest(input: {
   projectId: string;
   userId: string;
   source: IngestSource;
   onPhase?: (phase: IngestPhase) => void;
-  includeImages?: boolean;
 }): Promise<PreparedMaterial> {
   const signedIn = await requireSignedInUser();
   const userId = signedIn.uid;
   const { projectId, source } = input;
   const ref = newMaterialRef(projectId);
   const payload = sourcePayload(source);
-  const storagePath = originalStoragePath(userId, projectId, ref.id, payload.originalName);
+  let storagePath = originalStoragePath(userId, projectId, ref.id, payload.originalName);
   const textPath = extractedTextPath(userId, projectId, ref.id);
-
-  await reserveStorageBytes(userId, payload.sizeBytes);
-  let storageHeld = true;
+  let sizeBytes = payload.sizeBytes;
+  let originalMime = payload.originalMime;
+  let storageHeld = false;
+  let storageUploaded = false;
+  let pdfStarted = false;
 
   try {
     input.onPhase?.("uploading");
-    await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime);
+    const uploaded = await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime, {
+      reservePool: true,
+      originalName: source.kind === "file" ? source.file.name : payload.originalName,
+    });
+    storagePath = uploaded.path;
+    sizeBytes = uploaded.sizeBytes;
+    originalMime = uploaded.contentType;
+    storageHeld = uploaded.reservedBytes > 0;
+    storageUploaded = true;
 
     input.onPhase?.("reading");
-    const data =
-      source.kind === "file"
-        ? await deriveFromStorage({ path: storagePath, textPath }, input.includeImages ? "all" : "text")
-        : await deriveFromApi(source, input.includeImages ? "all" : "text");
-    if ((!data.text && !data.textStored) || !data.type) {
+    let data: ExtractResponse;
+    if (source.kind === "file" && payload.type === "pdf") {
+      await writeMaterialDoc(projectId, ref.id, {
+        userId,
+        title: payload.title,
+        type: "pdf",
+        storagePath,
+        extractedTextPreview: "",
+        sizeBytes,
+        pageCount: 0,
+        status: "processing",
+      });
+      pdfStarted = true;
+      let completed = false;
+      data = {};
+      while (!completed) {
+        let response: Response | null = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            response = await fetch("/api/materials/pdf-batch", {
+              method: "POST",
+              headers: await authHeaders(),
+              body: JSON.stringify({ path: storagePath, projectId, materialId: ref.id }),
+            });
+            if (response.ok || response.status < 500 || attempt === 2) break;
+          } catch {
+            if (attempt === 2) {
+              throw new MaterialIngestError("Network error while reading PDF pages. Retry to resume.", { phase: "network", storageSaved: true });
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        }
+        if (!response) throw new MaterialIngestError("Network error while reading PDF pages. Retry to resume.", { phase: "network", storageSaved: true });
+        data = (await response.json()) as ExtractResponse & { done?: boolean };
+        if (!response.ok) throw new MaterialIngestError(data.error ?? "PDF extraction failed.", { phase: "extract", status: response.status, storageSaved: true });
+        completed = (data as ExtractResponse & { done?: boolean }).done === true;
+      }
+      data.type = "pdf";
+      data.indexed = true;
+    } else {
+      data = source.kind === "file"
+        ? await deriveFromStorage({ path: storagePath, textPath })
+        : await deriveFromApi(source);
+    }
+    if ((!data.text && !data.textStored && !data.indexed) || !data.type) {
       throw new Error(data.error ?? "Extraction failed.");
     }
     return {
@@ -187,8 +277,8 @@ export async function prepareMaterialIngest(input: {
       materialId: ref.id,
       type: payload.type,
       title: payload.title,
-      originalMime: payload.originalMime,
-      sizeBytes: payload.sizeBytes,
+      originalMime,
+      sizeBytes,
       storagePath,
       textPath,
       data,
@@ -196,19 +286,71 @@ export async function prepareMaterialIngest(input: {
       storageHeld,
     };
   } catch (error) {
+    if (storageUploaded) {
+      if (payload.type === "pdf" && pdfStarted) {
+        storageHeld = false;
+        if (error instanceof MaterialIngestError) throw error;
+        throw new MaterialIngestError("PDF processing paused. Retry to resume saved pages.", {
+          phase: "extract",
+          storageSaved: true,
+        });
+      }
+      if (payload.type === "pdf") {
+        await deleteStoragePath(storagePath);
+        if (storageHeld) {
+          storageHeld = false;
+          await releaseStoragePool(sizeBytes).catch(() => undefined);
+        }
+        throw error instanceof Error ? error : new Error("PDF upload failed.");
+      }
+      try {
+        await writeMaterialDoc(projectId, ref.id, {
+          userId,
+          title: payload.title,
+          type: payload.type,
+          storagePath,
+          textPath,
+          extractedTextPreview: "",
+          sizeBytes,
+          status: "processing",
+        });
+        await writeMaterialDoc(projectId, ref.id, {
+          userId,
+          title: payload.title,
+          type: payload.type,
+          storagePath,
+          textPath,
+          extractedTextPreview: "",
+          sizeBytes,
+          status: "failed",
+        });
+        storageHeld = false;
+      } catch {
+        await deleteStoragePath(storagePath);
+        if (storageHeld) {
+          storageHeld = false;
+          await releaseStoragePool(sizeBytes).catch(() => undefined);
+        }
+        throw error instanceof Error ? error : new Error("Extraction failed.");
+      }
+      throw new MaterialIngestError("Saved, but text could not be read", {
+        phase: "extract",
+        storageSaved: true,
+      });
+    }
     await deleteStoragePath(storagePath);
     if (storageHeld) {
       storageHeld = false;
-      void adjustStorageBytes(userId, -payload.sizeBytes);
+      await releaseStoragePool(sizeBytes).catch(() => undefined);
     }
-    throw error instanceof Error ? error : new Error("Extraction failed.");
+    throw error instanceof Error ? error : new Error("Upload failed.");
   }
 }
 
 async function releasePreparedStorage(item: PreparedMaterial): Promise<void> {
   if (!item.storageHeld || !item.sizeBytes) return;
   item.storageHeld = false;
-  await adjustStorageBytes(item.userId, -item.sizeBytes);
+  await releaseStoragePool(item.sizeBytes);
 }
 
 export async function discardPreparedMaterials(prepared: PreparedMaterial[]): Promise<void> {
@@ -220,64 +362,76 @@ export async function discardPreparedMaterials(prepared: PreparedMaterial[]): Pr
   );
 }
 
-async function slideImagesFromExtract(
-  prepared: PreparedMaterial,
-  images: ExtractResponse["images"],
-): Promise<MaterialImage[]> {
-  const { projectId, userId, materialId } = prepared;
-  const counts = new Map<number, number>();
-  const uploaded: MaterialImage[] = [];
-  for (const item of images ?? []) {
-    if (typeof item.data !== "string" || !item.data) continue;
-    const page = typeof item.page === "number" && item.page > 0 ? Math.floor(item.page) : 1;
-    const mime = typeof item.mime === "string" && item.mime.startsWith("image/") ? item.mime : "image/jpeg";
-    const index = counts.get(page) ?? 0;
-    counts.set(page, index + 1);
-    const path = slideImagePath(userId, projectId, materialId, page, mime, index);
-    await uploadMaterialBytes(path, bytesFromBase64(item.data), mime);
-    uploaded.push({ page, path, mime });
-  }
-  return uploaded;
-}
-
 function previewFromPrepared(prepared: PreparedMaterial): string {
   const text = prepared.data.text ?? "";
   return prepared.data.preview || previewText(text);
 }
 
-/** Text + preview on the material doc. PPTX stays processing until slide images finish. */
+type IndexStepResponse = { done?: boolean; error?: string };
+
+/** Non-PDF text is chunked and embedded server-side in time-boxed steps; keep calling until done. */
+async function indexMaterialText(projectId: string, materialId: string): Promise<void> {
+  for (let step = 0; step < 200; step += 1) {
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await fetch("/api/materials/index", {
+          method: "POST",
+          headers: await authHeaders(),
+          body: JSON.stringify({ projectId, materialId }),
+        });
+        if (response.ok || response.status < 500 || attempt === 2) break;
+      } catch {
+        if (attempt === 2) throw new MaterialIngestError("Network error while indexing. Try again.", { phase: "network", storageSaved: true });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+    if (!response) throw new MaterialIngestError("Network error while indexing. Try again.", { phase: "network", storageSaved: true });
+    const data = (await response.json()) as IndexStepResponse;
+    if (!response.ok) throw new MaterialIngestError(data.error ?? "Indexing failed.", { phase: "extract", status: response.status, storageSaved: true });
+    if (data.done) return;
+  }
+  throw new MaterialIngestError("This file is too large to index in one go.", { phase: "extract", storageSaved: true });
+}
+
+/** Text + preview on the material doc, then the vector index. Only text is kept, never page or slide images. */
 export async function commitMaterialText(prepared: PreparedMaterial): Promise<string> {
   const { projectId, userId, materialId, storagePath, textPath, data } = prepared;
   const type = data.type ?? prepared.type;
-  const title = data.title?.trim() || prepared.title;
-  const needsSlideImages = type === "pptx";
+  const title = prepared.title.trim() || data.title?.trim() || "File";
 
-  await writeMaterialDoc(projectId, materialId, {
-    userId,
-    title: prepared.title,
-    type: prepared.type,
-    storagePath,
-    textPath,
-    extractedTextPreview: "",
-    sizeBytes: prepared.sizeBytes,
-    status: "processing",
-  });
+  if (type !== "pdf") {
+    await writeMaterialDoc(projectId, materialId, {
+      userId,
+      title: prepared.title,
+      type: prepared.type,
+      storagePath,
+      textPath,
+      extractedTextPreview: "",
+      sizeBytes: prepared.sizeBytes,
+      status: "processing",
+    });
+  }
   prepared.storageHeld = false;
 
   try {
-    if (!data.type || (!data.text && !data.textStored)) {
+    if (!data.type || (!data.text && !data.textStored && !data.indexed)) {
       throw new Error(data.error ?? "Extraction failed.");
     }
 
-    if (!data.textStored) {
+    if (type !== "pdf" && !data.textStored) {
       if (!data.text) throw new Error("Extraction failed.");
       await uploadExtractedText(textPath, data.text);
     }
 
+    if (type === "pdf") {
+      // The server already wrote pageCount, textChars, preview and status while indexing.
+      return materialId;
+    }
+
+    // An uploaded image is its own preview; nothing else is rasterised or stored.
     const images: MaterialImage[] =
-      type === "image"
-        ? [{ page: 1, path: storagePath, mime: prepared.originalMime || "image/jpeg" }]
-        : [];
+      type === "image" ? [{ page: 1, path: storagePath, mime: prepared.originalMime || "image/jpeg" }] : [];
 
     await writeMaterialDoc(projectId, materialId, {
       userId,
@@ -291,20 +445,31 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
       hasImages: images.length > 0,
       textChars: data.textChars ?? data.text?.length ?? 0,
       images,
-      status: needsSlideImages ? "processing" : "ready",
+      status: "processing",
     });
-
-    if (!needsSlideImages) {
-      trackEvent({
-        userId,
-        projectId,
-        type: "material_uploaded",
-        value: type,
-      });
-    }
+    await indexMaterialText(projectId, materialId);
+    await writeMaterialDoc(projectId, materialId, {
+      userId,
+      title,
+      type,
+      storagePath,
+      textPath,
+      extractedTextPreview: previewFromPrepared(prepared),
+      sizeBytes: prepared.sizeBytes,
+      pageCount: data.pageCount ?? 1,
+      hasImages: images.length > 0,
+      textChars: data.textChars ?? data.text?.length ?? 0,
+      images,
+      status: "ready",
+    });
 
     return materialId;
   } catch (error) {
+    if (type === "pdf") {
+      throw error instanceof MaterialIngestError
+        ? error
+        : new MaterialIngestError("PDF pages are saved; indexing can resume.", { phase: "extract", storageSaved: true });
+    }
     await writeMaterialDoc(projectId, materialId, {
       userId,
       title: prepared.title,
@@ -315,84 +480,26 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
       sizeBytes: prepared.sizeBytes,
       status: "failed",
     });
-    throw error instanceof Error ? error : new Error("Extraction failed.");
-  }
-}
-
-/** Background: extract and upload slide images. Does not block chat. */
-export async function finalizeMaterialImages(prepared: PreparedMaterial): Promise<void> {
-  const type = prepared.data.type ?? prepared.type;
-  if (type !== "pptx") return;
-
-  const { projectId, userId, materialId, storagePath, textPath, data } = prepared;
-  const title = data.title?.trim() || prepared.title;
-  const preview = previewFromPrepared(prepared);
-  const textChars = data.textChars ?? data.text?.length ?? 0;
-
-  try {
-    let images: MaterialImage[] = [];
-    const cached = (prepared.data.images ?? []).filter((item) => typeof item.data === "string" && item.data);
-    if (cached.length > 0) {
-      images = await slideImagesFromExtract(prepared, cached);
-    } else {
-      const extracted = await deriveFromStorage({ path: prepared.storagePath, textPath: prepared.textPath }, "images");
-      images = await slideImagesFromExtract(prepared, extracted.images);
-    }
-
-    await writeMaterialDoc(projectId, materialId, {
-      userId,
-      title,
-      type,
-      storagePath,
-      textPath,
-      extractedTextPreview: preview,
-      sizeBytes: prepared.sizeBytes,
-      pageCount: data.pageCount ?? 1,
-      hasImages: images.length > 0,
-      textChars,
-      images,
-      status: "ready",
-    });
-
-    trackEvent({
-      userId,
-      projectId,
-      type: "material_uploaded",
-      value: type,
-    });
-  } catch (error) {
-    console.error("Slide image ingest failed; keeping text preview.", error);
-    await writeMaterialDoc(projectId, materialId, {
-      userId,
-      title,
-      type,
-      storagePath,
-      textPath,
-      extractedTextPreview: preview,
-      sizeBytes: prepared.sizeBytes,
-      pageCount: data.pageCount ?? 1,
-      hasImages: false,
-      textChars,
-      images: [],
-      status: "ready",
+    if (error instanceof MaterialIngestError) throw error;
+    throw new MaterialIngestError("Saved, but text could not be read", {
+      phase: "extract",
+      storageSaved: true,
     });
   }
 }
 
-/** Write material docs and extracted sidecars. Parent project must exist (Firestore rules). */
+/** Write material docs and run the index. Parent project must exist (Firestore rules). */
 export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promise<string> {
-  const materialId = await commitMaterialText(prepared);
-  await finalizeMaterialImages(prepared);
-  return materialId;
+  return commitMaterialText(prepared);
 }
 
-/** Original file goes to Storage first. Then derive text/images. Never keep a File for chat. */
+/** Original file goes to Storage first. Then read text and index it. Never keep a File for chat. */
 export async function ingestMaterial(input: {
   projectId: string;
   userId: string;
   source: IngestSource;
 }): Promise<string> {
-  const prepared = await prepareMaterialIngest({ ...input, includeImages: true });
+  const prepared = await prepareMaterialIngest(input);
   try {
     return await finalizeMaterialIngest(prepared);
   } catch (error) {
@@ -405,8 +512,13 @@ export async function ingestMaterialFile(input: {
   projectId: string;
   userId: string;
   file: File;
+  title?: string;
 }): Promise<string> {
-  return ingestMaterial({ projectId: input.projectId, userId: input.userId, source: { kind: "file", file: input.file } });
+  return ingestMaterial({
+    projectId: input.projectId,
+    userId: input.userId,
+    source: { kind: "file", file: input.file, title: input.title },
+  });
 }
 
 export async function ingestMaterialPaste(input: {

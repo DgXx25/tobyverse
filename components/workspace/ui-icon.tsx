@@ -1,141 +1,158 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
-import {
-  Activity,
-  Apple,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Atom,
-  Bone,
-  BookOpen,
-  Brain,
-  Bug,
-  ChartColumn,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CircleHelp,
-  Copy,
-  CreditCard,
-  Database,
-  Dna,
-  Download,
-  Droplet,
-  Ellipsis,
-  File,
-  Files,
-  Flag,
-  Flame,
-  FlaskConical,
-  Folder,
-  Globe,
-  Heart,
-  Hexagon,
-  Layers,
-  Leaf,
-  List,
-  Lock,
-  LogOut,
-  Menu,
-  Moon,
-  Mountain,
-  NotebookText,
-  Palette,
-  PanelLeft,
-  Pencil,
-  Pill,
-  Plus,
-  Search,
-  Settings,
-  Share2,
-  Shield,
-  SlidersHorizontal,
-  Sparkle,
-  Star,
-  Sun,
-  Trash2,
-  TriangleAlert,
-  User,
-  Virus,
-  Wind,
-  X,
-  Zap,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import Activity01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Activity01Icon.js";
+import Alert01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Alert01Icon.js";
+import Apple01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Apple01Icon.js";
+import ArrowRight01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ArrowRight01Icon.js";
+import ArrowUp01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ArrowUp01Icon.js";
+import Atom01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Atom01Icon.js";
+import BacteriaIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/BacteriaIcon.js";
+import Bone01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Bone01Icon.js";
+import BookOpen01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/BookOpen01Icon.js";
+import Brain01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Brain01Icon.js";
+import Bug01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Bug01Icon.js";
+import Cancel01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Cancel01Icon.js";
+import ChartColumnIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ChartColumnIcon.js";
+import Copy01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Copy01Icon.js";
+import CreditCardIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/CreditCardIcon.js";
+import Database01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Database01Icon.js";
+import Delete02Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Delete02Icon.js";
+import Dna01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Dna01Icon.js";
+import Download01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Download01Icon.js";
+import DropletIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/DropletIcon.js";
+import FastWindIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FastWindIcon.js";
+import File01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/File01Icon.js";
+import FileSpreadsheetIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FileSpreadsheetIcon.js";
+import Files01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Files01Icon.js";
+import FireIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FireIcon.js";
+import Flag01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Flag01Icon.js";
+import FlaskConicalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FlaskConicalIcon.js";
+import Folder01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Folder01Icon.js";
+import Globe02Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Globe02Icon.js";
+import HeartCheckIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/HeartCheckIcon.js";
+import HelpCircleIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/HelpCircleIcon.js";
+import Hexagon01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Hexagon01Icon.js";
+import Layers01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Layers01Icon.js";
+import Leaf01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Leaf01Icon.js";
+import LibraryIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/LibraryIcon.js";
+import Logout01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Logout01Icon.js";
+import LungsIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/LungsIcon.js";
+import Maximize01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Maximize01Icon.js";
+import Medicine01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Medicine01Icon.js";
+import Menu01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Menu01Icon.js";
+import Message01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Message01Icon.js";
+import Minimize01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Minimize01Icon.js";
+import Moon01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Moon01Icon.js";
+import MountainIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/MountainIcon.js";
+import Notebook01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Notebook01Icon.js";
+import PaintBoardIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PaintBoardIcon.js";
+import PaperclipIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PaperclipIcon.js";
+import PencilEdit01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PencilEdit01Icon.js";
+import PinIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PinIcon.js";
+import PlusSignIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PlusSignIcon.js";
+import Search01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Search01Icon.js";
+import Settings01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Settings01Icon.js";
+import Share01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Share01Icon.js";
+import Shield01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Shield01Icon.js";
+import SidebarLeftIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SidebarLeftIcon.js";
+import SidebarRightIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SidebarRightIcon.js";
+import SlidersHorizontalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SlidersHorizontalIcon.js";
+import SparklesIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SparklesIcon.js";
+import SquareLock01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SquareLock01Icon.js";
+import StarIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/StarIcon.js";
+import Sun01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Sun01Icon.js";
+import ThumbsDownIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ThumbsDownIcon.js";
+import ThumbsUpIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ThumbsUpIcon.js";
+import Tick01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Tick01Icon.js";
+import UserIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/UserIcon.js";
+import ZapIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ZapIcon.js";
+import ZoomInAreaIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ZoomInAreaIcon.js";
+import ZoomOutAreaIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ZoomOutAreaIcon.js";
+import type { IconSvgElement } from "@hugeicons/react";
 
 const ICONS = {
-  share: Share2,
-  panel: PanelLeft,
-  close: X,
-  materials: Folder,
-  notes: NotebookText,
-  practice: Atom,
-  spark: Sparkle,
-  plus: Plus,
-  menu: Menu,
-  back: ArrowLeft,
-  forward: ChevronRight,
-  prev: ChevronLeft,
-  chevronDown: ChevronDown,
-  zoomIn: ZoomIn,
-  zoomOut: ZoomOut,
-  more: Ellipsis,
-  edit: Pencil,
-  trash: Trash2,
-  user: User,
-  settings: Settings,
-  sliders: SlidersHorizontal,
-  sun: Sun,
-  moon: Moon,
-  help: CircleHelp,
-  billing: CreditCard,
-  logout: LogOut,
-  library: BookOpen,
-  search: Search,
-  send: ArrowUp,
-  appearance: Palette,
-  usage: ChartColumn,
-  data: Database,
-  file: File,
-  pages: Files,
-  plan: List,
-  deck: Layers,
-  download: Download,
-  activity: Activity,
-  apple: Apple,
-  arrow: ArrowRight,
-  atom: Atom,
-  bone: Bone,
-  book: BookOpen,
-  brain: Brain,
-  bug: Bug,
-  cell: Hexagon,
-  check: Check,
-  copy: Copy,
-  lock: Lock,
-  dna: Dna,
-  droplet: Droplet,
-  flag: Flag,
-  flame: Flame,
-  flask: FlaskConical,
-  globe: Globe,
-  heart: Heart,
-  leaf: Leaf,
-  lungs: Wind,
-  mountain: Mountain,
-  pill: Pill,
-  shield: Shield,
-  star: Star,
-  virus: Virus,
-  warning: TriangleAlert,
-  wind: Wind,
-  x: X,
-  zap: Zap,
-} as const satisfies Record<string, LucideIcon>;
+  share: Share01Icon,
+  panel: SidebarLeftIcon,
+  panelLeft: SidebarLeftIcon,
+  panelRight: SidebarRightIcon,
+  close: Cancel01Icon,
+  materials: Folder01Icon,
+  notes: Notebook01Icon,
+  practice: Atom01Icon,
+  spark: SparklesIcon,
+  plus: PlusSignIcon,
+  chat: Message01Icon,
+  newChat: PencilEdit01Icon,
+  projectFolder: Folder01Icon,
+  attach: PaperclipIcon,
+  menu: Menu01Icon,
+  back: ArrowRight01Icon,
+  forward: ArrowRight01Icon,
+  prev: ArrowRight01Icon,
+  chevronDown: ArrowRight01Icon,
+  zoomIn: ZoomInAreaIcon,
+  zoomOut: ZoomOutAreaIcon,
+  more: Menu01Icon,
+  edit: PencilEdit01Icon,
+  pin: PinIcon,
+  trash: Delete02Icon,
+  user: UserIcon,
+  settings: Settings01Icon,
+  sliders: SlidersHorizontalIcon,
+  sun: Sun01Icon,
+  moon: Moon01Icon,
+  help: HelpCircleIcon,
+  billing: CreditCardIcon,
+  logout: Logout01Icon,
+  maximize: Maximize01Icon,
+  minimize: Minimize01Icon,
+  library: LibraryIcon,
+  search: Search01Icon,
+  send: ArrowUp01Icon,
+  appearance: PaintBoardIcon,
+  usage: ChartColumnIcon,
+  data: Database01Icon,
+  file: File01Icon,
+  fileText: Notebook01Icon,
+  spreadsheet: FileSpreadsheetIcon,
+  pages: Files01Icon,
+  plan: Files01Icon,
+  deck: Layers01Icon,
+  download: Download01Icon,
+  activity: Activity01Icon,
+  apple: Apple01Icon,
+  arrow: ArrowRight01Icon,
+  atom: Atom01Icon,
+  bone: Bone01Icon,
+  book: BookOpen01Icon,
+  brain: Brain01Icon,
+  bug: Bug01Icon,
+  cell: Hexagon01Icon,
+  check: Tick01Icon,
+  copy: Copy01Icon,
+  lock: SquareLock01Icon,
+  dna: Dna01Icon,
+  droplet: DropletIcon,
+  flag: Flag01Icon,
+  flame: FireIcon,
+  flask: FlaskConicalIcon,
+  globe: Globe02Icon,
+  heart: HeartCheckIcon,
+  leaf: Leaf01Icon,
+  lungs: LungsIcon,
+  mountain: MountainIcon,
+  pill: Medicine01Icon,
+  shield: Shield01Icon,
+  star: StarIcon,
+  virus: BacteriaIcon,
+  warning: Alert01Icon,
+  dislike: ThumbsDownIcon,
+  like: ThumbsUpIcon,
+  wind: FastWindIcon,
+  x: Cancel01Icon,
+  zap: ZapIcon,
+} as const satisfies Record<string, IconSvgElement>;
 
 export type UiIconName = keyof typeof ICONS;
 
@@ -176,57 +193,19 @@ export const CATALOG_ICON_IDS = [
 const ALIASES: Record<string, UiIconName> = {
   atom01: "atom",
   barchart: "usage",
-  barchart01: "usage",
-  barchart3: "usage",
-  barbell: "practice",
   bookopen: "book",
-  bookopen01: "library",
-  chartcolumn: "usage",
   circlehelp: "help",
   creditcard: "billing",
-  creditcard01: "billing",
-  database01: "data",
-  dotshorizontal: "more",
-  download01: "download",
-  drop: "droplet",
-  dumbbell: "practice",
-  edit01: "edit",
   ellipsis: "more",
-  file02: "notes",
-  file06: "file",
-  files: "pages",
   filetext: "notes",
-  flaskconical: "flask",
   folder: "materials",
-  heartbeat: "activity",
   helpcircle: "help",
-  layerstwo01: "deck",
-  layoutright: "panel",
-  lightning: "zap",
   list: "plan",
-  logout01: "logout",
-  memory: "brain",
-  moon01: "moon",
-  mountains: "mountain",
   note: "notes",
   notebook: "notes",
-  notebooktext: "notes",
-  notepad: "notes",
-  panelleft: "panel",
-  pulse: "activity",
   searchmd: "search",
-  send01: "send",
-  settings01: "settings",
-  share07: "share",
-  share2: "share",
-  signout: "logout",
-  sliders01: "sliders",
   sparkle: "spark",
-  stickynote: "notes",
-  trash01: "trash",
   trash2: "trash",
-  trianglealert: "warning",
-  user01: "user",
 };
 
 function normalizeIconKey(value: string): string {
@@ -240,6 +219,12 @@ export function resolveUiIconName(name?: string | null): UiIconName | null {
   return ALIASES[key] ?? null;
 }
 
+const FLIPPED: Partial<Record<UiIconName, boolean>> = {
+  back: true,
+  prev: true,
+  chevronDown: true,
+};
+
 export function UiIcon({
   name,
   size = 18,
@@ -249,14 +234,15 @@ export function UiIcon({
   size?: number;
   className?: string;
 }) {
-  const Icon = ICONS[name];
-  if (!Icon) return null;
+  const icon = ICONS[name];
+  if (!icon) return null;
   return (
-    <Icon
+    <HugeiconsIcon
+      icon={icon}
       size={size}
       color="currentColor"
-      strokeWidth={2}
-      className={className}
+      strokeWidth={1.75}
+      className={`${FLIPPED[name] ? "-scale-x-100" : ""} ${name === "chevronDown" ? "rotate-90" : ""} ${className}`}
       aria-hidden="true"
     />
   );

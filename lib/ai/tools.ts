@@ -1,33 +1,3 @@
-export const CHAT_TOOLS = [
-  "answer",
-  "clarify",
-  "suggest_practice",
-  "suggest_sheet",
-  "suggest_path",
-  "create_practice",
-  "edit_practice",
-  "append_practice",
-  "create_sheet",
-  "edit_sheet",
-  "create_path",
-  "advance_path",
-  "restart_path",
-  "start_path",
-  "search_images",
-] as const;
-
-export type ChatToolName = (typeof CHAT_TOOLS)[number];
-
-/** Never sent as Gemini functions. Keyword / chip intercept owns these. */
-export const INTERCEPT_ONLY_CHAT_TOOLS = [
-  "create_practice",
-  "create_sheet",
-  "create_path",
-  "edit_practice",
-  "append_practice",
-  "edit_sheet",
-] as const satisfies readonly ChatToolName[];
-
 export type ChatToolArgs = {
   topic?: string;
   question?: string;
@@ -37,6 +7,7 @@ export type ChatToolArgs = {
   id?: string;
   query?: string;
   mode?: "practice" | "exam";
+  blocks?: import("@/types/visual").VisualBlock[];
 };
 
 export type ChatToolCall = {
@@ -50,9 +21,15 @@ export type ChatStreamPart = {
 };
 
 export type ChatToolJsonProperty =
-  | { type: "string"; description: string }
-  | { type: "integer"; description: string }
-  | { type: "array"; description: string; items: { type: "string" } };
+  | { type: "string"; description?: string; enum?: string[] }
+  | { type: "number" | "integer"; description?: string }
+  | { type: "array"; description?: string; items: ChatToolJsonProperty }
+  | {
+      type: "object";
+      description?: string;
+      properties: Record<string, ChatToolJsonProperty>;
+      required?: string[];
+    };
 
 export type ChatToolJsonSchema = {
   type: "object";
@@ -60,19 +37,34 @@ export type ChatToolJsonSchema = {
   required?: string[];
 };
 
-export type ChatToolDefinition = {
-  name: ChatToolName;
+export type ChatToolDefinition<Name extends string = string> = {
+  name: Name;
   description: string;
   parameters: ChatToolJsonSchema;
   /** If true, the client shows a card and the route does not stream body text. */
   card?: boolean;
+  execute: (context: ChatToolExecutionContext) => Promise<unknown>;
 };
 
-export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
-  {
+export type ChatToolExecutionContext = {
+  call: ChatToolCall;
+  invoke: (call: ChatToolCall) => Promise<unknown>;
+};
+
+function defineTool<const Name extends string>(
+  definition: Omit<ChatToolDefinition<Name>, "execute">,
+): ChatToolDefinition<Name> {
+  return {
+    ...definition,
+    execute: async (context: ChatToolExecutionContext) => context.invoke(context.call),
+  };
+}
+
+export const CHAT_TOOL_DEFINITIONS = [
+  defineTool({
     name: "answer",
     description:
-      "Default. A topic name or ordinary question: write the explanation in the user's language. Never reply by asking what the topic is. No chips. Do not create a set unless they asked to practice or to move on. Do not pass `question` unless they asked to move on or this is an exam-only turn. Never yes/no \"did you get it?\". Never \"what is this called?\" / \"which tense would you use to describe…\". Skip `question` for translate/rewrite/calculate/\"write X\". Table cells: a few words, not a paragraph, never a long parenthetical. Example then `<br>` then a short gloss in their language.",
+      "Answer an ordinary question or complete a direct text task in the user's language. Use it when no more specific action tool is needed. Pass question only when the user explicitly asked for a check or to move on. Do not add chips, a quiz, or a confirmation question to a simple request.",
     parameters: {
       type: "object",
       properties: {
@@ -87,11 +79,11 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
         },
       },
     },
-  },
-  {
+  }),
+  defineTool({
     name: "clarify",
     description:
-      "Only when the user asked to practice, for notes, or for photos and one detail is missing. Ask ONE concrete question in their language. Include 2-4 short tap options when you have them. Never a second clarify. Never canned English. Do not use for ordinary questions.",
+      "Ask one concrete question when an action tool lacks its required topic and there are no usable materials. Use the user's language and include two to four short options when helpful. Do not clarify an ordinary question or ask a second confirmation after a slash, chip, or direct creation request.",
     parameters: {
       type: "object",
       properties: {
@@ -104,11 +96,71 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
       },
       required: ["question"],
     },
-  },
-  {
+  }),
+  defineTool({
+    name: "illustrate",
+    description:
+      "Emit one or more typed catalog blocks under a short answer when the idea is clearer visually. Use it for a shape or curve, a comparison, a formula, ordered steps, or a cycle. Use only graph, compare_vs, formula_card, steps, flow, or cycle blocks and keep labels in the user's language. Do not use it for yes/no questions, one-line definitions, study sheets, or image generation.",
+    parameters: {
+      type: "object",
+      properties: {
+        blocks: {
+          type: "array",
+          description: "One to four in-thread catalog blocks.",
+          items: {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: ["graph", "compare_vs", "formula_card", "steps", "flow", "cycle"],
+                description: "Catalog block type.",
+              },
+              title: { type: "string", description: "Optional short heading." },
+              text: { type: "string", description: "Optional plain-language explanation." },
+              formula: { type: "string", description: "Formula source for formula_card." },
+              slope: { type: "number", description: "Line slope for graph." },
+              intercept: { type: "number", description: "Line intercept for graph." },
+              points: {
+                type: "array",
+                description: "Y values for a curve when slope is insufficient.",
+                items: { type: "number" },
+              },
+              caption: { type: "string", description: "Short graph caption." },
+              items: {
+                type: "array",
+                description: "Ordered labels for steps or a cycle/flow.",
+                items: { type: "string" },
+              },
+              left: {
+                type: "object",
+                description: "Left comparison side.",
+                properties: {
+                  title: { type: "string" },
+                  text: { type: "string" },
+                },
+                required: ["title", "text"],
+              },
+              right: {
+                type: "object",
+                description: "Right comparison side.",
+                properties: {
+                  title: { type: "string" },
+                  text: { type: "string" },
+                },
+                required: ["title", "text"],
+              },
+            },
+            required: ["type"],
+          },
+        },
+      },
+      required: ["blocks"],
+    },
+  }),
+  defineTool({
     name: "suggest_practice",
     description:
-      "After a short briefing, when they asked to practice or for an exam, or they asked to move on. Offer a chip. Do not create the set. Do not offer this after an ordinary explanation. Do not offer this for form-writing (განცხადება / official letter) — that is a paper block in chat. Pass mode exam if they asked for an exam (გამოცდა / გამომცადე / test me).",
+      "Offer a practice or exam chip after a short briefing when the user is exploring rather than directly ordering a set. Use mode exam when they asked to be tested. Do not use after an ordinary explanation or for form-writing. Use create_practice instead for a slash, accepted chip, or direct creation request.",
     parameters: {
       type: "object",
       properties: {
@@ -116,29 +168,29 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
         mode: { type: "string", description: "practice or exam." },
       },
     },
-  },
-  {
+  }),
+  defineTool({
     name: "suggest_sheet",
     description:
-      "When they asked for notes / კონსპექტი. Offer a chip. Do not create the sheet. In Teacher mode you MAY also suggest_sheet after a long explanation — not a one-line answer, not every turn, not on Fast. Do not pass `question`.",
+      "Offer a note chip when the user expresses interest in notes without directly asking you to create them. Teacher may also offer it after a substantial explanation. Do not use on Fast or for a one-line fact. Use create_sheet for a slash, accepted chip, or direct creation request.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Topic for the chip." } },
     },
-  },
-  {
+  }),
+  defineTool({
     name: "suggest_path",
     description:
-      "After a short briefing or one clarify, when they asked to plan (დამიგეგმე / სწავლა მინდა as a plan) or for exam review but a syllabus/topic is still thin. Offer a chip. Do not create the path. Never dump the week list.",
+      "Offer a path chip after a short briefing when the user is considering a course or exam-review plan. Use it only in Teacher mode and only with a usable topic or material. Do not create the path or dump a week list in chat. Use create_path for an explicit accepted plan action.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Course or exam-review topic for the chip." } },
     },
-  },
-  {
+  }),
+  defineTool({
     name: "create_practice",
     description:
-      "Only after they accepted a practice/exam chip, said yes, or said დამიწერე / გააკეთე. First ask: brief the move, then suggest_practice — do not create yet. Never write quiz items into chat — card only. Never for form-writing (განცხადება) — that is a paper block. Pass mode exam if they asked for an exam. On a review path, only for memory-heavy theory (terms, lists, flags, formulas) — not a 10-item MCQ because practice exists.",
+      "Create a practice or exam card when the user used /practice, accepted a chip, or directly asked you to make the set. Call it immediately when a topic or material exists; do not ask for confirmation again. Pass mode exam when they asked to be tested. Never dump quiz items into chat or use it for form-writing.",
     parameters: {
       type: "object",
       properties: {
@@ -148,10 +200,10 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
       required: ["topic"],
     },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "edit_practice",
-    description: "Change the current practice set. Keep the same id. Never dump items into chat.",
+    description: "Change the active practice set according to the user's instruction. Use it only when a practice card is active. Keep the same id and return the updated card. Never dump the items into chat.",
     parameters: {
       type: "object",
       properties: {
@@ -161,10 +213,10 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
       required: ["instruction"],
     },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "append_practice",
-    description: "Add items to the current practice set. Same id. Never dump items into chat.",
+    description: "Append new items to the active practice set. Use the requested count when present and otherwise add a small relevant batch. Keep the same id and return the updated card. Never dump the items into chat.",
     parameters: {
       type: "object",
       properties: {
@@ -174,22 +226,22 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
       },
     },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "create_sheet",
     description:
-      "Only after they accepted a notes chip, said yes, or said დამიწერე / გააკეთე. Never write the notes as chat text. Notes teach understanding (meaning first, then formula). One short chat line plus the card. Do not generate long notes on a review path unless they asked.",
+      "Create a study sheet when the user used /note, accepted a note chip, or directly asked for notes or a კონსპექტი. Call it immediately when a topic or material exists; do not ask for confirmation again. Return a card and never write the sheet body as chat text. Do not create one for a one-line definition.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Specific sheet topic." } },
       required: ["topic"],
     },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "edit_sheet",
     description:
-      "Rewrite the current notes so a beginner gets the idea (meaning first, then formula). Keep the same id. Never dump the notes into chat.",
+      "Rewrite the active study sheet according to the user's instruction. Use it only when a sheet is active. Keep the same id and preserve meaning-first explanations. Never dump the rewritten notes into chat.",
     parameters: {
       type: "object",
       properties: {
@@ -199,42 +251,42 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
       required: ["instruction"],
     },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "create_path",
     description:
-      "They asked to plan with a syllabus/topic (დამიგეგმე) or for exam prep with dumped slides/quizzes, or they accepted a plan chip / said დამიწერე / გააკეთე. Build the path card only — never write the week list in chat. Skip course-intro / aims / grading as lesson 1. First node is the first real topic. Exam prep = a short review path (about 4–8 high-yield nodes), not a week-long course. Do not create notes or practice. Never call this for a plain explain (ამიხსნა მოკლედ).",
+      "Create a course or exam-review path card from an explicit plan action and a usable topic or material. Use it only in Teacher mode; Fast must ignore /path. Start with the first real topic and keep exam review to a short high-yield track. Never dump the syllabus in chat or use it for a plain explanation.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Course or semester name, if known." } },
     },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "advance_path",
     description:
-      "Only when the student looks ready: they said გაიარე / next topic, passed a practice/exam check, or tapped Continue on a node already marked ready. Never on a greeting, thanks, or because YOU just explained. Do not dump the rest of the path. Card stays the same path.",
+      "Advance an already-started Teacher path when the user explicitly says the topic is done or asks for the next topic. It may also follow a completed check. Do not use it after your own explanation, a greeting, or thanks. Keep the same path card and do not reveal the remaining syllabus.",
     parameters: { type: "object", properties: {} },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "restart_path",
     description:
-      "A study path already exists and the user wants to start from the first topic (პირველიდან / თავიდან / start from the beginning), or current was jumped into the middle. Only before teaching has started. Reset current to the first open node. One short line plus the same path card. Do not create a new path. Do not write [artifact ...] in chat.",
+      "Reset an existing draft path to its first open topic when the user explicitly asks to start over. Use it only before teaching has started. Keep the same path and return its card. Do not create a replacement path or expose artifact markup.",
     parameters: { type: "object", properties: {} },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "start_path",
     description:
-      "The student confirmed the draft path (დავიწყოთ / let's start / Continue). Opens a child thread for this plan; the parent chat stays free. Never call this until they confirmed. Do not change the map. One short line plus the same path card. Do not teach the first topic in the parent chat.",
+      "Start a confirmed Teacher path and open its child thread. Use it only after the user confirms the draft plan. Keep the parent chat free and do not alter the map. Do not teach the first topic in the parent thread.",
     parameters: { type: "object", properties: {} },
     card: true,
-  },
-  {
+  }),
+  defineTool({
     name: "search_images",
     description:
-      "Find photos, charts, graphs, maps, or diagrams. Call only if the user asked for a figure/photo/diagram, or this turn is about an attached slide/image. Do not call because a figure might help. Always write one short line in the user's language in the same turn; the photos render under it. Skip abstract-only answers and skip when project files already have the figure. Pass the full topic as query in the original language. Optional count (max 8). If they only asked for photos with no topic, use clarify once instead. If search returns nothing, say so in one short line. Never invent image URLs. Do not dump URL lists in chat.",
+      "Find external photos, maps, charts, or diagrams only when the user explicitly asks for them or refers to an attached figure. Pass the full topic in the user's language and optionally cap the result count. Add one short introductory line, while results render separately. Do not invent URLs, dump link lists, or use this when illustrate catalog blocks are the better fit.",
     parameters: {
       type: "object",
       properties: {
@@ -243,8 +295,14 @@ export const CHAT_TOOL_DEFINITIONS: ChatToolDefinition[] = [
       },
       required: ["query"],
     },
-  },
+  }),
 ];
+
+export type ChatToolName = (typeof CHAT_TOOL_DEFINITIONS)[number]["name"];
+export const CHAT_TOOLS = CHAT_TOOL_DEFINITIONS.map((definition) => definition.name) as ChatToolName[];
+
+/** Backward-compatible inventory field. Native tool calling has no intercept-only tools. */
+export const INTERCEPT_ONLY_CHAT_TOOLS = [] as const satisfies readonly ChatToolName[];
 
 export function isChatToolName(value: unknown): value is ChatToolName {
   return typeof value === "string" && (CHAT_TOOLS as readonly string[]).includes(value);
@@ -299,7 +357,31 @@ export function parseToolArgs(value: unknown): ChatToolArgs {
     query: typeof row.query === "string" ? row.query.trim() || undefined : undefined,
     count: Number.isFinite(count) ? Math.min(8, Math.max(1, Math.floor(count))) : undefined,
     mode: row.mode === "exam" || row.mode === "practice" ? row.mode : undefined,
+    blocks: parseIllustrationBlocks(row.blocks),
   };
+}
+
+function parseIllustrationBlocks(value: unknown): import("@/types/visual").VisualBlock[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const allowed = new Set(["graph", "compare_vs", "formula_card", "steps", "flow"]);
+  const blocks = value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    if (row.type === "cycle") {
+      const items = Array.isArray(row.items)
+        ? row.items.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+        : [];
+      if (items.length < 2) return [];
+      return [{
+        type: "flow" as const,
+        title: typeof row.title === "string" ? row.title : undefined,
+        items: [...items, items[0]],
+      }];
+    }
+    if (typeof row.type !== "string" || !allowed.has(row.type)) return [];
+    return [item as import("@/types/visual").VisualBlock];
+  }).slice(0, 4);
+  return blocks.length ? blocks : undefined;
 }
 
 export function parseToolCall(name: unknown, args?: unknown): ChatToolCall | null {
@@ -307,8 +389,38 @@ export function parseToolCall(name: unknown, args?: unknown): ChatToolCall | nul
   return { name, args: parseToolArgs(args) };
 }
 
-/** OpenAI Chat Completions tool list. Unused until that provider is wired. */
-export function toOpenAITools(defs: ChatToolDefinition[] = CHAT_TOOL_DEFINITIONS) {
+const FAST_EXCLUDED = new Set<ChatToolName>([
+  "suggest_path",
+  "create_path",
+  "advance_path",
+  "restart_path",
+  "start_path",
+]);
+const NON_TEACHER_EXCLUDED = new Set<ChatToolName>([
+  "suggest_path",
+  "create_path",
+  "advance_path",
+  "restart_path",
+  "start_path",
+]);
+
+export function eligibleChatToolNames(mode: import("@/types/chat").ChatMode = "auto"): ChatToolName[] {
+  return CHAT_TOOL_DEFINITIONS.map((definition) => definition.name).filter((name) => {
+    if (mode === "fast") return !FAST_EXCLUDED.has(name);
+    if (mode !== "teacher") return !NON_TEACHER_EXCLUDED.has(name);
+    return true;
+  });
+}
+
+export function eligibleChatToolDefinitions(
+  mode: import("@/types/chat").ChatMode = "auto",
+): Array<(typeof CHAT_TOOL_DEFINITIONS)[number]> {
+  const allowed = new Set(eligibleChatToolNames(mode));
+  return CHAT_TOOL_DEFINITIONS.filter((definition) => allowed.has(definition.name));
+}
+
+/** OpenAI Chat Completions mapper stub. No OpenAI provider is live yet. */
+export function toOpenAITools(defs: ChatToolDefinition[] = eligibleChatToolDefinitions("auto")) {
   return defs.map((def) => ({
     type: "function" as const,
     function: {
@@ -319,11 +431,26 @@ export function toOpenAITools(defs: ChatToolDefinition[] = CHAT_TOOL_DEFINITIONS
   }));
 }
 
-/** Anthropic Messages tool list. Unused until that provider is wired. */
-export function toAnthropicTools(defs: ChatToolDefinition[] = CHAT_TOOL_DEFINITIONS) {
+/** Anthropic Messages mapper stub. No Claude provider is live yet. */
+export function toAnthropicTools(defs: ChatToolDefinition[] = eligibleChatToolDefinitions("auto")) {
   return defs.map((def) => ({
     name: def.name,
     description: def.description,
     input_schema: def.parameters,
   }));
+}
+
+/** Gemini functionDeclarations mapper. GeminiProvider is the only live provider. */
+export function toGeminiTools(defs: ChatToolDefinition[] = eligibleChatToolDefinitions("auto")) {
+  return defs.map((def) => ({
+    name: def.name,
+    description: def.description,
+    parameters: def.parameters,
+  }));
+}
+
+export function chatToolDefinition(name: ChatToolName): ChatToolDefinition {
+  const definition = CHAT_TOOL_DEFINITIONS.find((item) => item.name === name);
+  if (!definition) throw new Error(`Unknown chat tool: ${name}`);
+  return definition;
 }

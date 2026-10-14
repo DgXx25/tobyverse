@@ -6,6 +6,7 @@ export {
   generateToolStream,
   getAIProvider,
   setAIProvider,
+  geminiCallUsage,
 } from "@/lib/ai/gemini";
 export { generateJson, validateOrRepairJson } from "@/lib/ai/json";
 export {
@@ -24,6 +25,16 @@ export {
   type ChatToolName,
 } from "@/lib/ai/tools";
 export {
+  DEFAULT_GEMINI_MODEL,
+  GEMINI_MODEL_OPTIONS,
+  availableAiModels,
+  isKnownAiModel,
+  isAllowedAiModel,
+  isAdminOnlyAiModel,
+  resolveAiModel,
+  aiModelDisplayName,
+  type AiModelId,
+  type AiModelOption,
   AI_PROVIDER_OPTIONS,
   DEFAULT_AI_PROVIDER,
   availableAiProviders,

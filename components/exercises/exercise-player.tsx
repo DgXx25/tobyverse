@@ -3,7 +3,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { authHeaders } from "@/lib/api/client";
-import { trackEvent } from "@/lib/analytics/track";
 import { gradeObjective, isObjectiveType, isProblemTypeForHints } from "@/lib/exercises/grade";
 import type { ProjectExercise } from "@/lib/exercises/store";
 import type {
@@ -55,15 +54,6 @@ export const ExercisePlayer = forwardRef<
     onReadyChange(unsupported);
   }, [item.id, onReadyChange, unsupported]);
 
-  useEffect(() => {
-    trackEvent({
-      userId,
-      projectId: item.projectId,
-      type: "exercise_started",
-      value: item.category,
-    });
-  }, [item.id, item.category, item.projectId, userId]);
-
   function setAnswer(value: unknown, ready: boolean) {
     answerRef.current = value;
     onReadyChange(ready);
@@ -98,18 +88,8 @@ export const ExercisePlayer = forwardRef<
     }
   }
 
-  function finish(correct: boolean | null) {
-    trackEvent({
-      userId,
-      projectId: item.projectId,
-      type: "exercise_completed",
-      value: item.type,
-    });
-    if (correct === true) {
-      trackEvent({ userId, projectId: item.projectId, type: "exercise_correct", value: item.type });
-    } else if (correct === false) {
-      trackEvent({ userId, projectId: item.projectId, type: "exercise_incorrect", value: item.type });
-    }
+  function finish(_correct: boolean | null) {
+    // Answers are not tracked; progress lives in the practice session itself.
   }
 
   useImperativeHandle(ref, () => ({

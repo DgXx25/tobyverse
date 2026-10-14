@@ -28,6 +28,14 @@ export type Project = {
   recipe: LessonRecipe;
   preferredChatMode: ChatMode;
   activeArtifact: ActiveArtifact | null;
+  /** Durable subject facts (book, weak topics, exam date). Not user personalization. */
+  projectMemory: string[];
+  /** Legacy flag from the chat-list era. Every project is a notebook now. */
+  listed?: boolean;
+  /** Symbol shown on the notebook card and in the top bar (an emoji). */
+  icon?: string;
+  /** Optional group, e.g. "Study". Notebooks without one show under All. */
+  folder?: string;
   hidden?: boolean;
   createdAt: IsoDateString | null;
   updatedAt: IsoDateString | null;
@@ -40,4 +48,9 @@ export type CreateProjectInput = {
   userId: EntityId;
   goal?: ProjectGoal;
   preferredChatMode?: ChatMode;
+  listed?: boolean;
+  icon?: string;
+  folder?: string;
+  /** Default true. Listed project homes start empty until "New chat". */
+  createThread?: boolean;
 };

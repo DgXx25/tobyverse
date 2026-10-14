@@ -17,6 +17,8 @@ import { ChatBlock } from "@/components/workspace/chat-block";
 import { HighlightedCode } from "@/components/workspace/highlighted-code";
 import { renderFormula } from "@/lib/visuals/catalog";
 import { protectInlineMath, restoreInlineMath, scrubLeakedMarkup, splitCodeFences, splitDisplayMath } from "@/lib/visuals/math";
+import { CitationMark } from "@/components/workspace/citations";
+import { linkCitations, sourceNumberFromHref } from "@/lib/rag/sources";
 import { isInlineMarkHref, remarkInlineMarks } from "@/lib/visuals/markdown-marks";
 import { layoutChatTable, prepareChatMarkdown, splitMarkdownTables } from "@/lib/visuals/markdown-table";
 import type { VisualBlock } from "@/types/visual";
@@ -133,7 +135,7 @@ const MarkdownBody = memo(function MarkdownBody({
   text: string;
   streaming?: boolean;
 }) {
-  const protectedMath = protectInlineMath(scrubLeakedMarkup(text));
+  const protectedMath = protectInlineMath(scrubLeakedMarkup(linkCitations(text)));
   const seenRef = useRef(0);
   const seen = seenRef.current;
   const rich = (children: ReactNode) => (
@@ -161,7 +163,7 @@ const MarkdownBody = memo(function MarkdownBody({
           ol: ({ children }) => <ol>{children}</ol>,
           li: ({ children }) => <li>{rich(children)}</li>,
           br: () => <br />,
-          blockquote: ({ children }) => <blockquote className="note-highlight my-3 px-3.5 py-2.5">{children}</blockquote>,
+          blockquote: ({ children }) => <blockquote className="note-highlight my-5 px-3.5 py-2.5">{children}</blockquote>,
           code: ({ className, children }) => {
             const inline = !className;
             const raw = restoreInlineMath(String(children).replace(/\n$/, ""), protectedMath.slots);
@@ -190,7 +192,9 @@ const MarkdownBody = memo(function MarkdownBody({
           th: ({ children }) => <th>{rich(children)}</th>,
           td: ({ children }) => <td>{rich(children)}</td>,
           a: ({ href, children }) =>
-            isInlineMarkHref(href) ? (
+            sourceNumberFromHref(href) != null ? (
+              <CitationMark n={sourceNumberFromHref(href) as number} />
+            ) : isInlineMarkHref(href) ? (
               <mark className="note-mark">{rich(children)}</mark>
             ) : (
               <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link">
@@ -297,7 +301,7 @@ export function RichContent({
           );
         }
         return (
-          <div key={key} className={`my-3 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
+          <div key={key} className={`my-5 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
             <VisualBlockView block={segment.block} />
           </div>
         );

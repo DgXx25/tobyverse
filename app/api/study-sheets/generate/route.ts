@@ -1,6 +1,7 @@
 import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
 import { clipText, SHEET_TOTAL_CHARS } from "@/lib/materials/limits";
 import { streamNotesDocument } from "@/lib/study-sheets/generate-stream";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 
@@ -32,8 +33,9 @@ function compileSources(sources: unknown[]): string {
 }
 
 export async function POST(request: Request) {
+  let session;
   try {
-    await assertAccountRequest(request);
+    session = await assertAccountRequest(request);
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -65,6 +67,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Add a topic or a file first." }, { status: 400 });
   }
 
+  let usage;
+  try {
+    usage = await startAiUsageSession(session.uid);
+  } catch (error) {
+    return aiUsageErrorResponse(error);
+  }
+
   const userPrompt = [
     `Project: ${projectTitle}`,
     "Write for a student who knows nothing yet. Meaning first. Never a jargon label or a formula without saying what it is.",
@@ -87,7 +96,7 @@ export async function POST(request: Request) {
         controller.enqueue(encodeSse(payload));
       };
       try {
-        for await (const event of streamNotesDocument(userPrompt)) {
+        for await (const event of streamNotesDocument(userPrompt, { usage: usage.report })) {
           if (request.signal.aborted) break;
           if (event.type === "status") send({ status: event.status });
           else if (event.type === "title") send({ title: event.title });
@@ -101,6 +110,7 @@ export async function POST(request: Request) {
       } catch (error) {
         send({ error: error instanceof Error ? error.message : "Generation failed." });
       } finally {
+        await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
         controller.close();
       }
     },

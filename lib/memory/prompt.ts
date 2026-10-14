@@ -5,14 +5,18 @@ import type { ChatTurn } from "@/types/chat";
 
 export const ASK_MEMORY_CAP = 4;
 
-export const MEMORY_EXTRACT_SYSTEM = `You maintain two stores for a workspace assistant. Return JSON only. Default is no change.
+export const MEMORY_EXTRACT_SYSTEM = `You maintain three stores for a workspace assistant. Return JSON only. Default is no change.
 
-Memory = durable facts about the user that should change later answers: name, role/job, exam or course (including a date), level, preferred language, work context.
-Save memory when they state such a fact, or clearly asked to remember / from now on / always / never.
-Do not store: this turn's question, homework, greetings, one-off requests, or how they like explanations.
+User memory = durable facts about the person: name, role/job, preferred language.
+Save when they state such a fact, or clearly asked to remember / from now on / always / never.
+Do not store: this turn's question, homework, greetings, one-off requests, how they like explanations, quiz answers, or tool tags.
 A request for notes / კონსპექტი / practice / a path / photos / write X is a task — never memory and never personalization.
-If unsure, return no memory. Prefer {"operations":[]}. At most ${MEMORY_OPS_PER_TURN} operation. One sentence, max ${MEMORY_CONTENT_MAX} characters.
+If unsure, return no user memory. Prefer {"operations":[]}. At most ${MEMORY_OPS_PER_TURN} operation. One sentence, max ${MEMORY_CONTENT_MAX} characters.
 If a new fact replaces an existing one, update that id. Never duplicate.
+
+Project memory = durable SUBJECT facts for this course/workspace only: book or chapter, exam date, lecturer, weak topics ("struggles with X").
+Never put name/role/language here. Never store quiz answers, item text, or raw tool tags.
+If unsure, return []. At most 1 new line, max ${MEMORY_CONTENT_MAX} characters. Do not dump the full list.
 
 Personalization = ONE edited paragraph about how they work or learn (what clicks, what loses them, preferred length). Update only on a durable signal (confused, too long, wants examples, job context). A normal content question is not a signal.
 If updating, rewrite the whole paragraph: keep what is still true, fold in the new signal, drop contradictions. Do not grow with trivia.
@@ -20,9 +24,10 @@ If nothing new, return personalization null. Empty string is not a wipe; use nul
 Never put standing response instructions in personalization. Max ${PERSONALIZATION_MAX} characters.
 
 JSON shape:
-{"operations":[],"personalization":null}
-or {"operations":[{"op":"add","content":"..."}],"personalization":null}
-or {"operations":[],"personalization":"full replacement paragraph"}`;
+{"operations":[],"personalization":null,"projectMemory":[]}
+or {"operations":[{"op":"add","content":"..."}],"personalization":null,"projectMemory":[]}
+or {"operations":[],"personalization":"full replacement paragraph","projectMemory":["exam 26th"]}
+or {"operations":[],"personalization":null,"projectMemory":["book: Mankiw ch.3"]}`;
 
 function tokens(text: string): string[] {
   return text
@@ -92,6 +97,7 @@ export function memoryExtractPrompt(input: {
   memories: ChatMemoryContext[];
   personalization?: string;
   history?: ChatTurn[];
+  projectMemory?: string[];
 }): string {
   const existing =
     input.memories.length > 0
@@ -103,10 +109,15 @@ export function memoryExtractPrompt(input: {
     .map((turn) => `${turn.role}: ${clipText(turn.content, MEMORY_TURN_CHARS)}`)
     .join("\n");
   const profile = input.personalization?.trim() || "(none)";
+  const subject =
+    (input.projectMemory ?? []).length > 0
+      ? input.projectMemory!.map((line) => `- ${line}`).join("\n")
+      : "(none)";
 
   return [
-    `Existing memories (id | durable fact):\n${existing}`,
+    `Existing user memories (id | durable person fact):\n${existing}`,
     `Existing personalization:\n${profile}`,
+    `Existing project memory (subject facts only):\n${subject}`,
     recent ? `Recent chat (resolve "remember that"; do not store the transcript):\n${recent}` : null,
     `Latest user message:\n${clipText(input.prompt, 1500)}`,
   ]

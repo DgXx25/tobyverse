@@ -124,7 +124,7 @@ const GENERATE_NOW =
   /რაც გინდა|რაც მოგივა|დააგენერირე|გენერირება|\bსულ\b|just generate|generate (it|now|anyway)|whatever|random\b|any(thing)? (is )?fine|don't care|dont care|up to you|i don't mind/i;
 const ACCEPT_OFFER = /^(დიახ|კი|ხო|კარგი|ოკ|ok|okay|yes|yep|sure)\.?!?$/i;
 
-const DO_IT_NOW = /დამიწერე|გააკეთე/i;
+const DO_IT_NOW = /დამიწერე|გააკეთე|make (?:me )?a note|write (?:me )?a note/i;
 
 export function wantsImmediateCreate(prompt: string, confirmed?: boolean): boolean {
   if (confirmed) return true;
@@ -205,8 +205,7 @@ export function assessCreateReady(input: {
   const ready =
     Boolean(topic) ||
     Boolean(input.hasMaterials) ||
-    Boolean(input.priorClarify) ||
-    wantsImmediateCreate(input.prompt, input.confirmed);
+    Boolean(input.priorClarify);
   return { ready, missing: ready ? [] : ["topic"], specificity };
 }
 
@@ -231,7 +230,7 @@ export function intentFromTool(name: ChatToolName): ComposerIntent {
 const EXAM_HINT = /გამომცადე|გამოცდა|\bexam\b|quiz me|test me|\bquiz\b/i;
 const PRACTICE_HINT = /დამავარჯიშე|ვივარჯიშო|ვარჯიში|\bpractice\b/i;
 /** One stem covers კონსპექტი / დავაკონსპექტო / დამიკონსპექტე. */
-const SHEET_HINT = /კონსპექტ|შემომაჯამე|შემაჯამე|study sheet|\bnotes\b|summarize/i;
+const SHEET_HINT = /კონსპექტ|შემომაჯამე|შემაჯამე|study sheet|make (?:me )?a note|write (?:me )?a note|\bnotes?\b|summarize/i;
 /** Course map — not a notes dump. */
 const PATH_HINT =
   /სილაბუს|syllabus|study path|course path|კურსის გზა|სასწავლო გზა|დაგეგმე კურსი|დამიგეგმე|map this course|map the course|ეს კურსი მასწავლე|მასწავლე ეს კურსი|გზა დამიკეთე/i;
@@ -750,6 +749,25 @@ export function gateChatTool(input: {
   const askedForPractice =
     askedPractice || input.accepted === "create_practice" || input.pendingKind === "practice";
   const askedImages = wantsImages(prompt) && !askedPractice && !askedSheet && !askedPath;
+  if (
+    askedSheet &&
+    (tool.name === "suggest_path" || tool.name === "create_path" || tool.name === "start_path" || tool.name === "restart_path")
+  ) {
+    const topic = tool.args.topic ?? extractTopic(prompt) ?? undefined;
+    tool = wantsImmediateCreate(prompt, input.confirmed)
+      ? { name: "create_sheet", args: { topic } }
+      : { name: "suggest_sheet", args: { topic } };
+  }
+  const pathToolRequested =
+    askedPath ||
+    tool.name === "suggest_path" ||
+    tool.name === "create_path" ||
+    tool.name === "start_path" ||
+    tool.name === "restart_path" ||
+    tool.name === "advance_path";
+  if (pathToolRequested && !askedSheet && input.mode !== "teacher") {
+    return { name: "answer", args: {} };
+  }
   if (tool.name === "suggest_practice" && !askedForPractice) {
     tool = { name: "answer", args: {} };
   }

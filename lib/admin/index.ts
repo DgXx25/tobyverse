@@ -1,4 +1,4 @@
-export { ADMIN_EMAIL, isAdminEmail } from "@/lib/admin/constants";
+export { adminUids, isAdminUid } from "@/lib/admin/constants";
 export { assertAdminRequest, AdminAuthError, adminErrorResponse } from "@/lib/admin/assert";
 export {
   PLAYGROUND_VERSIONS,

@@ -13,19 +13,19 @@ import { useAuth } from "@/components/auth-provider";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { updatePreferredModel } from "@/lib/account/store";
 import {
-  availableAiProviders,
-  isEnabledProvider,
-  providerDisplayName,
-  resolveAiProvider,
-  type AiProviderId,
-  type AiProviderOption,
+  aiModelDisplayName,
+  availableAiModels,
+  isAllowedAiModel,
+  resolveAiModel,
+  type AiModelId,
+  type AiModelOption,
 } from "@/lib/ai/catalog";
 
 type PreferredModelValue = {
-  model: AiProviderId;
+  model: AiModelId;
   name: string;
-  options: AiProviderOption[];
-  setModel: (id: AiProviderId) => void;
+  options: AiModelOption[];
+  setModel: (id: AiModelId) => void;
 };
 
 const PreferredModelContext = createContext<PreferredModelValue | null>(null);
@@ -33,9 +33,10 @@ const PreferredModelContext = createContext<PreferredModelValue | null>(null);
 export function PreferredModelProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { profile } = useUserProfile();
-  const [optimistic, setOptimistic] = useState<AiProviderId | null>(null);
-  const fromProfile = resolveAiProvider(profile?.preferredModel);
-  const model = optimistic ?? fromProfile;
+  const isAdmin = profile?.admin === true;
+  const [optimistic, setOptimistic] = useState<AiModelId | null>(null);
+  const fromProfile = resolveAiModel(profile?.preferredModel, isAdmin);
+  const model = optimistic && isAllowedAiModel(optimistic, isAdmin) ? optimistic : fromProfile;
 
   useEffect(() => {
     setOptimistic(null);
@@ -46,23 +47,23 @@ export function PreferredModelProvider({ children }: { children: ReactNode }) {
   }, [fromProfile, optimistic]);
 
   const setModel = useCallback(
-    (id: AiProviderId) => {
-      if (!isEnabledProvider(id)) return;
+    (id: AiModelId) => {
+      if (!isAllowedAiModel(id, isAdmin)) return;
       setOptimistic(id);
       if (!user) return;
       void updatePreferredModel(user.uid, id).catch(() => undefined);
     },
-    [user],
+    [isAdmin, user],
   );
 
   const value = useMemo<PreferredModelValue>(
     () => ({
       model,
-      name: providerDisplayName(model),
-      options: availableAiProviders(),
+      name: aiModelDisplayName(model),
+      options: availableAiModels(isAdmin),
       setModel,
     }),
-    [model, setModel],
+    [isAdmin, model, setModel],
   );
 
   return <PreferredModelContext.Provider value={value}>{children}</PreferredModelContext.Provider>;
@@ -72,9 +73,9 @@ export function usePreferredModel(): PreferredModelValue {
   const value = useContext(PreferredModelContext);
   if (value) return value;
   return {
-    model: resolveAiProvider(null),
-    name: providerDisplayName(resolveAiProvider(null)),
-    options: availableAiProviders(),
+    model: resolveAiModel(null, false),
+    name: aiModelDisplayName(resolveAiModel(null, false)),
+    options: availableAiModels(false),
     setModel: () => undefined,
   };
 }

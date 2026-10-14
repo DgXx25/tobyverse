@@ -12,6 +12,13 @@ export {
   sanitizePersonalization,
 } from "@/lib/memory/normalize";
 export {
+  asProjectMemory,
+  mergeProjectMemory,
+  parseProjectFacts,
+  sanitizeProjectMemoryLine,
+  PROJECT_MEMORY_MAX,
+} from "@/lib/memory/project";
+export {
   addMemory,
   applyMemoryOperations,
   deleteAllMemories,

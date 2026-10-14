@@ -13,7 +13,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { deleteAllChatThreads, ensureChatThread } from "@/lib/chats";
-import { trackEvent } from "@/lib/analytics/track";
+import { asProjectMemory, mergeProjectMemory } from "@/lib/memory/project";
 import { asChatMode, preferredChatModeForGoal } from "@/lib/core/chat-modes";
 import { DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { recipeForGoal } from "@/lib/core/recipes";
@@ -87,6 +87,10 @@ function mapProject(id: string, data: Record<string, unknown>): Project {
     recipe: asRecipe(data.recipe, goal),
     preferredChatMode: projectChatMode(data.preferredChatMode, goal),
     activeArtifact: asActiveArtifact(data.activeArtifact),
+    projectMemory: asProjectMemory(data.projectMemory),
+    listed: data.listed === true,
+    icon: asString(data.icon) || undefined,
+    folder: asString(data.folder) || undefined,
     hidden: data.hidden === true,
     createdAt: toIsoDate(data.createdAt),
     updatedAt: toIsoDate(data.updatedAt),
@@ -131,6 +135,7 @@ export async function createProject(input: CreateProjectInput): Promise<string> 
   const goal = asGoal(input.goal);
   const projects = collection(getFirebaseDb(), COLLECTIONS.projects);
   const ref = input.id ? doc(projects, input.id) : doc(projects);
+  const listed = input.listed === true;
   await setDoc(ref, {
     title: input.title.trim(),
     description: (input.description ?? "").trim(),
@@ -138,21 +143,22 @@ export async function createProject(input: CreateProjectInput): Promise<string> 
     goal,
     recipe: recipeForGoal(goal),
     preferredChatMode: asChatMode(input.preferredChatMode, preferredChatModeForGoal(goal)),
+    projectMemory: [],
+    listed,
+    ...(input.icon ? { icon: input.icon } : {}),
+    ...(input.folder?.trim() ? { folder: input.folder.trim().slice(0, 40) } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 
-  await ensureChatThread({
-    projectId: ref.id,
-    userId: input.userId,
-    mode: asChatMode(input.preferredChatMode, preferredChatModeForGoal(goal)),
-  });
-
-  trackEvent({
-    userId: input.userId,
-    projectId: ref.id,
-    type: "project_created",
-  });
+  if (input.createThread !== false) {
+    await ensureChatThread({
+      projectId: ref.id,
+      userId: input.userId,
+      mode: asChatMode(input.preferredChatMode, preferredChatModeForGoal(goal)),
+      created: true,
+    });
+  }
 
   return ref.id;
 }
@@ -198,6 +204,48 @@ export async function updateProjectTitle(
     title: next,
     updatedAt: serverTimestamp(),
   });
+}
+
+/** Symbol and folder are plain fields the notebook home edits. Empty string clears them. */
+export async function updateProjectMeta(
+  projectId: string,
+  userId: string,
+  patch: { icon?: string; folder?: string },
+): Promise<void> {
+  await getOwnedProject(projectId, userId);
+  const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (patch.icon !== undefined) payload.icon = patch.icon.trim().slice(0, 8);
+  if (patch.folder !== undefined) payload.folder = patch.folder.trim().slice(0, 40);
+  await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), payload);
+}
+
+export async function updateProjectMemory(
+  projectId: string,
+  userId: string,
+  lines: string[],
+): Promise<string[]> {
+  await getOwnedProject(projectId, userId);
+  const projectMemory = asProjectMemory(lines);
+  await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), {
+    projectMemory,
+    updatedAt: serverTimestamp(),
+  });
+  return projectMemory;
+}
+
+export async function appendProjectMemory(
+  projectId: string,
+  userId: string,
+  additions: string[],
+): Promise<string[]> {
+  const project = await getOwnedProject(projectId, userId);
+  const projectMemory = mergeProjectMemory(project.projectMemory, additions);
+  if (projectMemory.length === project.projectMemory.length) return projectMemory;
+  await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), {
+    projectMemory,
+    updatedAt: serverTimestamp(),
+  });
+  return projectMemory;
 }
 
 export async function updateProjectGoal(

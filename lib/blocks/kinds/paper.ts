@@ -1,8 +1,8 @@
 import { paperBlockSchema } from "@/lib/exercises/schemas";
 import type { ChatBlockDef } from "@/lib/blocks/types";
-import type { PaperPayload } from "@/types/exercise";
+import type { z } from "zod";
 
-export type PaperBlock = PaperPayload;
+export type PaperBlock = z.infer<typeof paperBlockSchema>;
 
 export const paperBlock: ChatBlockDef<PaperBlock> = {
   id: "paper",
@@ -10,6 +10,7 @@ export const paperBlock: ChatBlockDef<PaperBlock> = {
     "განცხადებ",
     "საჩივარ",
     "მიმართვა",
+    "ფურცელ",
     "application letter",
     "official letter",
     "petition",
@@ -24,5 +25,10 @@ If they don't know how / asked for an example: FILLED sample (real invented name
 {"form":"ganckhadeba","brief":"მაგალითი — ოჯახური მიზეზით 3 დღის გაცდენა","sample":{"to":"სსიპ მე-12 საჯარო სკოლის დირექტორს","body":"მე, ნინო კაპანაძე, ამ სკოლის IX კლასის მოსწავლე, გთხოვთ, ოჯახური მიზეზის გამო გამომიცადოთ 3 დღე — 2023 წლის 24, 25 და 26 ოქტომბერი.\\n\\nგაცდენილ მასალას შევასრულებ და ჩავბარდები დროულად.","sign":"ნინო კაპანაძე","date":"23 ოქტომბერი, 2023"}}
 \`\`\`
 If they asked to try / write one themselves: empty sheet (brief + optional given.to). The UI has Check. You may emit the filled example first, then an empty sheet. Do not follow with a quiz.
+If this thread already has a paper and they now want to fill/try it: do not rewrite brief/sample. Emit only:
+\`\`\`toby paper
+{"reuse":true}
+\`\`\`
+The UI puts that sheet at the bottom. Older sheets stay skipped — no Check.
 Never wrap several <br> lines in one ==. Never $ around Georgian or leftover == / $ in table cells. A short parts table only if each cell is a few words.`,
 };

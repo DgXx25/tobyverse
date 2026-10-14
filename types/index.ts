@@ -20,6 +20,8 @@ export {
   type ChatThread,
   type ChatMessage,
   type ChatImageHit,
+  type ChatSource,
+  type ChatSourceRef,
   type PendingKind,
   type ChatAttachment,
   type ChatArtifact,
@@ -89,14 +91,6 @@ export {
   type CreateKnowledgeItemInput,
   type UserProgress,
 } from "@/types/knowledge";
-export {
-  ANALYTICS_EVENT_TYPES,
-  DROPOFF_VALUES,
-  type AnalyticsEventType,
-  type DropoffValue,
-  type AnalyticsEvent,
-  type TrackAnalyticsInput,
-} from "@/types/analytics";
 export {
   TRAINING_CONTEXT_TYPES,
   TRAINING_SIGNALS,

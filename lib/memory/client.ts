@@ -1,6 +1,14 @@
 import { authHeaders } from "@/lib/api/client";
+import { appendProjectMemory } from "@/lib/projects";
 import { applyMemoryOperations } from "@/lib/memory/store";
-import { foldLearningSignal, isStudyMethodMemory, parseMemoryOps, parsePersonalizationPatch, shouldExtractMemory } from "@/lib/memory/normalize";
+import {
+  foldLearningSignal,
+  isStudyMethodMemory,
+  parseMemoryOps,
+  parsePersonalizationPatch,
+  shouldExtractMemory,
+} from "@/lib/memory/normalize";
+import { parseProjectFacts } from "@/lib/memory/project";
 import { setLearningProfile } from "@/lib/memory/profile";
 import type { ChatTurn } from "@/types/chat";
 import type { ChatMemoryContext, MemoryOp } from "@/types/memory";
@@ -11,6 +19,9 @@ export function syncUserMemories(input: {
   memories: ChatMemoryContext[];
   personalization?: string;
   history?: ChatTurn[];
+  projectId?: string;
+  projectMemory?: string[];
+  onProjectMemory?: (lines: string[]) => void;
 }): Promise<boolean> {
   if (!input.userId || !input.prompt.trim()) return Promise.resolve(false);
   if (!shouldExtractMemory(input.prompt)) {
@@ -53,6 +64,9 @@ async function runMemorySync(input: {
   memories: ChatMemoryContext[];
   personalization?: string;
   history?: ChatTurn[];
+  projectId?: string;
+  projectMemory?: string[];
+  onProjectMemory?: (lines: string[]) => void;
 }): Promise<boolean> {
   try {
     const response = await fetch("/api/memory", {
@@ -63,10 +77,15 @@ async function runMemorySync(input: {
         memories: input.memories,
         personalization: input.personalization ?? "",
         history: input.history,
+        projectMemory: input.projectMemory ?? [],
       }),
     });
     if (!response.ok) return false;
-    const data = (await response.json()) as { operations?: unknown; personalization?: unknown };
+    const data = (await response.json()) as {
+      operations?: unknown;
+      personalization?: unknown;
+      projectMemory?: unknown;
+    };
     const known = new Set(input.memories.map((item) => item.id));
     const ops = parseMemoryOps(data, known);
     const current = input.personalization ?? "";
@@ -97,8 +116,15 @@ async function runMemorySync(input: {
       await setLearningProfile(input.userId, nextProfile);
     }
     if (kept.length > 0) await applyMemoryOperations(input.userId, kept);
+    const projectFacts = parseProjectFacts(data);
+    let projectSaved = false;
+    if (input.projectId && projectFacts.length > 0) {
+      const next = await appendProjectMemory(input.projectId, input.userId, projectFacts);
+      projectSaved = next.length > (input.projectMemory ?? []).length;
+      input.onProjectMemory?.(next);
+    }
     const userFacingOps = kept.some((op) => op.op === "add" || op.op === "update");
-    return Boolean(extractProfile) || userFacingOps;
+    return Boolean(extractProfile) || userFacingOps || projectSaved;
   } catch {
     return false;
   }

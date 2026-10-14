@@ -1,6 +1,8 @@
 import type { UserPlan, UserUsage } from "@/types/user";
+import { normalizeStoredPlan, PLAN_CATALOG } from "@/lib/billing/plans";
+import { formatBytes } from "@/lib/format";
 
-export const BETA_PLAN: UserPlan = "free";
+export const BETA_PLAN: UserPlan = "free_beta";
 
 /** 1 GiB per user for materials, enforced during beta. */
 export const STORAGE_CAP_BYTES = 1024 * 1024 * 1024;
@@ -35,12 +37,12 @@ export function emptyUsage(weekStart = utcWeekStart()): UserUsage {
 }
 
 /** Plan is never taken from a client flag, query, or paid claim. */
-export function asUserPlan(_value: unknown): UserPlan {
-  return BETA_PLAN;
+export function asUserPlan(value: unknown): UserPlan {
+  return normalizeStoredPlan(value) as UserPlan;
 }
 
-export function planLabel(_plan: UserPlan = BETA_PLAN): string {
-  return "Free";
+export function planLabel(plan: UserPlan | "admin" = BETA_PLAN): string {
+  return plan === "admin" ? "Admin" : PLAN_CATALOG[plan].name;
 }
 
 function asCount(value: unknown): number {
@@ -72,5 +74,11 @@ export function wouldExceedStorage(used: number, extra: number): boolean {
 }
 
 export function storageQuotaMessage(): string {
-  return `You've used your ${STORAGE_CAP_LABEL} of material storage. Delete files to free space.`;
+  return storageInsufficientMessage(0, 0);
+}
+
+export function storageInsufficientMessage(remainingBytes: number, requiredBytes: number): string {
+  const left = formatBytes(Math.max(0, remainingBytes)) || "0 B";
+  const need = formatBytes(Math.max(0, requiredBytes)) || "more space";
+  return `Not enough storage. This needs ${need}; ${left} left of ${STORAGE_CAP_LABEL}.`;
 }

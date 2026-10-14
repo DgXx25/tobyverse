@@ -7,6 +7,7 @@ import {
   snapWikiThumbUrl,
   type ImageSearchHit,
 } from "@/lib/images/types";
+import type { AiUsageReporter } from "@/types/billing";
 
 export type { ImageSearchHit } from "@/lib/images/types";
 export { IMAGE_SEARCH_DEFAULT, IMAGE_SEARCH_MAX } from "@/lib/images/types";
@@ -429,11 +430,11 @@ async function searchProviders(plan: ImageSearchPlan, keep: number): Promise<Ima
   return hits;
 }
 
-export async function searchWebImages(query: string, count?: number): Promise<ImageSearchHit[]> {
+export async function searchWebImages(query: string, count?: number, options: { usage?: AiUsageReporter } = {}): Promise<ImageSearchHit[]> {
   const q = query.trim();
   if (!q) throw new ImageSearchError("Missing search query.");
   const limit = clampImageCount(count);
-  const plan = await planImageSearch(q);
+  const plan = await planImageSearch(q, options);
   const key = `rel7:${normalizeImageQuery(plan.query)}:${plan.must.join("-")}:${limit}`;
   const cached = readCache(key);
   if (cached && cached.length > 0) return cached.slice(0, limit);

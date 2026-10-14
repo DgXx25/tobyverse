@@ -1,12 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type RefObject, type UIEvent } from "react";
 import dynamic from "next/dynamic";
-import { DocumentPaper } from "@/components/workspace/document-paper";
 import { LinkifiedText } from "@/components/workspace/linkified-text";
 import { ViewerBoundary } from "@/components/workspace/viewer-boundary";
 import { UiIcon } from "@/components/workspace/ui-icon";
-import { docxBytesToHtml } from "@/lib/materials/docx-html";
+import { formatBytes } from "@/lib/format";
 import {
   cacheKey,
   downloadMaterialFile,
@@ -15,11 +14,14 @@ import {
   listMaterialFiles,
   materialFileObjectUrl,
   type MaterialFileResult,
+  type MaterialFileAccess,
 } from "@/lib/materials/file-client";
-import { patchMaterialPreviewHtml } from "@/lib/materials/store";
 import {
   extractedStoredName,
+  decodeHtmlEntities,
+  mergeViewerPages,
   originalStoredName,
+  paginateText,
   slidesFromListedNames,
   slidesFromMaterial,
   splitSlideText,
@@ -27,6 +29,7 @@ import {
   type ViewerSlide,
 } from "@/lib/materials/viewer-files";
 import type { Material } from "@/types/material";
+import { SpreadsheetPage } from "@/components/workspace/spreadsheet-page";
 
 const MaterialPdfPage = dynamic(() => import("@/components/workspace/material-pdf-page"), {
   ssr: false,
@@ -34,40 +37,52 @@ const MaterialPdfPage = dynamic(() => import("@/components/workspace/material-pd
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 200;
+const MaterialFileAccessContext = createContext<MaterialFileAccess | undefined>(undefined);
+
+export type StageChrome = {
+  page: number;
+  count: number;
+  zoom: number;
+  setPage: (page: number) => void;
+  setZoom: (zoom: number) => void;
+};
 
 function useMaterialFile(projectId: string, materialId: string, name: string | null) {
-  const [result, setResult] = useState<MaterialFileResult | null>(() => {
-    if (!name) return null;
-    if (isMissingMaterialName(projectId, materialId, name)) {
-      return { ok: false, status: 404, message: "ფაილი ვერ მოიძებნა" };
-    }
-    return null;
-  });
+  const access = useContext(MaterialFileAccessContext);
+  const key = cacheKey(projectId, materialId, name || "", access);
+  const [state, setState] = useState<{ key: string; result: MaterialFileResult } | null>(null);
 
   useEffect(() => {
     if (!name) {
-      setResult(null);
+      setState(null);
       return;
     }
-    if (isMissingMaterialName(projectId, materialId, name)) {
-      setResult({ ok: false, status: 404, message: "ფაილი ვერ მოიძებნა" });
+    if (isMissingMaterialName(projectId, materialId, name, access)) {
+      setState({ key, result: { ok: false, status: 404, message: "File not found." } });
       return;
     }
     let cancelled = false;
-    setResult(null);
-    void getMaterialFile(projectId, materialId, name).then((next) => {
-      if (!cancelled) setResult(next);
+    setState(null);
+    void getMaterialFile(projectId, materialId, name, access).then((next) => {
+      if (!cancelled) setState({ key, result: next });
     });
     return () => {
       cancelled = true;
     };
-  }, [projectId, materialId, name]);
+  }, [projectId, materialId, name, key, access]);
 
-  return result;
+  return state?.key === key ? state.result : null;
 }
 
 function FileMessage({ text }: { text: string }) {
   return <p className="px-4 py-8 text-center text-[13px] text-muted">{text}</p>;
+}
+
+function SpreadsheetStage({ material, originalName, onChrome }: {
+  material: Material; originalName: string | null; onChrome: (chrome: StageChrome | null) => void;
+}) {
+  const file = useMaterialFile(material.projectId, material.id, originalName);
+  return <SpreadsheetPage file={file} onChrome={onChrome} />;
 }
 
 function GhostBtn({
@@ -77,7 +92,7 @@ function GhostBtn({
   disabled,
 }: {
   label: string;
-  icon: "back" | "close" | "download" | "prev" | "forward" | "zoomIn" | "zoomOut";
+  icon: "back" | "close" | "download" | "panel" | "prev" | "forward" | "zoomIn" | "zoomOut";
   onClick: () => void;
   disabled?: boolean;
 }) {
@@ -85,9 +100,10 @@ function GhostBtn({
     <button
       type="button"
       aria-label={label}
+      title={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex h-8 w-8 items-center justify-center rounded-lg bg-transparent text-muted hover:text-foreground disabled:cursor-default disabled:opacity-35"
+      className="flex h-8 w-7 shrink-0 items-center justify-center rounded-lg bg-transparent text-muted hover:text-foreground disabled:cursor-default disabled:opacity-35"
     >
       <UiIcon name={icon} size={16} />
     </button>
@@ -97,67 +113,114 @@ function GhostBtn({
 export function MaterialViewer({
   material,
   onClose,
+  onBack,
+  presentation = "pane",
+  onDelete,
+  deleting = false,
+  confirmDelete = false,
+  fileAccess,
 }: {
   material: Material;
   onClose: () => void;
+  onBack?: () => void;
+  presentation?: "pane" | "overlay";
+  onDelete?: () => void;
+  deleting?: boolean;
+  confirmDelete?: boolean;
+  fileAccess?: MaterialFileAccess;
 }) {
   const originalName = originalStoredName(material);
   const title = viewerTitle(material);
   const [downloading, setDownloading] = useState(false);
+  const [chrome, setChrome] = useState<StageChrome | null>(null);
+  const onChrome = useCallback((next: StageChrome | null) => setChrome(next), []);
+
+  const overlay = presentation === "overlay";
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   async function onDownload() {
     if (!originalName || originalName === "extracted.txt" || downloading) return;
     setDownloading(true);
     try {
-      await downloadMaterialFile(material.projectId, material.id, originalName, originalName);
+      const error = await downloadMaterialFile(material.projectId, material.id, originalName, originalName, fileAccess);
+      setDownloadError(error?.message ?? null);
+    } catch {
+      setDownloadError("Could not download file.");
     } finally {
       setDownloading(false);
     }
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
-        <GhostBtn label="Back" icon="back" onClick={onClose} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] text-foreground">{title}</p>
-          <p className="truncate font-mono text-[10px] uppercase tracking-wide text-muted">
-            {material.type}
-            {originalName ? ` · ${originalName}` : ""}
+    <MaterialFileAccessContext.Provider value={fileAccess}>
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div className={overlay ? "absolute bottom-0 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 shadow-sm" : "flex min-h-11 shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1"}>
+        {!overlay && onBack ? <button type="button" onClick={onBack} aria-label="Back" title="Back" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-foreground"><UiIcon name="back" size={16} /></button> : null}
+        {!overlay ? <div className="flex min-w-[80px] flex-1 items-baseline gap-2">
+          <p className="min-w-0 truncate text-[13px] text-foreground">{title}</p>
+          <p className="shrink-0 truncate text-[11px] text-muted">
+            {material.type.toUpperCase()}
+            {material.sizeBytes ? ` · ${formatBytes(material.sizeBytes)}` : ""}
           </p>
-        </div>
+        </div> : null}
+        {chrome && chrome.count > 0 ? (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <GhostBtn label="Previous page" icon="prev" disabled={chrome.page <= 1} onClick={() => chrome.setPage(chrome.page - 1)} />
+            <p className="min-w-[40px] text-center text-[12px] text-muted" aria-live="polite">
+              {chrome.page} / {chrome.count}
+            </p>
+            <GhostBtn
+              label="Next page"
+              icon="forward"
+              disabled={chrome.page >= chrome.count}
+              onClick={() => chrome.setPage(chrome.page + 1)}
+            />
+            <span className="mx-1 h-4 w-px bg-border" />
+            <GhostBtn label="Zoom out" icon="zoomOut" disabled={chrome.zoom <= ZOOM_MIN} onClick={() => chrome.setZoom(chrome.zoom - 25)} />
+            <GhostBtn label="Zoom in" icon="zoomIn" disabled={chrome.zoom >= ZOOM_MAX} onClick={() => chrome.setZoom(chrome.zoom + 25)} />
+          </div>
+        ) : null}
         <GhostBtn
           label="Download"
           icon="download"
           disabled={!originalName || downloading}
           onClick={() => void onDownload()}
         />
-        <GhostBtn label="Close" icon="close" onClick={onClose} />
+        {overlay && onDelete ? <button type="button" onClick={onDelete} disabled={deleting} title={confirmDelete ? "Confirm delete" : "Delete"} aria-label={confirmDelete ? "Confirm delete" : "Delete"} className="flex h-8 w-7 items-center justify-center text-red-500 disabled:opacity-35"><UiIcon name="trash" size={16} /></button> : null}
+        <GhostBtn label="Close pane" icon="panel" onClick={onClose} />
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        <ViewerBoundary>
-          {material.status === "failed" ? (
-            <FileMessage text="Could not process this file." />
-          ) : material.status === "processing" && !material.extractedTextPreview.trim() ? (
-            <FileMessage text="Still processing…" />
-          ) : material.type === "pdf" ? (
-            <PdfStage material={material} originalName={originalName} />
+      {downloadError ? <p role="alert" className="bg-surface p-2 text-center text-xs text-foreground">{downloadError}</p> : null}
+      <div className={`min-h-0 flex-1 overflow-hidden ${overlay ? "pb-14" : ""}`}>
+        <ViewerBoundary key={material.id}>
+          {material.type === "pdf" ? (
+            <PdfStage material={material} originalName={originalName} onChrome={onChrome} />
           ) : material.type === "pptx" ? (
-            <PptxStage material={material} />
+            <PptxStage material={material} onChrome={onChrome} />
           ) : material.type === "image" ? (
-            <ImageStage material={material} originalName={originalName} />
+            <ImageStage material={material} originalName={originalName} onChrome={onChrome} />
           ) : material.type === "docx" ? (
-            <DocxStage material={material} originalName={originalName} />
+            <DocxStage material={material} onChrome={onChrome} />
+          ) : material.type === "xlsx" || /\.xlsx?$/i.test(originalName || "") ? (
+            <SpreadsheetStage material={material} originalName={originalName} onChrome={onChrome} />
           ) : (
-            <TextStage material={material} />
+            <TextStage material={material} onChrome={onChrome} />
           )}
         </ViewerBoundary>
       </div>
     </div>
+    </MaterialFileAccessContext.Provider>
   );
 }
 
-function PdfStage({ material, originalName }: { material: Material; originalName: string | null }) {
+function PdfStage({
+  material,
+  originalName,
+  onChrome,
+}: {
+  material: Material;
+  originalName: string | null;
+  onChrome: (chrome: StageChrome | null) => void;
+}) {
   const file = useMaterialFile(material.projectId, material.id, originalName);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(Math.max(1, material.pageCount || 1));
@@ -173,364 +236,383 @@ function PdfStage({ material, originalName }: { material: Material; originalName
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [file]);
 
   const onPageCount = useCallback((count: number) => {
     setPageCount(Math.max(1, count));
     setPage((current) => Math.min(current, Math.max(1, count)));
   }, []);
 
-  if (!originalName) return <FileMessage text="ფაილი ვერ მოიძებნა" />;
+  const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const viewport = event.currentTarget;
+    const nodes = [...viewport.querySelectorAll<HTMLElement>("[data-pdf-page]")];
+    let closest = page;
+    let distance = Number.POSITIVE_INFINITY;
+    for (const node of nodes) {
+      const nextDistance = Math.abs(node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 16);
+      if (nextDistance < distance) {
+        distance = nextDistance;
+        closest = Number(node.dataset.pdfPage) || closest;
+      }
+    }
+    if (closest !== page) setPage(closest);
+  }, [page]);
+
+  const scrollToPage = useCallback((next: number) => {
+    const target = stageRef.current?.querySelector<HTMLElement>(`[data-pdf-page="${next}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useEffect(() => {
+    onChrome({
+      page,
+      count: pageCount,
+      zoom,
+      setPage: (next) => {
+        const safe = Math.min(pageCount, Math.max(1, next));
+        setPage(safe);
+        scrollToPage(safe);
+      },
+      setZoom: (next) => setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next))),
+    });
+    return () => onChrome(null);
+  }, [onChrome, page, pageCount, scrollToPage, zoom]);
+
+  if (!originalName) return <FileMessage text="File not found." />;
   if (!file) return <FileMessage text="Loading…" />;
   if (!file.ok) {
-    return <FileMessage text={file.status === 401 ? "Sign in." : "ფაილი ვერ მოიძებნა"} />;
+    return <FileMessage text={file.status === 401 ? "Sign in." : "File not found."} />;
   }
 
   const pageWidth = Math.round(width * (zoom / 100));
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-center gap-1 px-2 py-1.5">
-        <GhostBtn label="Previous page" icon="prev" disabled={page <= 1} onClick={() => setPage((n) => Math.max(1, n - 1))} />
-        <p className="min-w-[72px] text-center text-[12px] text-muted">
-          {page} / {pageCount}
-        </p>
-        <GhostBtn
-          label="Next page"
-          icon="forward"
-          disabled={page >= pageCount}
-          onClick={() => setPage((n) => Math.min(pageCount, n + 1))}
-        />
-        <span className="mx-1 h-4 w-px bg-border" />
-        <GhostBtn label="Zoom out" icon="zoomOut" disabled={zoom <= ZOOM_MIN} onClick={() => setZoom((n) => Math.max(ZOOM_MIN, n - 25))} />
-        <p className="min-w-[40px] text-center text-[12px] text-muted">{zoom}%</p>
-        <GhostBtn label="Zoom in" icon="zoomIn" disabled={zoom >= ZOOM_MAX} onClick={() => setZoom((n) => Math.min(ZOOM_MAX, n + 25))} />
-      </div>
-      <div ref={stageRef} className="min-h-0 flex-1 overflow-auto">
-        <div className="flex justify-center px-3 pb-4">
-          <MaterialPdfPage data={file.bytes} page={page} width={pageWidth || 320} onPageCount={onPageCount} />
-        </div>
+    <div ref={stageRef} className="h-full overflow-auto" onScroll={onScroll}>
+      <div className="mx-auto py-4" style={{ width: pageWidth || 320 }}>
+        <MaterialPdfPage data={file.bytes} pageCount={pageCount} width={pageWidth || 320} onPageCount={onPageCount} />
       </div>
     </div>
   );
 }
 
-function useResolvedPptxSlides(material: Material) {
+function useResolvedPreviewPages(material: Material) {
+  const access = useContext(MaterialFileAccessContext);
   const fromDoc = useMemo(() => slidesFromMaterial(material), [material]);
-  const originalName = originalStoredName(material);
-  const docKey = fromDoc.map((slide) => slide.fileName).join("|");
-  const [slides, setSlides] = useState<ViewerSlide[]>([]);
+  const [slides, setSlides] = useState<ViewerSlide[]>(fromDoc);
   const [ready, setReady] = useState(false);
-  const listed = useRef(false);
-
-  const applyListed = useCallback(async () => {
-    if (listed.current) return;
-    listed.current = true;
-    const listing = await listMaterialFiles(material.projectId, material.id);
-    const existing = (names: ViewerSlide[]) =>
-      names.filter(
-        (slide) =>
-          Boolean(slide.fileName) &&
-          !isMissingMaterialName(material.projectId, material.id, slide.fileName || ""),
-      );
-    if (listing.ok) {
-      setSlides(existing(slidesFromListedNames(listing.names, originalName)));
-    } else {
-      setSlides(existing(fromDoc));
-    }
-    setReady(true);
-  }, [fromDoc, material.projectId, material.id, originalName]);
-
-  const dropUnconfirmed = useCallback((keep: Set<string>) => {
-    setSlides((current) => {
-      const next = current.filter((slide) => Boolean(slide.fileName) && keep.has(slide.fileName || ""));
-      return next.length === current.length ? current : next;
-    });
-  }, []);
 
   useEffect(() => {
-    listed.current = false;
+    let cancelled = false;
+    setSlides(fromDoc);
     setReady(false);
-    setSlides([]);
-    void applyListed();
-  }, [material.id, material.projectId, docKey, applyListed]);
+    void listMaterialFiles(material.projectId, material.id, access).then((listing) => {
+      if (cancelled) return;
+      const pages = new Map<number, ViewerSlide>();
+      if (listing.ok) {
+        for (const slide of slidesFromListedNames(listing.names, originalStoredName(material))) pages.set(slide.page, slide);
+      }
+      for (const slide of fromDoc) pages.set(slide.page, slide);
+      setSlides([...pages.values()].sort((a, b) => a.page - b.page));
+      setReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [fromDoc, material, access]);
 
-  return { slides, ready, refreshFromStorage: applyListed, dropUnconfirmed };
+  const removePageImage = useCallback((fileName: string) => {
+    setSlides((current) => current.map((slide) => slide.fileName === fileName ? { ...slide, fileName: null } : slide));
+  }, []);
+  return { slides, ready, removePageImage };
 }
 
-function PptxStage({ material }: { material: Material }) {
-  const { slides, ready, refreshFromStorage, dropUnconfirmed } = useResolvedPptxSlides(material);
+function PptxStage({
+  material,
+  onChrome,
+}: {
+  material: Material;
+  onChrome: (chrome: StageChrome | null) => void;
+}) {
+  return <StoredPagesStage material={material} onChrome={onChrome} kind="slides" />;
+}
+
+function DocxStage({
+  material,
+  onChrome,
+}: {
+  material: Material;
+  onChrome: (chrome: StageChrome | null) => void;
+}) {
+  return <StoredPagesStage material={material} onChrome={onChrome} kind="document" />;
+}
+
+function StoredPagesStage({
+  material,
+  onChrome,
+  kind,
+}: {
+  material: Material;
+  onChrome: (chrome: StageChrome | null) => void;
+  kind: "slides" | "document";
+}) {
+  const access = useContext(MaterialFileAccessContext);
+  const { slides, ready, removePageImage } = useResolvedPreviewPages(material);
   const [index, setIndex] = useState(0);
-  const [confirmed, setConfirmed] = useState<Set<string>>(() => new Set());
-  const extractedName = slides.length === 0 && ready ? extractedStoredName(material) : null;
+  const [zoom, setZoom] = useState(100);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const extractedName = ready ? extractedStoredName(material) : null;
   const extracted = useMaterialFile(material.projectId, material.id, extractedName);
   const texts = useMemo(() => {
-    if (!extracted?.ok) return new Map<number, string>();
-    return splitSlideText(new TextDecoder().decode(extracted.bytes));
-  }, [extracted]);
+    const text = extracted ? textFallback(material, extracted) : "";
+    return kind === "slides" ? splitSlideText(text) : paginateText(text);
+  }, [material, extracted, kind]);
+  const pages = useMemo(() => mergeViewerPages(slides, kind === "slides"
+    ? new Set([...texts.keys(), ...Array.from({ length: Math.min(10000, Math.max(0, material.pageCount || 0)) }, (_, i) => i + 1)])
+    : texts.keys()), [slides, texts, kind, material.pageCount]);
+  const count = Math.max(1, pages.length);
+  const navigatePage = useCallback((next: number) => {
+    const pageIndex = Math.min(count - 1, Math.max(0, next - 1));
+    setIndex(pageIndex);
+    requestAnimationFrame(() => {
+      scrollRef.current?.querySelector<HTMLElement>(`[data-slide-page="${pageIndex + 1}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [count]);
 
   useEffect(() => {
     setIndex(0);
-    setConfirmed(new Set());
+    setZoom(100);
   }, [material.id]);
 
   useEffect(() => {
-    setIndex((n) => (slides.length === 0 ? 0 : Math.min(n, slides.length - 1)));
-  }, [slides.length]);
-
-  const current = slides[index] ?? slides[0];
-  const currentName = current?.fileName ?? null;
-  const slideFile = useMaterialFile(material.projectId, material.id, currentName);
+    setIndex((current) => Math.min(current, count - 1));
+  }, [count]);
 
   useEffect(() => {
-    if (slideFile?.ok && currentName) {
-      setConfirmed((prev) => {
-        if (prev.has(currentName)) return prev;
-        const next = new Set(prev);
-        next.add(currentName);
-        return next;
-      });
+    onChrome({
+      page: index + 1,
+      count,
+      zoom,
+      setPage: navigatePage,
+      setZoom: (next) => setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next))),
+    });
+    return () => onChrome(null);
+  }, [count, index, navigatePage, onChrome, zoom]);
+
+  const current = pages[index] ?? pages[0];
+  const currentName = current?.fileName ?? null;
+  const pageFile = useMaterialFile(material.projectId, material.id, currentName);
+
+  useEffect(() => {
+    if (pageFile && !pageFile.ok && pageFile.status === 404 && currentName) {
+      removePageImage(currentName);
     }
-    if (slideFile && !slideFile.ok && slideFile.status === 404 && currentName) {
-      dropUnconfirmed(confirmed);
-      void refreshFromStorage();
-    }
-  }, [slideFile, currentName, refreshFromStorage, confirmed, dropUnconfirmed]);
+  }, [pageFile, currentName, removePageImage]);
 
   const neighbors = useMemo(() => {
     return [index - 1, index, index + 1]
-      .map((i) => slides[i]?.fileName)
-      .filter((name): name is string => typeof name === "string" && confirmed.has(name));
-  }, [index, slides, confirmed]);
+      .map((i) => pages[i]?.fileName)
+      .filter((name): name is string => typeof name === "string");
+  }, [index, pages]);
 
   useEffect(() => {
     for (const name of neighbors) {
-      if (isMissingMaterialName(material.projectId, material.id, name)) continue;
-      void getMaterialFile(material.projectId, material.id, name);
+      if (isMissingMaterialName(material.projectId, material.id, name, access)) continue;
+      void getMaterialFile(material.projectId, material.id, name, access);
     }
-  }, [neighbors, material.projectId, material.id]);
+  }, [neighbors, material.projectId, material.id, access]);
 
   if (!ready) return <FileMessage text="Loading…" />;
+  if (!currentName && !extracted) return <FileMessage text="Loading…" />;
 
-  if (slides.length === 0) {
-    const text = textFallback(material, extracted);
+  if (kind === "slides" || kind === "document") {
+    if (pages.length === 0) {
+      return kind === "slides"
+        ? <FileMessage text="Preview unavailable — Download the original PowerPoint file." />
+        : <TextPage text={texts.get(1) || "No preview yet."} zoom={zoom} />;
+    }
+    return (
+      <div
+        ref={scrollRef}
+        className="h-full overflow-auto px-3 py-4"
+        onScroll={(event) => {
+          const viewport = event.currentTarget;
+          const nodes = [...viewport.querySelectorAll<HTMLElement>("[data-slide-page]")];
+          let closest = index;
+          let distance = Number.POSITIVE_INFINITY;
+          for (const node of nodes) {
+            const top = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+            const nextDistance = Math.abs(top - 16);
+            if (nextDistance < distance) {
+              distance = nextDistance;
+              closest = Number(node.dataset.slidePage) - 1;
+            }
+          }
+          if (closest !== index) setIndex(closest);
+        }}
+      >
+        <div className="mx-auto flex max-w-4xl flex-col gap-4" style={{ width: `${zoom}%` }}>
+          {pages.map((slide) => (
+            <ContinuousSlidePage
+              key={`${material.id}:${slide.page}:${slide.fileName ?? "text"}`}
+              material={material}
+              slide={slide}
+              text={texts.get(slide.page) || ""}
+              zoom={100}
+              kind={kind}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (pages.length === 0) {
     if (extracted && !extracted.ok && extracted.status === 401) return <FileMessage text="Sign in." />;
     if (!extracted && extractedName) return <FileMessage text="Loading…" />;
     return (
-      <DocumentPaper>
-        <p className="whitespace-pre-wrap">
-          <LinkifiedText text={text || "No preview yet. Download to open in PowerPoint."} />
-        </p>
-      </DocumentPaper>
+      <TextPage
+        text="No preview yet."
+        notice="Layout preview unavailable."
+        zoom={zoom}
+      />
     );
   }
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center justify-center gap-1 px-2 py-1.5">
-        <GhostBtn label="Previous slide" icon="prev" disabled={index <= 0} onClick={() => setIndex((n) => Math.max(0, n - 1))} />
-        <p className="min-w-[72px] text-center text-[12px] text-muted">
-          {index + 1} / {slides.length}
-        </p>
-        <GhostBtn
-          label="Next slide"
-          icon="forward"
-          disabled={index >= slides.length - 1}
-          onClick={() => setIndex((n) => Math.min(slides.length - 1, n + 1))}
-        />
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
-        <SlideStage
-          projectId={material.projectId}
-          materialId={material.id}
-          fileName={currentName}
-          file={currentName ? slideFile : null}
-          text={texts.get(current?.page ?? 0) || ""}
-        />
-      </div>
-      {slides.length > 1 ? (
-        <div className="flex shrink-0 gap-1.5 overflow-x-auto border-t border-border px-2 py-2">
-          {slides.map((slide, i) => (
-            <button
-              key={`${slide.page}-${slide.fileName || "text"}`}
-              type="button"
-              onClick={() => setIndex(i)}
-              className={`h-14 w-20 shrink-0 overflow-hidden rounded-lg border ${
-                i === index ? "border-foreground" : "border-border"
-              }`}
-              aria-label={`Slide ${slide.page}`}
-              aria-current={i === index ? "true" : undefined}
-            >
-              <FilmstripThumb
-                projectId={material.projectId}
-                materialId={material.id}
-                fileName={slide.fileName}
-                load={Boolean(slide.fileName && (i === index || confirmed.has(slide.fileName)))}
-              />
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
-function SlideStage({
-  projectId,
-  materialId,
-  fileName,
-  file,
+function ContinuousSlidePage({
+  material,
+  slide,
   text,
+  zoom,
+  kind,
 }: {
-  projectId: string;
-  materialId: string;
-  fileName: string | null;
-  file: MaterialFileResult | null;
+  material: Material;
+  slide: ViewerSlide;
   text: string;
+  zoom: number;
+  kind: "slides" | "document";
 }) {
-  if (!fileName) {
-    return (
-      <DocumentPaper>
-        <p className="whitespace-pre-wrap">
-          <LinkifiedText text={text || "No text on this slide."} />
-        </p>
-      </DocumentPaper>
-    );
+  const access = useContext(MaterialFileAccessContext);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const active = useNearViewport(pageRef);
+  const file = useMaterialFile(material.projectId, material.id, active ? slide.fileName : null);
+
+  if (!slide.fileName) {
+    return <div data-slide-page={slide.page} data-stored-page={kind === "document" ? slide.page : undefined} className="min-h-[420px] bg-white p-8 text-black shadow-sm">
+      {kind === "slides" ? <p className="text-[13px] text-black/60">Preview unavailable — Download the original PowerPoint file.</p> : (
+        <article className="whitespace-pre-wrap text-[16px] leading-relaxed" style={{ fontSize: `${16 * zoom / 100}px` }}>{text || "No preview yet."}</article>
+      )}
+    </div>;
   }
-  if (!file) return <FileMessage text="Loading…" />;
-  if (!file.ok) {
-    return (
-      <div className="flex h-full flex-col">
-        <FileMessage text={file.status === 401 ? "Sign in." : "ფაილი ვერ მოიძებნა"} />
-        {text ? (
-          <DocumentPaper>
-            <p className="whitespace-pre-wrap">
-              <LinkifiedText text={text} />
-            </p>
-          </DocumentPaper>
-        ) : null}
-      </div>
-    );
-  }
-  const url = materialFileObjectUrl(file, cacheKey(projectId, materialId, fileName));
-  return <img src={url} alt="" className="mx-auto max-h-full max-w-full object-contain" />;
+  const url = file?.ok
+    ? materialFileObjectUrl(file, cacheKey(material.projectId, material.id, slide.fileName, access))
+    : null;
+  return <div ref={pageRef} data-slide-page={slide.page} data-stored-page={kind === "document" ? slide.page : undefined} className="min-h-[240px] bg-white shadow-sm">
+    {url ? <img src={url} alt={`Slide ${slide.page}`} loading="lazy" className="block h-auto w-full object-contain" /> : (
+      kind === "slides"
+        ? <div className="p-8 text-black/60"><p className="text-[13px]">Preview unavailable — Download the original PowerPoint file.</p></div>
+        : text ? <div className="p-8 text-black"><p className="whitespace-pre-wrap">{text}</p></div> : <div className="h-[420px]" />
+    )}
+  </div>;
 }
 
-function FilmstripThumb({
-  projectId,
-  materialId,
-  fileName,
-  load,
+function useNearViewport(ref: RefObject<HTMLDivElement | null>) {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(([entry]) => setActive(entry.isIntersecting), { rootMargin: "500px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
+  return active;
+}
+
+function ImageStage({
+  material,
+  originalName,
+  onChrome,
 }: {
-  projectId: string;
-  materialId: string;
-  fileName: string | null;
-  load: boolean;
+  material: Material;
+  originalName: string | null;
+  onChrome: (chrome: StageChrome | null) => void;
 }) {
-  const skip = Boolean(fileName && isMissingMaterialName(projectId, materialId, fileName));
-  const file = useMaterialFile(projectId, materialId, load && !skip ? fileName : null);
-  if (!fileName) {
-    return <span className="flex h-full items-center justify-center text-[10px] text-muted">Text</span>;
-  }
-  if (skip || (file && !file.ok)) {
-    return <span className="flex h-full items-center justify-center text-[10px] text-muted">—</span>;
-  }
-  if (!load || !file) {
-    return <span className="flex h-full items-center justify-center text-[10px] text-muted">—</span>;
-  }
-  const url = materialFileObjectUrl(file, cacheKey(projectId, materialId, fileName));
-  return <img src={url} alt="" className="h-full w-full object-cover" />;
-}
-
-function ImageStage({ material, originalName }: { material: Material; originalName: string | null }) {
+  const access = useContext(MaterialFileAccessContext);
   const name = originalName || slidesFromMaterial(material)[0]?.fileName || null;
   const file = useMaterialFile(material.projectId, material.id, name);
-  if (!name) return <FileMessage text="ფაილი ვერ მოიძებნა" />;
+  const [zoom, setZoom] = useState(100);
+
+  useEffect(() => {
+    onChrome({
+      page: 1,
+      count: 1,
+      zoom,
+      setPage: () => undefined,
+      setZoom: (next) => setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next))),
+    });
+    return () => onChrome(null);
+  }, [onChrome, zoom]);
+
+  if (!name) return <FileMessage text="File not found." />;
   if (!file) return <FileMessage text="Loading…" />;
   if (!file.ok) {
-    return <FileMessage text={file.status === 401 ? "Sign in." : "ფაილი ვერ მოიძებნა"} />;
+    return <FileMessage text={file.status === 401 ? "Sign in." : "File not found."} />;
   }
-  const url = materialFileObjectUrl(file, cacheKey(material.projectId, material.id, name));
+  const url = materialFileObjectUrl(file, cacheKey(material.projectId, material.id, name, access));
   return (
     <div className="flex h-full items-center justify-center overflow-auto p-3">
-      <img src={url} alt={material.title} className="max-h-full max-w-full object-contain" />
+      <img
+        src={url}
+        alt={material.title}
+        className="block max-w-none object-contain"
+        style={{ width: `${zoom}%` }}
+      />
     </div>
   );
 }
 
 function textFallback(material: Material, file: MaterialFileResult | null): string {
-  if (file?.ok) return new TextDecoder().decode(file.bytes).trim();
-  return material.extractedTextPreview?.trim() || "";
+  if (file?.ok) return decodeHtmlEntities(new TextDecoder().decode(file.bytes)).trim();
+  return decodeHtmlEntities(material.extractedTextPreview?.trim() || "");
 }
 
-function TextStage({ material }: { material: Material }) {
+function TextStage({
+  material,
+  onChrome,
+}: {
+  material: Material;
+  onChrome: (chrome: StageChrome | null) => void;
+}) {
   const name = extractedStoredName(material);
   const file = useMaterialFile(material.projectId, material.id, name);
+  const [zoom, setZoom] = useState(100);
+
+  useEffect(() => {
+    onChrome({
+      page: 1,
+      count: 1,
+      zoom,
+      setPage: () => undefined,
+      setZoom: (next) => setZoom(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next))),
+    });
+    return () => onChrome(null);
+  }, [onChrome, zoom]);
+
   if (!file) return <FileMessage text="Loading…" />;
   if (!file.ok && file.status === 401) return <FileMessage text="Sign in." />;
   const text = textFallback(material, file);
-  if (!file.ok && !text) return <FileMessage text="ფაილი ვერ მოიძებნა" />;
-  return (
-    <DocumentPaper>
-      <p className="whitespace-pre-wrap">
-        <LinkifiedText text={text || "No preview yet."} />
-      </p>
-    </DocumentPaper>
-  );
+  if (!file.ok && !text) return <FileMessage text="File not found." />;
+  return <TextPage text={text || "No preview yet."} zoom={zoom} paper={material.type !== "paste"} />;
 }
 
-function DocxStage({ material, originalName }: { material: Material; originalName: string | null }) {
-  const cachedHtml = material.previewHtml?.trim() || "";
-  const [html, setHtml] = useState(cachedHtml);
-  const [failed, setFailed] = useState(false);
-  const original = useMaterialFile(material.projectId, material.id, cachedHtml ? null : originalName);
-  const extractedName = extractedStoredName(material);
-  const extracted = useMaterialFile(material.projectId, material.id, html ? null : extractedName);
-
-  useEffect(() => {
-    if (cachedHtml) {
-      setHtml(cachedHtml);
-      return;
-    }
-    if (!originalName) {
-      setFailed(true);
-      return;
-    }
-    if (!original) return;
-    if (!original.ok) {
-      setFailed(true);
-      return;
-    }
-    let cancelled = false;
-    void docxBytesToHtml(original.bytes)
-      .then((next) => {
-        if (cancelled) return;
-        if (!next.trim()) {
-          setFailed(true);
-          return;
-        }
-        setHtml(next);
-        void patchMaterialPreviewHtml(material.projectId, material.id, next);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [cachedHtml, originalName, original, material.projectId, material.id]);
-
-  if (html) return <DocumentPaper html={html} />;
-  if (original && !original.ok && original.status === 401) return <FileMessage text="Sign in." />;
-  if (!failed && originalName) return <FileMessage text="Loading…" />;
-
-  const text = textFallback(material, extracted);
-  if (!text && original && !original.ok) return <FileMessage text="ფაილი ვერ მოიძებნა" />;
+function TextPage({ text, notice, zoom, paper = true }: { text: string; notice?: string; zoom: number; paper?: boolean }) {
   return (
-    <DocumentPaper>
-      <p className="whitespace-pre-wrap">
-        <LinkifiedText text={text || "No preview yet."} />
-      </p>
-    </DocumentPaper>
+    <div className="h-full overflow-auto px-3 py-5">
+      <article className={`mx-auto min-h-[60vh] max-w-none p-6 text-[16px] leading-relaxed sm:p-12 ${paper ? "bg-white text-black" : "bg-surface text-foreground"}`} style={{ width: `${zoom}%`, overflowWrap: "anywhere" }}>
+        {notice ? <p className={`mb-5 text-[12px] ${paper ? "text-black/55" : "text-muted"}`}>{notice}</p> : null}
+        <p className="whitespace-pre-wrap">
+          <LinkifiedText text={text} />
+        </p>
+      </article>
+    </div>
   );
 }

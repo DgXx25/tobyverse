@@ -4,6 +4,8 @@ import { compactArtifactLine } from "@/lib/composer/memory";
 import { chatSystemInstruction } from "@/lib/core/chat-modes";
 import { DEFAULT_PROJECT_GOAL, PROJECT_GOAL_LABELS } from "@/lib/core/constants";
 import { isFormWriteTopic } from "@/lib/exercises/plan";
+import { formatSourcesBlock } from "@/lib/rag/sources";
+import { detectSubjectSkill, formatSkillBlock } from "@/lib/skills";
 import { formatKnownUserBlock, pickMemoriesForAsk } from "@/lib/memory/prompt";
 import { formatPathBriefing } from "@/lib/paths/model";
 import type { ChatGenerationContext } from "@/types/chat";
@@ -30,6 +32,7 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     showLearningGoal(context) ? `Learning goal: ${goalLabel(context.goal)}.` : null,
     context.projectDescription ? `Project notes: ${context.projectDescription}` : null,
     "Keep ordinary answers dense and scannable: lead with the answer in 1–2 sentences, then only the needed bullets or comparison table, and stop.",
+    "Formatting stays plain: bold only the key term being defined, one heading level at most and only for a long answer, bullets no deeper than two levels.",
     "If a tool exists for the action, call it; do not simulate its result in prose.",
     context.path
       ? null
@@ -72,7 +75,20 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     sections.push(`Known facts to prefer over inventing new ones:\n${facts}`);
   }
 
-  if (context.materials.length > 0) {
+  const sourcesBlock = formatSourcesBlock(context.sources ?? []);
+  if (sourcesBlock) sections.push(sourcesBlock);
+
+  const skillBlock = formatSkillBlock(
+    detectSubjectSkill({
+      prompt: context.prompt,
+      projectTitle: context.projectTitle,
+      materialNames: [...context.materials.map((item) => item.name), ...(context.sources ?? []).map((item) => item.title)],
+      sourceText: (context.sources ?? []).map((item) => item.text).join("\n"),
+    }),
+  );
+  if (skillBlock) sections.push(skillBlock);
+
+  if (!sourcesBlock && context.materials.length > 0) {
     const materials = context.materials
       .map((item) => `### ${item.name}\n${item.excerpt}`)
       .join("\n\n");

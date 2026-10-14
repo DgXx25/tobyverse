@@ -1,6 +1,12 @@
-import type { ChatToolName } from "@/lib/ai/tools";
+import { eligibleChatToolNames, type ChatToolName } from "@/lib/ai/tools";
 import type { ChatMode } from "@/types/chat";
 import type { ProjectGoal } from "@/types/goals";
+
+export const CHAT_MODE_TOOLS: Record<ChatMode, readonly ChatToolName[]> = {
+  fast: eligibleChatToolNames("fast"),
+  auto: eligibleChatToolNames("auto"),
+  teacher: eligibleChatToolNames("teacher"),
+};
 
 export function preferredChatModeForGoal(_goal: ProjectGoal): ChatMode {
   return "auto";
@@ -17,29 +23,13 @@ export function asChatMode(value: unknown, fallback: ChatMode = "auto"): ChatMod
   return fallback;
 }
 
-const AUTO_CHAT_TOOLS = [
-  "answer",
-  "clarify",
-  "suggest_practice",
-  "suggest_sheet",
-  "suggest_path",
-  "search_images",
-] as const satisfies readonly ChatToolName[];
-
-/** Gemini function-calling allowlist. create_* / edit_* are intercept-only — never listed here. */
-export const CHAT_MODE_TOOLS: Record<ChatMode, readonly ChatToolName[]> = {
-  fast: ["answer"],
-  auto: AUTO_CHAT_TOOLS,
-  teacher: [...AUTO_CHAT_TOOLS, "start_path", "advance_path", "restart_path"],
-};
-
 export function chatModeTools(mode: ChatMode): readonly ChatToolName[] {
-  return CHAT_MODE_TOOLS[asChatMode(mode)];
+  return eligibleChatToolNames(asChatMode(mode));
 }
 
-/** Fast is text-only. Omit function declarations when the list is only `answer`. */
-export function chatModeSendsToolDeclarations(mode: ChatMode): boolean {
-  return chatModeTools(mode).some((name) => name !== "answer");
+/** Every reply style sends the same registry filtered only by eligibility. */
+export function chatModeSendsToolDeclarations(_mode: ChatMode): boolean {
+  return true;
 }
 
 export const CHAT_MODE_INSTRUCTIONS: Record<ChatMode, string> = {

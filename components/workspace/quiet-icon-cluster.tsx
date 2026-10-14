@@ -21,6 +21,11 @@ type TipState = {
 const TIP_GAP = 8;
 const TIP_FADE_MS = 140;
 
+function isEventTargetInside(container: Node | null, target: EventTarget | null) {
+  if (!container || !target || typeof Node === "undefined" || !(target instanceof Node)) return false;
+  return container.contains(target);
+}
+
 export function QuietIconCluster({
   actions,
   className = "",
@@ -54,8 +59,7 @@ export function QuietIconCluster({
   }, []);
 
   function leaveCluster(event: MouseEvent<HTMLDivElement>) {
-    const next = event.relatedTarget as Node | null;
-    if (next && clusterRef.current?.contains(next)) return;
+    if (isEventTargetInside(clusterRef.current, event.relatedTarget)) return;
     hide();
   }
 
@@ -106,6 +110,7 @@ export function QuietIconCluster({
         <button
           key={action.id}
           type="button"
+          disabled={action.disabled}
           aria-label={action.label}
           aria-current={action.active ? "true" : undefined}
           aria-disabled={action.disabled || undefined}
@@ -123,13 +128,12 @@ export function QuietIconCluster({
             show(action.label, event.currentTarget);
           }}
           onBlur={(event) => {
-            const next = event.relatedTarget as Node | null;
-            if (next && clusterRef.current?.contains(next)) return;
+            if (isEventTargetInside(clusterRef.current, event.relatedTarget)) return;
             hide();
           }}
-          className={`flex h-9 w-9 items-center justify-center rounded-[10px] shadow-none transition-[background-color,color,opacity] duration-150 ease-out ${
+          className={`flex h-9 w-9 items-center justify-center rounded-[10px] shadow-none ${
             action.disabled
-              ? "cursor-default bg-transparent text-muted opacity-35"
+              ? "pointer-events-none cursor-default bg-transparent text-muted opacity-35"
               : action.active
                 ? "cursor-pointer bg-surface-2 text-foreground"
                 : "cursor-pointer bg-transparent text-muted hover:text-foreground"

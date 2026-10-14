@@ -46,3 +46,17 @@ export function dayGroup(iso: string | null): "Today" | "Yesterday" | "Earlier" 
   if (diff === 1) return "Yesterday";
   return "Earlier";
 }
+
+export function weekGroup(iso: string | null): string {
+  if (!iso) return "Earlier";
+  const then = new Date(iso);
+  if (!Number.isFinite(then.getTime())) return "Earlier";
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const day = new Date(then);
+  day.setHours(0, 0, 0, 0);
+  const diff = Math.round((start.getTime() - day.getTime()) / 86400000);
+  if (diff <= 6 && start.getDay() >= day.getDay() && diff < 7) return "This week";
+  if (diff < 14) return "Last week";
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}

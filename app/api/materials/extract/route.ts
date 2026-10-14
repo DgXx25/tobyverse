@@ -2,15 +2,14 @@ import { extractPlainText, MaterialExtractError } from "@/lib/materials/extract"
 import { extractUrlText } from "@/lib/materials/url";
 import {
   EXTRACT_MAX_CHARS,
-  MAX_UPLOAD_BODY_BYTES,
-  MAX_UPLOAD_BYTES,
   clipText,
   previewText,
-  uploadTooLargeMessage,
 } from "@/lib/materials/limits";
+import { MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@/lib/materials/limits";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
 import { downloadGcsObject, uploadGcsObject } from "@/lib/storage-gcs";
 import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -20,6 +19,7 @@ async function extractStoredFile(input: {
   path: string;
   textPath?: string;
   phase: string;
+  usage?: Awaited<ReturnType<typeof startAiUsageSession>>;
 }) {
   const parsed = parseMaterialStoragePath(input.path);
   if (!parsed || parsed.userId !== input.uid) {
@@ -31,6 +31,7 @@ async function extractStoredFile(input: {
     mime: contentType,
     buffer,
     includeImages: input.phase !== "text",
+    usage: input.usage?.report,
   });
   let textStored = false;
   if (input.textPath && input.phase !== "images") {
@@ -60,9 +61,16 @@ export async function POST(request: Request) {
     return authErrorResponse(error);
   }
 
+  let usage;
+  try {
+    usage = await startAiUsageSession(uid);
+  } catch (error) {
+    return aiUsageErrorResponse(error);
+  }
+
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BODY_BYTES) {
-    return Response.json({ error: uploadTooLargeMessage() }, { status: 413 });
+    return Response.json({ error: uploadTooLargeMessage(), maxBytes: MAX_UPLOAD_BYTES }, { status: 413 });
   }
 
   const contentType = request.headers.get("content-type") ?? "";
@@ -82,7 +90,7 @@ export async function POST(request: Request) {
         const phase = typeof body.phase === "string" ? body.phase.trim().toLowerCase() : "text";
         const textPath = typeof body.textPath === "string" ? body.textPath.trim() : "";
         return Response.json(
-          await extractStoredFile({ uid, path, textPath: textPath || undefined, phase }),
+          await extractStoredFile({ uid, path, textPath: textPath || undefined, phase, usage }),
         );
       }
 
@@ -121,17 +129,14 @@ export async function POST(request: Request) {
     try {
       form = await request.formData();
     } catch {
-      return Response.json(
-        { error: "Could not read upload. File may be too large." },
-        { status: 413 },
-      );
+      return Response.json({ error: uploadTooLargeMessage(), maxBytes: MAX_UPLOAD_BYTES }, { status: 413 });
     }
     const file = form.get("file");
     if (!(file instanceof File)) {
       return Response.json({ error: "Choose a PDF, DOCX, PPTX, TXT, MD, or image file." }, { status: 400 });
     }
     if (file.size > MAX_UPLOAD_BYTES) {
-      return Response.json({ error: uploadTooLargeMessage() }, { status: 413 });
+      return Response.json({ error: uploadTooLargeMessage(), maxBytes: MAX_UPLOAD_BYTES }, { status: 413 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -141,6 +146,7 @@ export async function POST(request: Request) {
       mime: file.type,
       buffer,
       includeImages: phase !== "text",
+      usage: usage.report,
     });
 
     return Response.json({
@@ -159,5 +165,7 @@ export async function POST(request: Request) {
           ? error.message
           : "Could not extract text.";
     return Response.json({ error: message }, { status: 400 });
+  } finally {
+    await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
   }
 }

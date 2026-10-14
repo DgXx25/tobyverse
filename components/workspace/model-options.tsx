@@ -26,7 +26,7 @@ export function ModelOptions({
               setModel(option.id);
               onPicked?.();
             }}
-            className={`flex w-full items-center justify-between rounded-lg text-left ${
+            className={`flex w-full items-center justify-between rounded-lg text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               compact ? "h-8 px-2.5 text-[13px]" : "h-10 px-2.5 text-[14px]"
             } ${
               selected

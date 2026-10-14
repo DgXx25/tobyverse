@@ -2,6 +2,7 @@ import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
 import { clipText, PATH_TOTAL_CHARS } from "@/lib/materials/limits";
 import { streamPathDocument } from "@/lib/paths/generate-stream";
 import type { PathKind } from "@/types/path";
+import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 
@@ -10,8 +11,9 @@ function encodeSse(payload: Record<string, unknown>): Uint8Array {
 }
 
 export async function POST(request: Request) {
+  let session;
   try {
-    await assertAccountRequest(request);
+    session = await assertAccountRequest(request);
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -46,6 +48,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Add a syllabus or name the course first." }, { status: 400 });
   }
 
+  let usage;
+  try {
+    usage = await startAiUsageSession(session.uid);
+  } catch (error) {
+    return aiUsageErrorResponse(error);
+  }
+
   const compiled = sources
     .map((item) => `# ${item.title}\n${item.excerpt}`.trim())
     .filter(Boolean)
@@ -65,7 +74,7 @@ export async function POST(request: Request) {
         controller.enqueue(encodeSse(payload));
       };
       try {
-        for await (const event of streamPathDocument(userPrompt, kind)) {
+        for await (const event of streamPathDocument(userPrompt, kind, { usage: usage.report })) {
           if (request.signal.aborted) break;
           if (event.type === "status") send({ status: event.status });
           else if (event.type === "title") send({ title: event.title });
@@ -86,6 +95,7 @@ export async function POST(request: Request) {
       } catch (error) {
         send({ error: error instanceof Error ? error.message : "Generation failed." });
       } finally {
+        await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
         controller.close();
       }
     },

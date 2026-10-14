@@ -9,6 +9,7 @@ import { MemoriesPanel } from "@/components/account/memories-panel";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { firstNameFromUser, initialsFromName, signInMethodsFromProviderData } from "@/lib/account/providers";
 import { planLabel } from "@/lib/account/plan";
+import { resolveEffectivePlan } from "@/lib/billing/plans";
 
 type AccountTab = "account" | "memory" | "data";
 
@@ -23,7 +24,7 @@ export function AccountWorkspace() {
   const initials = initialsFromName(displayName, email);
   const createdAt = profile?.createdAt || user?.metadata.creationTime || null;
   const methods = signInMethodsFromProviderData(user?.providerData ?? []);
-  const plan = planLabel(profile?.plan);
+  const plan = planLabel(resolveEffectivePlan({ storedPlan: profile?.plan, admin: profile?.admin }));
 
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">
@@ -91,9 +92,11 @@ export function AccountWorkspace() {
               <div className="mt-8 overflow-hidden rounded-2xl bg-surface-2">
                 <InfoRow label="Full name" value={displayName} />
                 <InfoRow label="Email" value={email || "—"} />
-                <InfoRow label="Plan" value={plan} hint="Beta" />
+                <InfoRow label="Plan" value={plan} />
                 <InfoRow label="Account created" value={formatCreated(createdAt)} last />
               </div>
+
+              <Link href="/plans" className="mt-5 inline-flex rounded-full border border-border px-4 py-2 text-[13px] text-foreground">View plans</Link>
 
               <div className="mt-10">
                 <h3 className="text-[18px] font-semibold tracking-tight text-foreground">Sign-in methods</h3>

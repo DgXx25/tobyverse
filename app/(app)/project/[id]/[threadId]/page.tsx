@@ -1,4 +1,4 @@
-import { ProjectView } from "@/components/project-view";
+import { ProjectRedirect } from "@/components/project-redirect";
 
 export default async function ProjectThreadPage({
   params,
@@ -6,5 +6,5 @@ export default async function ProjectThreadPage({
   params: Promise<{ id: string; threadId: string }>;
 }) {
   const { id, threadId } = await params;
-  return <ProjectView projectId={id} threadId={threadId} />;
+  return <ProjectRedirect projectId={id} threadId={threadId} />;
 }

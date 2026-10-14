@@ -17,7 +17,7 @@ export function PracticeLeave({
   const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      className="absolute inset-0 z-10 flex flex-col bg-surface"
+      className="absolute inset-0 z-10 flex flex-col bg-background"
       initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}

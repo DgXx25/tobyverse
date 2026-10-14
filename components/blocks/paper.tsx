@@ -7,7 +7,15 @@ import type { PaperPayload } from "@/types/exercise";
 
 type Feedback = { feedback: string; verdict: "correct" | "partial" | "incorrect" | "hint" };
 
-export function PaperView({ block, streaming = false }: { block: PaperPayload; streaming?: boolean }) {
+export function PaperView({
+  block,
+  streaming = false,
+  skipped = false,
+}: {
+  block: PaperPayload;
+  streaming?: boolean;
+  skipped?: boolean;
+}) {
   const example = paperIsExample(block);
   const [answer, setAnswer] = useState<PaperAnswer | null>(null);
   const [busy, setBusy] = useState(false);
@@ -15,9 +23,10 @@ export function PaperView({ block, streaming = false }: { block: PaperPayload; s
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [error, setError] = useState<string | null>(null);
   const ready = paperReady(answer);
+  const frozen = example || skipped || locked || streaming;
 
   async function check() {
-    if (!ready || busy || locked || !answer) return;
+    if (!ready || busy || frozen || !answer) return;
     setBusy(true);
     setError(null);
     try {
@@ -45,12 +54,12 @@ export function PaperView({ block, streaming = false }: { block: PaperPayload; s
 
   return (
     <div className="ex-paper-block">
-      <PaperPlay data={block} locked={locked || streaming} onSelect={setAnswer} streaming={streaming} />
+      <PaperPlay data={block} locked={frozen} skipped={skipped} onSelect={setAnswer} streaming={streaming} />
       {feedback ? <p className="ex-paper-feedback">{feedback.feedback}</p> : null}
       {error ? <p className="ex-paper-error">{error}</p> : null}
-      {!example && !locked && !streaming ? (
+      {!example && !skipped && !locked && !streaming ? (
         <button type="button" className="ex-paper-check" disabled={!ready || busy} onClick={() => void check()}>
-          {busy ? "ამოწმებს…" : "შემოწმება"}
+          {busy ? "Checking…" : "Check"}
         </button>
       ) : null}
     </div>

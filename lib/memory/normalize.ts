@@ -61,7 +61,7 @@ const LEARNING_OR_MEMORY_SIGNAL =
   /remember|never forget|from now on|\balways\b|never (do|use|say|write)|დამიმახსოვრ|დაიმახსოვრ|ყოველთვის|არასდროს|დავიბენ|ვიბენ|მიჭირს|გაამარტივე|confused|overwhelmed|too (hard|abstract|long|fast)|simpler|slower|მაგალით|\bexamples?\b|ცხრილ|\btables?\b|ისტორი|\bstor(y|ies)\b|დამილისტ|don't just list|how I learn|როგორ ვსწავლ|clicked|helped me/i;
 
 const DURABLE_FACT =
-  /მე მქვია|my name is|ვმუშაობ|i work as|i(?:['’]m| am) an?\b|ფინალ.{0,48}(\d|რიცხვ)|exam.{0,24}(\d|on |date)|always (answer|write|reply) in|წერე? ქართულ|preferred language|B[12]\b|C[12]\b|A[12]\b|დონე/i;
+  /მე მქვია|my name is|ვმუშაობ|i work as|i(?:['’]m| am) an?\b|ფინალ.{0,48}(\d|რიცხვ)|exam.{0,24}(\d|on |date)|always (answer|write|reply) in|წერე? ქართულ|preferred language|B[12]\b|C[12]\b|A[12]\b|დონე|struggles with|მიჭირს|lecturer|ლექტორ|მანქიუ|mankiw|textbook|წიგნი|exam on|გამოცდა/i;
 
 function looksLikeQuestionOnly(prompt: string): boolean {
   const text = prompt.trim();

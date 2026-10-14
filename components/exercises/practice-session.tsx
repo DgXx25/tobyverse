@@ -339,7 +339,7 @@ export function PracticeSession({
         </AnimatePresence>
 
         <footer
-          className={`absolute inset-x-0 bottom-0 z-10 flex items-center gap-3 bg-surface ${
+          className={`absolute inset-x-0 bottom-0 z-10 flex items-center gap-3 bg-background ${
             compact ? "px-4 py-3" : "px-6 py-4"
           } ${footerOpen ? "border-t border-transparent" : "border-t border-border"}`}
         >
