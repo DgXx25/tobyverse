@@ -1,5 +1,7 @@
-import type { NextConfig } from "next";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const root = path.dirname(fileURLToPath(import.meta.url));
 
 // Turbopack `next dev` and webpack `next build` cannot share `.next` on Windows.
 const distDir =
@@ -10,9 +12,10 @@ const firebaseAuthHelperHost = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
   ? `${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}.firebaseapp.com`
   : process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
 
-const nextConfig: NextConfig = {
+/** @type {import("next").NextConfig} */
+const nextConfig = {
   distDir,
-  outputFileTracingRoot: path.join(__dirname),
+  outputFileTracingRoot: root,
   transpilePackages: ["galaxyjs"],
   serverExternalPackages: ["unpdf", "mammoth", "jszip"],
   webpack: (config) => {
@@ -25,7 +28,15 @@ const nextConfig: NextConfig = {
     },
   },
   experimental: {
-    optimizePackageImports: ["lucide-react", "@hugeicons/react"],
+    optimizePackageImports: [
+      "lucide-react",
+      "@hugeicons/react",
+      "@hugeicons/core-free-icons",
+      "motion",
+      "firebase/firestore",
+      "firebase/auth",
+      "firebase/app",
+    ],
     middlewareClientMaxBodySize: "202mb",
     serverActions: {
       bodySizeLimit: "202mb",

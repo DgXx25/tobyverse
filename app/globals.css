@@ -5,7 +5,7 @@
 :root,
 html.light {
   --bg: #f5f5f7;
-  --surface: #ececee;
+  --surface: #ffffff;
   --surface-2: #ffffff;
   --border: #e6e6e8;
   --text: #1d1d1f;
@@ -24,17 +24,19 @@ html.light {
   --toby-c1: #b56b68;
   --toby-c2: #b89a4e;
   --toby-c3: #5e8f78;
-  --file-pdf: #ff3b30;
-  --file-doc: #007aff;
-  --file-sheet: #34c759;
-  --file-slides: #ff9500;
-  --file-notes: #af52de;
+  --file-pdf: #FF383C;
+  --file-doc: #0088FF;
+  --file-sheet: #34C759;
+  --file-slides: #FF8D28;
+  --file-notes: #CB30E0;
+  --tone-yellow: #FFCC00;
+  --tone-pink: #FF2D55;
 }
 
 html.dark {
-  --bg: #111111;
-  --surface: #1d1d1f;
-  --surface-2: #1d1d1f;
+  --bg: #141414;
+  --surface: #181818;
+  --surface-2: #212121;
   --border: #2a2a2c;
   --text: #ececec;
   --text-muted: #8e8e93;
@@ -52,18 +54,20 @@ html.dark {
   --toby-c1: #c48986;
   --toby-c2: #c4b07a;
   --toby-c3: #7aa090;
-  --file-pdf: #ff453a;
-  --file-doc: #0a84ff;
-  --file-sheet: #30d158;
-  --file-slides: #ff9f0a;
-  --file-notes: #bf5af2;
+  --file-pdf: #FF4245;
+  --file-doc: #0091FF;
+  --file-sheet: #30D158;
+  --file-slides: #FF9230;
+  --file-notes: #DB34F2;
+  --tone-yellow: #FFD600;
+  --tone-pink: #FF375F;
 }
 
 html.marketing,
 html.marketing.dark {
-  --bg: #111111;
-  --surface: #1d1d1f;
-  --surface-2: #1d1d1f;
+  --bg: #141414;
+  --surface: #181818;
+  --surface-2: #212121;
   --border: #2a2a2c;
   --text: #ececec;
   --text-muted: #8e8e93;
@@ -79,7 +83,7 @@ html.marketing.dark {
 html.marketing.light {
   --bg: #f5f5f7;
   --surface: #ffffff;
-  --surface-2: #ececee;
+  --surface-2: #ffffff;
   --border: #e6e6e8;
   --text: #1d1d1f;
   --text-muted: #6e6e73;
@@ -187,7 +191,7 @@ html.marketing .composer-send:not(:disabled) {
 }
 
 html.dark.high-contrast {
-  --bg: #000000;
+  --bg: #111111;
   --surface: #181818;
   --surface-2: #242424;
   --border: #626266;
@@ -215,6 +219,49 @@ html.theme-switching *::after {
 
 .sidebar-item-rest.sidebar-item-active {
   background: color-mix(in srgb, var(--text) 9%, transparent);
+}
+
+.edge-stroke {
+  border: 1px solid var(--border);
+}
+
+html.dark .project-card {
+  background: #252525;
+}
+
+html.dark .project-card:hover {
+  background: #2c2c2c;
+}
+
+html.dark .edge-stroke {
+  border-color: #292929;
+}
+
+html.dark .prompt-bubble {
+  background: #212121;
+  border: 1px solid #313131;
+}
+
+html.dark .composer-shell {
+  border-color: #313131;
+}
+
+html.dark .composer-attach {
+  background: #313131;
+  color: var(--text);
+}
+html.light .topbar-tabs .sidebar-item-active,
+html.light .topbar-tabs .sidebar-item-active:hover,
+html.light .topbar-tabs .sidebar-item-active:has(:focus-visible) {
+  background: #ffffff;
+  cursor: default;
+}
+
+html.dark .topbar-tabs .sidebar-item-active,
+html.dark .topbar-tabs .sidebar-item-active:hover,
+html.dark .topbar-tabs .sidebar-item-active:has(:focus-visible) {
+  background: var(--surface-2);
+  cursor: default;
 }
 
 .sidebar-project-control,
@@ -306,12 +353,21 @@ html.dark .sidebar-profile-trigger:focus-visible {
   padding: 1rem;
 }
 
+html.dark .artifact-panel-slot {
+  --surface-2: #252525;
+}
+
 .artifact-panel-block {
-  background: var(--surface);
+  background: var(--surface-2);
+}
+
+html.light .artifact-panel-block,
+html.light .artifact-panel-slot .bg-surface-2 {
+  background-color: var(--bg);
 }
 
 .artifact-panel-block:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-2));
 }
 
 .artifact-panel-content .note-card {
@@ -480,7 +536,7 @@ html.nav-lock body {
 .mobile-topbar {
   min-height: 48px;
   padding-top: env(safe-area-inset-top, 0px);
-  background: var(--surface);
+  background: var(--bg);
 }
 
 .mobile-topbar.is-overlay {
@@ -488,6 +544,22 @@ html.nav-lock body {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
+}
+
+.mobile-tabbar {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 767px) {
+  .artifact-panel-slot.mobile-page,
+  .artifact-panel-slot.mobile-page > div {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 100%;
+  }
 }
 
 @media (max-width: 767px) {
@@ -698,7 +770,7 @@ html.ios-standalone.marketing::before {
 
 .chat-body {
   font-size: 15px;
-  line-height: 1.72;
+  line-height: 1.85;
   font-family: inherit;
 }
 
@@ -714,7 +786,7 @@ html.ios-standalone.marketing::before {
   inset: auto 0 0;
   height: 2.75rem;
   pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--surface-2));
+  background: linear-gradient(to bottom, transparent, var(--surface));
 }
 
 .chat-body > :first-child {
@@ -1780,7 +1852,6 @@ html.ios-standalone.marketing::before {
   overflow-anchor: none;
   scrollbar-gutter: stable;
   background: var(--bg);
-  scrollbar-color: var(--scrollbar) var(--bg);
 }
 
 .page-y-scroll:has(.project-workspace) {
@@ -1788,9 +1859,9 @@ html.ios-standalone.marketing::before {
   scrollbar-gutter: auto;
 }
 
-.page-y-scroll::-webkit-scrollbar-track,
-.page-y-scroll::-webkit-scrollbar-track-piece,
-.page-y-scroll::-webkit-scrollbar-corner {
+html:not(.platform-mac) .page-y-scroll::-webkit-scrollbar-track,
+html:not(.platform-mac) .page-y-scroll::-webkit-scrollbar-track-piece,
+html:not(.platform-mac) .page-y-scroll::-webkit-scrollbar-corner {
   background: var(--bg);
 }
 
@@ -1799,35 +1870,54 @@ html.ios-standalone.marketing::before {
   color: var(--bg);
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar) transparent;
+@supports not selector(::-webkit-scrollbar) {
+  html:not(.platform-mac) * {
+    scrollbar-color: var(--scrollbar) transparent;
+    scrollbar-width: thin;
+  }
 }
 
-*::-webkit-scrollbar {
+html:not(.platform-mac) *::-webkit-scrollbar {
   width: 3px;
   height: 3px;
   background: transparent;
 }
 
-*::-webkit-scrollbar-button {
-  display: none;
+html:not(.platform-mac) *::-webkit-scrollbar-button,
+html:not(.platform-mac) *::-webkit-scrollbar-button:single-button,
+html:not(.platform-mac) *::-webkit-scrollbar-button:double-button,
+html:not(.platform-mac) *::-webkit-scrollbar-button:vertical:start:decrement,
+html:not(.platform-mac) *::-webkit-scrollbar-button:vertical:start:increment,
+html:not(.platform-mac) *::-webkit-scrollbar-button:vertical:end:decrement,
+html:not(.platform-mac) *::-webkit-scrollbar-button:vertical:end:increment,
+html:not(.platform-mac) *::-webkit-scrollbar-button:horizontal:start:decrement,
+html:not(.platform-mac) *::-webkit-scrollbar-button:horizontal:start:increment,
+html:not(.platform-mac) *::-webkit-scrollbar-button:horizontal:end:decrement,
+html:not(.platform-mac) *::-webkit-scrollbar-button:horizontal:end:increment {
+  display: block;
   width: 0;
   height: 0;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+  background-image: none;
+  border: 0;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-*::-webkit-scrollbar-track,
-*::-webkit-scrollbar-track-piece,
-*::-webkit-scrollbar-corner {
+html:not(.platform-mac) *::-webkit-scrollbar-track,
+html:not(.platform-mac) *::-webkit-scrollbar-track-piece,
+html:not(.platform-mac) *::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-*::-webkit-scrollbar-thumb {
+html:not(.platform-mac) *::-webkit-scrollbar-thumb {
   background: var(--scrollbar);
   border-radius: 999px;
 }
 
-*::-webkit-scrollbar-thumb:hover {
+html:not(.platform-mac) *::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar);
 }
 

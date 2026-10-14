@@ -55,6 +55,52 @@ function reportGeminiResponse(options: GenerateOptions, model: string, response:
   if (usage) options.usage?.(usage);
 }
 
+const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
+
+type SignedPart = Part & { thoughtSignature?: string; thought?: boolean };
+
+function partSignature(part: object): string | undefined {
+  const record = part as { thoughtSignature?: unknown; thought_signature?: unknown };
+  const value = record.thoughtSignature ?? record.thought_signature;
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+/**
+ * Gemini 3 requires the original thoughtSignature on the first functionCall of
+ * each tool step. The installed SDK drops that field while merging a stream,
+ * so tool turns use the raw response and this replay keeps the signature.
+ */
+export function partsForReplay(parts: readonly object[]): SignedPart[] {
+  const copied: SignedPart[] = parts.map((part) => {
+    const next = { ...(part as SignedPart) };
+    delete (next as { thought_signature?: string }).thought_signature;
+    const signature = partSignature(part);
+    if (signature) next.thoughtSignature = signature;
+    return next;
+  });
+  const carried = copied.find((part) => part.thoughtSignature)?.thoughtSignature;
+  let signed = false;
+  return copied.map((part) => {
+    if (!part.functionCall) return part;
+    if (part.thoughtSignature || signed) {
+      signed = true;
+      return part;
+    }
+    signed = true;
+    return { ...part, thoughtSignature: carried || SKIP_THOUGHT_SIGNATURE };
+  });
+}
+
+function loopParts(parts: readonly SignedPart[]): Array<{ text?: string; functionCall?: { name: string; args?: unknown } }> {
+  const visible: Array<{ text?: string; functionCall?: { name: string; args?: unknown } }> = [];
+  for (const part of parts) {
+    if (part.thought) continue;
+    if (part.text) visible.push({ text: part.text });
+    if (part.functionCall) visible.push({ functionCall: part.functionCall });
+  }
+  return visible;
+}
+
 function toHistory(prompt: string, history: ChatTurn[] = []): Content[] {
   return historyWithoutCurrentPrompt(history, prompt)
     .filter((turn) => turn.content.trim().length > 0)
@@ -185,33 +231,33 @@ export class GeminiProvider implements AIProvider {
 
   async *generateToolStream(prompt: string, options: GenerateOptions = {}): AsyncIterable<ChatStreamPart> {
     const model = options.model ?? DEFAULT_GEMINI_MODEL;
-    const chat = this.getModel(options).startChat({ history: toHistory(prompt, options.history) });
+    const generative = this.getModel(options);
+    const contents: Content[] = [...toHistory(prompt, options.history)];
     const firstParts = toPromptParts(prompt, options.images);
     const result = await runToolLoop({
       maxRounds: options.toolChoice ? 1 : 3,
       callModel: async ({ round, functionResponses }) => {
-        const outgoing: Part[] =
+        const message: Content =
           round === 1
-            ? firstParts
-            : functionResponses.map(({ name, response }) => ({
-                functionResponse: {
-                  name,
-                  response:
-                    response && typeof response === "object"
-                      ? (response as object)
-                      : { result: response ?? null },
-                },
-              }));
-        const turn = await chat.sendMessageStream(outgoing);
-        const parts: Array<{ text?: string; functionCall?: { name: string; args?: unknown } }> = [];
-        for await (const chunk of turn.stream) {
-          for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-            if (part.text) parts.push({ text: part.text });
-            if (part.functionCall) parts.push({ functionCall: part.functionCall });
-          }
-        }
-        reportGeminiResponse(options, model, await turn.response);
-        return { parts };
+            ? { role: "user", parts: firstParts }
+            : {
+                role: "user",
+                parts: functionResponses.map(({ name, response }) => ({
+                  functionResponse: {
+                    name,
+                    response:
+                      response && typeof response === "object"
+                        ? (response as object)
+                        : { result: response ?? null },
+                  },
+                })),
+              };
+        const turn = await generative.generateContent({ contents: [...contents, message] });
+        const replay = partsForReplay(turn.response.candidates?.[0]?.content?.parts ?? []);
+        contents.push(message);
+        if (replay.length) contents.push({ role: "model", parts: replay });
+        reportGeminiResponse(options, model, turn.response);
+        return { parts: loopParts(replay) };
       },
       execute: async (call) =>
         chatToolDefinition(call.name).execute({

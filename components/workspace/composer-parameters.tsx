@@ -67,7 +67,7 @@ export function ComposerParameters({
       {mounted ? (
         <div
           id={menuId}
-          className={`absolute bottom-[calc(100%+8px)] right-0 z-50 w-[min(220px,calc(100vw-32px))] rounded-2xl bg-surface-2 p-1.5 shadow-2xl ring-1 ring-border motion-reduce:transition-none ${open ? "composer-menu-enter" : "composer-menu-exit"}`}
+          className={`absolute bottom-[calc(100%+8px)] right-0 z-50 w-[min(220px,calc(100vw-32px))] rounded-2xl bg-surface p-1.5 shadow-2xl ring-1 ring-border motion-reduce:transition-none ${open ? "composer-menu-enter" : "composer-menu-exit"}`}
         >
           <ModelOptions compact onPicked={() => setOpen(false)} />
         </div>

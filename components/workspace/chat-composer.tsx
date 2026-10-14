@@ -424,7 +424,7 @@ export const ChatComposer = forwardRef<
         }
       />
       <div
-        className={`relative rounded-[28px] bg-surface-2 px-3 py-2 ${
+        className={`composer-shell edge-stroke relative rounded-[28px] bg-surface-2 px-3 py-2 ${
           isDrop ? "bg-foreground/[0.04]" : ""
         }`}
       >
@@ -577,7 +577,7 @@ export const ChatComposer = forwardRef<
           </div>
         </div>
         {slashMounted ? (
-          <div className={`absolute bottom-[calc(100%+8px)] left-2 z-50 w-[min(calc(100%-16px),320px)] rounded-2xl bg-surface-2 shadow-2xl ring-1 ring-border ${slashOpen ? "composer-menu-enter" : "composer-menu-exit"}`}>
+          <div className={`absolute bottom-[calc(100%+8px)] left-2 z-50 w-[min(calc(100%-16px),320px)] rounded-2xl bg-surface shadow-2xl ring-1 ring-border ${slashOpen ? "composer-menu-enter" : "composer-menu-exit"}`}>
             <SlashMenu
               items={slashItems}
               active={slashIndex}

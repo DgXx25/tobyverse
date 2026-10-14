@@ -7,12 +7,18 @@ export type ThemeId = (typeof THEMES)[number];
 
 export const ACCENT_OPTIONS = [
   { id: "default", label: "Default", light: "#1d1d1f", dark: "#ffffff" },
-  { id: "blue", label: "Blue", light: "#007aff", dark: "#007aff" },
-  { id: "red", label: "Red", light: "#ff3b30", dark: "#ff453a" },
-  { id: "yellow", label: "Yellow", light: "#ffcc00", dark: "#ffd600" },
-  { id: "green", label: "Green", light: "#248a3d", dark: "#30d158" },
-  { id: "orange", label: "Orange", light: "#ff8d28", dark: "#ff9230" },
-  { id: "purple", label: "Purple", light: "#8944ab", dark: "#bf5af2" },
+  { id: "red", label: "Red", light: "#FF383C", dark: "#FF4245" },
+  { id: "orange", label: "Orange", light: "#FF8D28", dark: "#FF9230" },
+  { id: "yellow", label: "Yellow", light: "#FFCC00", dark: "#FFD600" },
+  { id: "green", label: "Green", light: "#34C759", dark: "#30D158" },
+  { id: "mint", label: "Mint", light: "#00C8B3", dark: "#00DAC3" },
+  { id: "teal", label: "Teal", light: "#00C3D0", dark: "#00D2E0" },
+  { id: "cyan", label: "Cyan", light: "#00C0E8", dark: "#3CD3FE" },
+  { id: "blue", label: "Blue", light: "#0088FF", dark: "#0091FF" },
+  { id: "indigo", label: "Indigo", light: "#6155F5", dark: "#6D7CFF" },
+  { id: "purple", label: "Purple", light: "#CB30E0", dark: "#DB34F2" },
+  { id: "pink", label: "Pink", light: "#FF2D55", dark: "#FF375F" },
+  { id: "brown", label: "Brown", light: "#AC7F5E", dark: "#B78A66" },
 ] as const;
 
 export type AccentId = (typeof ACCENT_OPTIONS)[number]["id"];
@@ -25,12 +31,12 @@ export const THEME_OPTIONS: { id: ThemeId; label: string; preview: ThemePreview 
   {
     id: "light",
     label: "Light",
-    preview: { bg: "#f5f5f7", sidebar: "#ececee", text: "#1d1d1f", muted: "#d4d4d8", accent: "#007aff" },
+    preview: { bg: "#f5f5f7", sidebar: "#ececee", text: "#1d1d1f", muted: "#d4d4d8", accent: "#0088FF" },
   },
   {
     id: "dark",
     label: "Dark",
-    preview: { bg: "#111111", sidebar: "#1d1d1f", text: "#ececec", muted: "#2c2c2e", accent: "#007aff" },
+    preview: { bg: "#141414", sidebar: "#181818", text: "#ececec", muted: "#2c2c2e", accent: "#0091FF" },
   },
 ];
 
@@ -132,13 +138,13 @@ export function applyThemeAccent(theme: ThemeId, accent: AccentId, highContrast:
 }
 
 export const THEME_SURFACE: Record<ThemeId, string> = {
-  light: "#ececee",
-  dark: "#1d1d1f",
+  light: "#f5f5f7",
+  dark: "#141414",
 };
 
 export function applyThemeChrome(theme: ThemeId, marketing = false): void {
   if (typeof document === "undefined") return;
-  const color = marketing ? "#111111" : THEME_SURFACE[theme];
+  const color = marketing ? "#141414" : THEME_SURFACE[theme];
   let themeMeta = document.querySelector('meta[name="theme-color"]');
   if (!themeMeta) {
     themeMeta = document.createElement("meta");

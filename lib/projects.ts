@@ -90,6 +90,7 @@ function mapProject(id: string, data: Record<string, unknown>): Project {
     projectMemory: asProjectMemory(data.projectMemory),
     listed: data.listed === true,
     icon: asString(data.icon) || undefined,
+    iconColor: asString(data.iconColor) || undefined,
     folder: asString(data.folder) || undefined,
     hidden: data.hidden === true,
     createdAt: toIsoDate(data.createdAt),
@@ -210,11 +211,12 @@ export async function updateProjectTitle(
 export async function updateProjectMeta(
   projectId: string,
   userId: string,
-  patch: { icon?: string; folder?: string },
+  patch: { icon?: string; iconColor?: string; folder?: string },
 ): Promise<void> {
   await getOwnedProject(projectId, userId);
   const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
-  if (patch.icon !== undefined) payload.icon = patch.icon.trim().slice(0, 8);
+  if (patch.icon !== undefined) payload.icon = patch.icon.trim().slice(0, 80);
+  if (patch.iconColor !== undefined) payload.iconColor = patch.iconColor.trim().slice(0, 7);
   if (patch.folder !== undefined) payload.folder = patch.folder.trim().slice(0, 40);
   await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), payload);
 }

@@ -9,7 +9,7 @@ import { QuietIconCluster } from "@/components/workspace/quiet-icon-cluster";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { RichContent } from "@/components/rich-content";
 import type { SharedChatSnapshot } from "@/lib/sharing/types";
-import { loadSharedChatClient } from "@/lib/sharing/client";
+import { isStudioConfigPrompt } from "@/lib/workspace/studio";
 
 type SharedFocus = { kind: "material" | "sheet"; id: string };
 
@@ -106,9 +106,9 @@ export function SharedChatView({ shareId }: { shareId: string }) {
             <QuietIconCluster
               size={20}
               actions={[{
-                id: "panel",
+                id: "sidebar",
                 label: panelOpen ? "Close pane" : "Open pane",
-                icon: panelOpen ? "panelLeft" : "panelRight",
+                icon: panelOpen ? "sidebarLeft" : "sidebarRight",
                 active: panelOpen,
                 disabled: !hasArtifacts,
                 onClick: togglePanel,
@@ -119,7 +119,9 @@ export function SharedChatView({ shareId }: { shareId: string }) {
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
             <div className="chat-thread flex flex-col pb-16 pt-16">
-              {snapshot.messages.map((message) => (
+              {snapshot.messages.map((message) => {
+                if (isStudioConfigPrompt(message.content)) return null;
+                return (
                 <article
                   key={message.id}
                   data-turn={message.id}
@@ -129,7 +131,7 @@ export function SharedChatView({ shareId }: { shareId: string }) {
                     <div className="flex w-fit max-w-[min(100%,36rem)] flex-col items-end gap-2">
                       <MessageAttachments items={message.attachments} onOpenMaterial={(id) => open({ kind: "material", id })} />
                       {message.content.trim() ? (
-                        <div className="chat-body rounded-2xl bg-surface-2 px-4 py-2.5 text-foreground">
+                        <div className="chat-body rounded-2xl bg-surface px-4 py-2.5 text-foreground">
                           <p className="whitespace-pre-wrap">{message.content}</p>
                         </div>
                       ) : null}
@@ -151,7 +153,8 @@ export function SharedChatView({ shareId }: { shareId: string }) {
                     </div>
                   )}
                 </article>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

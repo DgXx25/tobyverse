@@ -204,6 +204,8 @@ export type ChatGenerationContext = {
   hintAsk?: boolean;
   /** Hidden Continue after a path bite — ask the check, do not advance. */
   examAsk?: boolean;
+  /** The student is answering this practice question. Grade it; do not ask another. */
+  replyTo?: string;
   /** Current user / hidden tutor prompt — used to pick 0–2 native block cards. */
   prompt?: string;
   /** A paper sheet already exists in this thread — reuse instead of rewriting. */

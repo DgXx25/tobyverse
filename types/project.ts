@@ -32,8 +32,10 @@ export type Project = {
   projectMemory: string[];
   /** Legacy flag from the chat-list era. Every project is a notebook now. */
   listed?: boolean;
-  /** Symbol shown on the notebook card and in the top bar (an emoji). */
+  /** Symbol shown on the notebook card and in the top bar. */
   icon?: string;
+  /** Accent hex for that symbol. */
+  iconColor?: string;
   /** Optional group, e.g. "Study". Notebooks without one show under All. */
   folder?: string;
   hidden?: boolean;

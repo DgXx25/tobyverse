@@ -12,7 +12,7 @@ export type StudioRequest = {
   tool?: AcceptedChatTool;
 };
 
-/** What the user sees in chat, the same shape NotebookLM uses. */
+/** Hidden instruction for a Studio click. The chat thread does not show it. */
 export const STUDIO_ASK: Record<StudioTool, string> = {
   practice: "Generate a practice set",
   quiz: "Generate a quiz",
@@ -31,11 +31,24 @@ export type StudioTile = {
   prompt: string;
 };
 
+const STUDIO_META =
+  /^(?:Length|Difficulty|Language): .+\.$|^Use my selected sources \(\d+\)\.$|^Use the sources as the topic\.$|^Topic: /;
+
+/** The parameter block Studio used to post as the user's own message. */
+export function isStudioConfigPrompt(content: string): boolean {
+  const lines = content.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+  const asks = new Set(Object.values(STUDIO_ASK));
+  if (lines.length === 1) return asks.has(lines[0]);
+  if (!asks.has(lines[0])) return false;
+  return lines.slice(1).every((line) => STUDIO_META.test(line));
+}
+
 const LANGUAGE = "Write in the language of my sources.";
 
 /**
- * What each Studio tile asks for. They are ordinary requests, sent as the user's own turn,
- * so the answer keeps the usual voice and the result lands in Studio like any other output.
+ * What each Studio tile asks the model for. The request stays off the chat thread;
+ * the result still lands in Studio.
  */
 export const STUDIO_TILES: StudioTile[] = [
   {

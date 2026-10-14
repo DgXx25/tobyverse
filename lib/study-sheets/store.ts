@@ -28,6 +28,18 @@ function sheetsRef(projectId: string) {
   );
 }
 
+function noteFields(blocks: VisualBlock[], content: string): { blocks: VisualBlock[]; content: string } {
+  const prose = content.trim();
+  if (blocks.length === 0) {
+    if (!prose) throw new Error("Could not save notes.");
+    return { blocks: [], content: prose };
+  }
+  const split = splitNotePayload(blocks, "");
+  if (split.blocks.length === 0 && !prose) throw new Error("Could not save notes.");
+  if (split.blocks.length === 0) return { blocks: [], content: prose };
+  return split;
+}
+
 function mapSheet(id: string, projectId: string, data: Record<string, unknown>): StudySheet {
   return mapNoteRecord(id, projectId, data, {
     userId: asString(data.userId),
@@ -47,10 +59,7 @@ export async function createStudySheet(input: {
   sourceMaterialIds: string[];
   content?: string;
 }): Promise<string> {
-  const { blocks, content } = splitNotePayload(input.blocks, input.content ?? "");
-  if (blocks.length === 0) {
-    throw new Error("Could not save notes.");
-  }
+  const saved = noteFields(input.blocks, input.content ?? "");
   const ref = await addDoc(
     sheetsRef(input.projectId),
     omitUndefined({
@@ -58,8 +67,8 @@ export async function createStudySheet(input: {
       userId: input.userId,
       title: input.title.trim() || "Notes",
       schemaVersion: NOTES_SCHEMA_VERSION,
-      blocks,
-      content,
+      blocks: saved.blocks,
+      content: saved.content,
       sourceMaterialIds: input.sourceMaterialIds ?? [],
       createdAt: serverTimestamp(),
     }),
@@ -104,12 +113,9 @@ export async function updateStudySheet(
   if (patch.title !== undefined) payload.title = patch.title;
   if (patch.sourceMaterialIds !== undefined) payload.sourceMaterialIds = patch.sourceMaterialIds;
   if (patch.blocks !== undefined || patch.content !== undefined) {
-    const { blocks, content } = splitNotePayload(patch.blocks ?? [], patch.content ?? "");
-    if (blocks.length === 0) {
-      throw new Error("Could not save notes.");
-    }
-    payload.blocks = blocks;
-    payload.content = content;
+    const saved = noteFields(patch.blocks ?? [], patch.content ?? "");
+    payload.blocks = saved.blocks;
+    payload.content = saved.content;
     payload.schemaVersion = NOTES_SCHEMA_VERSION;
   } else if (patch.schemaVersion !== undefined) {
     payload.schemaVersion = patch.schemaVersion;

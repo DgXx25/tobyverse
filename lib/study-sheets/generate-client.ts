@@ -8,6 +8,7 @@ import type { VisualBlock } from "@/types/visual";
 export type NotesGenerateEvent = {
   status?: string | null;
   title?: string;
+  content?: string;
   block?: VisualBlock;
   blocks?: VisualBlock[];
   sheetId?: string;
@@ -33,8 +34,8 @@ export async function generateStudySheetFromPrompt(input: {
     content: generated.content,
     sourceMaterialIds: input.materials.map((item) => item.id),
   });
-  input.onEvent?.({ title, blocks: generated.blocks, sheetId: id });
-  return { id, title, blocks: generated.blocks };
+  input.onEvent?.({ title, content: generated.content, blocks: [], sheetId: id });
+  return { id, title, blocks: [] };
 }
 
 export async function rewriteStudySheetFromPrompt(input: {
@@ -63,12 +64,12 @@ export async function rewriteStudySheetFromPrompt(input: {
   const title = generated.title || input.currentTitle || "Notes";
   await updateStudySheet(input.projectId, input.sheetId, {
     title,
-    blocks: generated.blocks,
+    blocks: [],
     content: generated.content,
     schemaVersion: NOTES_SCHEMA_VERSION,
   });
-  input.onEvent?.({ title, blocks: generated.blocks, sheetId: input.sheetId });
-  return { title, blocks: generated.blocks };
+  input.onEvent?.({ title, content: generated.content, blocks: [], sheetId: input.sheetId });
+  return { title, blocks: [] };
 }
 
 async function requestNotes(input: {
@@ -109,17 +110,15 @@ async function requestNotes(input: {
   if (!contentType.includes("text/event-stream")) {
     const data = (await response.json().catch(() => null)) as {
       title?: string;
-      blocks?: VisualBlock[];
+      content?: string;
       error?: string;
     } | null;
-    const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
-    if (!response.ok || blocks.length === 0) {
+    const content = typeof data?.content === "string" ? data.content.trim() : "";
+    if (!response.ok || !content) {
       throw new Error(data?.error ?? "Could not update the notes.");
     }
     const title = data?.title?.trim() || "Notes";
-    for (const block of blocks) input.onEvent?.({ block });
-    input.onEvent?.({ title, blocks });
-    return { title, blocks, content: "" };
+    return { title, blocks: [], content };
   }
 
   return readNotesSse(response, input.onEvent);
@@ -139,7 +138,7 @@ async function readNotesSse(
   const decoder = new TextDecoder();
   let buffer = "";
   let title = "Notes";
-  let blocks: VisualBlock[] = [];
+  let content = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -153,29 +152,19 @@ async function readNotesSse(
       const payload = JSON.parse(line.slice(6)) as {
         status?: string;
         title?: string;
-        block?: VisualBlock;
-        blocks?: VisualBlock[];
+        content?: string;
         error?: string;
         done?: boolean;
       };
       if (payload.error) throw new Error(payload.error);
       if (payload.status) onEvent?.({ status: payload.status });
-      if (payload.title?.trim()) {
-        title = payload.title.trim();
-        onEvent?.({ title });
-      }
-      if (payload.block) {
-        blocks = [...blocks, payload.block];
-        onEvent?.({ block: payload.block });
-      }
-      if (payload.done && Array.isArray(payload.blocks) && payload.blocks.length > 0) {
-        blocks = payload.blocks;
+      if (payload.done && typeof payload.content === "string" && payload.content.trim()) {
+        content = payload.content.trim();
         title = payload.title?.trim() || title;
-        onEvent?.({ title, blocks });
       }
     }
   }
 
-  if (blocks.length === 0) throw new Error("Could not update the notes.");
-  return { title, blocks, content: "" };
+  if (!content) throw new Error("Could not update the notes.");
+  return { title, blocks: [], content };
 }

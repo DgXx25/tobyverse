@@ -92,7 +92,7 @@ function GhostBtn({
   disabled,
 }: {
   label: string;
-  icon: "back" | "close" | "download" | "panel" | "prev" | "forward" | "zoomIn" | "zoomOut";
+  icon: "back" | "close" | "download" | "sidebar" | "prev" | "forward" | "zoomIn" | "zoomOut";
   onClick: () => void;
   disabled?: boolean;
 }) {
@@ -187,7 +187,7 @@ export function MaterialViewer({
           onClick={() => void onDownload()}
         />
         {overlay && onDelete ? <button type="button" onClick={onDelete} disabled={deleting} title={confirmDelete ? "Confirm delete" : "Delete"} aria-label={confirmDelete ? "Confirm delete" : "Delete"} className="flex h-8 w-7 items-center justify-center text-red-500 disabled:opacity-35"><UiIcon name="trash" size={16} /></button> : null}
-        <GhostBtn label="Close pane" icon="panel" onClick={onClose} />
+        <GhostBtn label="Close pane" icon="sidebar" onClick={onClose} />
       </div>
       {downloadError ? <p role="alert" className="bg-surface p-2 text-center text-xs text-foreground">{downloadError}</p> : null}
       <div className={`min-h-0 flex-1 overflow-hidden ${overlay ? "pb-14" : ""}`}>

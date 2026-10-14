@@ -130,6 +130,7 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     personalization: sanitizePersonalization(row.personalization) || undefined,
     hintAsk: row.hintAsk === true,
     examAsk: row.examAsk === true,
+    replyTo: typeof row.replyTo === "string" ? row.replyTo.trim() || undefined : undefined,
     threadPaper: row.threadPaper === true,
   };
 }

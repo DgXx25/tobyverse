@@ -1,6 +1,6 @@
 import type { UiIconName } from "@/components/workspace/ui-icon";
 
-/** The symbols a notebook can wear. Existing UiIcon glyphs, so they follow the theme like everything else. */
+/** Fallback symbols when a project has not picked one. */
 export const PROJECT_ICONS = [
   "book",
   "brain",
@@ -24,12 +24,10 @@ export const PROJECT_ICONS = [
   "deck",
 ] as const satisfies readonly UiIconName[];
 
-export type ProjectIconName = (typeof PROJECT_ICONS)[number];
+export type ProjectIconName = string;
 
-const KNOWN = new Set<string>(PROJECT_ICONS);
-
-export function isProjectIcon(value: unknown): value is ProjectIconName {
-  return typeof value === "string" && KNOWN.has(value);
+export function isProjectIcon(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 80;
 }
 
 function hash(text: string): number {

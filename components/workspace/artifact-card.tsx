@@ -102,11 +102,11 @@ export function ArtifactCard({
   const setCard = artifact.kind === "practice" && onStart;
   const frame = bare
     ? "flex w-full items-center gap-3 bg-surface px-3 py-3 text-left hover:bg-surface-2"
-    : "flex w-full items-center gap-3 rounded-2xl border border-border bg-surface px-3 py-3 text-left transition-colors hover:border-accent hover:bg-surface-2";
+    : "flex w-full items-center gap-3 rounded-2xl bg-surface px-3 py-3 text-left transition-colors hover:bg-white/10";
 
   const body = (
     <>
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-foreground">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface text-foreground">
         {kindIcon(artifact.kind)}
       </span>
       <span className="min-w-0 flex-1">
@@ -134,7 +134,7 @@ export function ArtifactCard({
         ) : null}
       </span>
       {setCard ? (
-        <span className="shrink-0 rounded-full border border-border px-3 py-1.5 text-[13px] text-foreground">
+        <span className="shrink-0 rounded-full bg-surface px-3 py-1.5 text-[13px] text-foreground">
           {result ? "Again" : "Start"}
         </span>
       ) : null}

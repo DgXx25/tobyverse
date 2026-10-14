@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type Ref } from "react";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { StatusWait } from "@/components/workspace/status-wait";
+import { RichContent } from "@/components/rich-content";
 import { VisualList } from "@/components/visuals/visual-block";
 import { MixedText } from "@/components/visuals/mixed-text";
 import { findNode, flattenCourseNodes, flattenNodes, pathIsStarted, progressCounts } from "@/lib/paths/model";
@@ -401,11 +402,13 @@ function PathNodeNote({
 }) {
   const title = (liveNote?.title || sheet?.title || "").trim();
   const blocks = liveNote?.blocks.length ? liveNote.blocks : sheet?.blocks ?? [];
+  const prose = (liveNote?.content || sheet?.prose || sheet?.content || "").trim();
   const heading = title && !/^notes$/i.test(title) ? title : "Notes";
+  const waiting = Boolean(liveNote?.status);
   return (
     <div className="overflow-hidden rounded-xl bg-surface-2 px-3 py-3">
-      {liveNote?.status ? <StatusWait label={liveNote.status} className="mb-2 text-[12px]" /> : null}
-      {onCollapse ? (
+      {waiting ? <StatusWait label={liveNote?.status || "Creating notes…"} className="text-[12px]" /> : null}
+      {waiting ? null : onCollapse ? (
         <button
           type="button"
           onClick={onCollapse}
@@ -421,7 +424,7 @@ function PathNodeNote({
           <MixedText text={title} />
         </p>
       ) : null}
-      <VisualList blocks={blocks} appear={Boolean(liveNote)} />
+      {waiting ? null : blocks.length > 0 ? <VisualList blocks={blocks} /> : prose ? <RichContent text={prose} /> : null}
     </div>
   );
 }

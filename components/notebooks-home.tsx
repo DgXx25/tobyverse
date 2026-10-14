@@ -5,21 +5,25 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { UiIcon } from "@/components/workspace/ui-icon";
+import { ProjectSymbol, iconSearchLabel } from "@/components/workspace/pack-icon";
+import { ICON_NAMES } from "@/lib/workspace/icon-names";
 import { deleteProject, updateProjectMeta, updateProjectTitle } from "@/lib/projects";
-import { shortDate } from "@/lib/format";
+import { countMaterials } from "@/lib/materials";
 import { createNotebook } from "@/lib/workspace/notebook";
+import { useTheme } from "@/components/workspace/theme-provider";
+import { accentColor, type AccentId } from "@/lib/workspace/theme";
 import {
   FOLDER_SUGGESTIONS,
   foldersOf,
   normalizeFolder,
   projectIconFor,
-  PROJECT_ICONS,
 } from "@/lib/workspace/project-icons";
 import { notebookTitle } from "@/lib/workspace/title";
 import { useNotebooks } from "@/lib/workspace/use-notebooks";
 import type { Project } from "@/types/project";
 
 const FOLDER_KEY = "tv.notebooks.folder";
+const SYMBOL_COLORS = ["blue", "red", "orange", "yellow", "green", "teal", "purple", "pink"] as const satisfies readonly AccentId[];
 
 function readFolder(): string {
   if (typeof window === "undefined") return "";
@@ -43,6 +47,28 @@ export function NotebooksHome() {
   const folders = useMemo(() => foldersOf(notebooks), [notebooks]);
   const activeFolder = folder && folders.includes(folder) ? folder : "";
   const shown = activeFolder ? notebooks.filter((item) => normalizeFolder(item.folder) === activeFolder) : notebooks;
+  const shownKey = shown.map((item) => item.id).join(",");
+  const [sourceCounts, setSourceCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const ids = shownKey ? shownKey.split(",") : [];
+    if (ids.length === 0) return;
+    let cancel = false;
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          return [id, await countMaterials(id)] as const;
+        } catch {
+          return [id, 0] as const;
+        }
+      }),
+    ).then((rows) => {
+      if (!cancel) setSourceCounts(Object.fromEntries(rows));
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [shownKey]);
 
   function setFolder(next: string) {
     setFolderState(next);
@@ -71,7 +97,7 @@ export function NotebooksHome() {
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-6 pb-16 pt-10 max-md:px-4 max-md:pt-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[28px] font-medium tracking-tight text-foreground max-md:text-[24px]">Notebooks</h1>
+        <h1 className="text-[28px] font-medium tracking-tight text-foreground max-md:text-[24px]">Projects</h1>
         <button
           type="button"
           onClick={() => void create()}
@@ -79,7 +105,7 @@ export function NotebooksHome() {
           className="inline-flex h-10 items-center gap-2 rounded-full bg-foreground px-4 text-[14px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           <UiIcon name="plus" size={16} />
-          New notebook
+          New project
         </button>
       </div>
 
@@ -94,30 +120,27 @@ export function NotebooksHome() {
 
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-400">{error}</p> : null}
 
-      <div className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
-        <button
-          type="button"
-          onClick={() => void create()}
-          disabled={creating}
-          className="group flex min-h-[168px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-transparent text-muted transition-colors hover:border-foreground/40 hover:bg-surface hover:text-foreground disabled:opacity-60"
-        >
-          <span className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface group-hover:bg-surface-2">
-            <UiIcon name="plus" size={20} />
-          </span>
-          <span className="text-[14px]">New notebook</span>
-        </button>
+      <div className="mt-6 grid grid-cols-4 gap-4 max-md:grid-cols-2">
         {shown.map((project) => (
-          <NotebookCard key={project.id} project={project} userId={user.uid} />
+          <NotebookCard key={project.id} project={project} userId={user.uid} sourceCount={sourceCounts[project.id]} />
         ))}
       </div>
 
       {ready && notebooks.length === 0 ? (
         <p className="mt-10 text-center text-[14px] text-muted">
-          Create a notebook, add your sources, and ask anything about them.
+          Create a project, add your sources, and ask anything about them.
         </p>
       ) : null}
     </div>
   );
+}
+
+function projectMeta(iso: string | null, sources: number | undefined): string {
+  const date = iso
+    ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "";
+  const count = sources == null ? "" : sources === 1 ? "1 source" : `${sources} sources`;
+  return [date, count].filter(Boolean).join(" · ");
 }
 
 function FolderChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
@@ -140,13 +163,17 @@ function FolderChip({ label, active, onClick }: { label: string; active: boolean
 
 type MenuView = "main" | "icon" | "folder" | "rename" | "delete";
 
-function NotebookCard({ project, userId }: { project: Project; userId: string }) {
+function NotebookCard({ project, userId, sourceCount }: { project: Project; userId: string; sourceCount?: number }) {
+  const { theme } = useTheme();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<MenuView>("main");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [folderDraft, setFolderDraft] = useState("");
+  const [iconQuery, setIconQuery] = useState("");
+  const [iconColor, setIconColor] = useState<AccentId>("blue");
+  const [packNames, setPackNames] = useState<string[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
   const icon = projectIconFor(project);
   const folder = normalizeFolder(project.folder);
@@ -167,10 +194,30 @@ function NotebookCard({ project, userId }: { project: Project; userId: string })
     };
   }, [open]);
 
+  useEffect(() => {
+    if (view !== "icon") return;
+    let cancel = false;
+    void Promise.resolve(ICON_NAMES).then((names) => {
+      if (!cancel) setPackNames(names);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [view]);
+
+  const iconMatches = (() => {
+    const query = iconQuery.trim().toLowerCase();
+    const source = query ? packNames.filter((name) => iconSearchLabel(name).includes(query) || name.toLowerCase().includes(query)) : packNames;
+    return source.slice(0, 80);
+  })();
+
   function show(next: MenuView) {
     setError(null);
     setTitleDraft(project.title.trim() === "" ? "" : notebookTitle(project.title));
     setFolderDraft(folder);
+    setIconQuery("");
+    const saved = SYMBOL_COLORS.find((id) => accentColor(theme, id) === project.iconColor);
+    setIconColor(saved ?? "blue");
     setView(next);
   }
 
@@ -188,36 +235,42 @@ function NotebookCard({ project, userId }: { project: Project; userId: string })
   }
 
   return (
-    <div ref={rootRef} className="group relative">
+    <div
+      ref={rootRef}
+      className="group relative"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        show("main");
+        setOpen(true);
+      }}
+    >
       <Link
         href={`/p/${project.id}`}
-        className="flex min-h-[168px] flex-col rounded-2xl border border-border bg-surface p-4 transition-colors hover:bg-surface-2"
+        className="project-card flex aspect-[5/3] flex-col rounded-2xl bg-surface p-4 transition-colors"
       >
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-background text-foreground">
-          <UiIcon name={icon} size={22} className="accent-symbol" />
+        <span className="flex h-12 w-12 items-center justify-center text-foreground">
+          <ProjectSymbol name={icon} size={38} color={project.iconColor} className={project.iconColor ? "" : "accent-symbol"} />
         </span>
-        <h3 className="mt-4 line-clamp-2 text-[16px] font-medium leading-snug tracking-tight text-foreground">
+        <h3 className="mt-4 line-clamp-2 min-h-[2.75em] text-[18px] font-medium leading-snug tracking-tight text-foreground">
           {notebookTitle(project.title)}
         </h3>
         <p className="mt-auto pt-4 text-[12px] text-muted">
-          {[shortDate(project.updatedAt || project.createdAt), folder].filter(Boolean).join(" · ")}
+          {projectMeta(project.updatedAt || project.createdAt, sourceCount)}
         </p>
       </Link>
 
       <button
         type="button"
-        aria-label="Notebook options"
+        aria-label="Project options"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {
           show("main");
           setOpen((current) => !current);
         }}
-        className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-opacity hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 max-md:opacity-100 ${
-          open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        }`}
+        className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-foreground/10 hover:text-foreground"
       >
-        <UiIcon name="more" size={17} />
+        <UiIcon name="moreVertical" size={18} />
       </button>
 
       {open ? (
@@ -236,24 +289,51 @@ function NotebookCard({ project, userId }: { project: Project; userId: string })
 
           {view === "icon" ? (
             <div className="p-1.5">
-              <p className="px-1 pb-1.5 text-[11px] text-muted">Symbol</p>
-              <div className="grid grid-cols-5 gap-1">
-                {PROJECT_ICONS.map((name) => (
+              <input
+                autoFocus
+                value={iconQuery}
+                onChange={(event) => setIconQuery(event.target.value)}
+                placeholder="Search symbols"
+                aria-label="Search symbols"
+                className="mb-1.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground outline-none placeholder:text-muted"
+              />
+              <div className="mb-2 flex items-center gap-1.5 px-0.5">
+                {SYMBOL_COLORS.map((id) => {
+                  const color = accentColor(theme, id);
+                  const on = iconColor === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      aria-label={id}
+                      aria-pressed={on}
+                      onClick={() => setIconColor(id)}
+                      className="h-4 w-4 rounded-full"
+                      style={{ background: color, outline: on ? "2px solid var(--text)" : "none", outlineOffset: 2 }}
+                    />
+                  );
+                })}
+              </div>
+              <div className="grid aspect-square grid-cols-4 gap-1 overflow-y-auto">
+                {iconMatches.map((name) => (
                   <button
                     key={name}
                     type="button"
                     disabled={busy}
-                    aria-label={name}
+                    aria-label={iconSearchLabel(name)}
+                    title={iconSearchLabel(name)}
                     aria-pressed={name === icon}
-                    onClick={() => void run(() => updateProjectMeta(project.id, userId, { icon: name }))}
-                    className={`flex h-9 w-9 items-center justify-center rounded-lg hover:bg-foreground/10 ${
+                    onClick={() => void run(() => updateProjectMeta(project.id, userId, { icon: name, iconColor: accentColor(theme, iconColor) }))}
+                    className={`flex aspect-square w-full items-center justify-center rounded-lg hover:bg-foreground/10 ${
                       name === icon ? "bg-foreground/10" : ""
                     }`}
                   >
-                    <UiIcon name={name} size={18} />
+                    <ProjectSymbol name={name} size={20} color={accentColor(theme, iconColor)} />
                   </button>
                 ))}
               </div>
+              {packNames.length === 0 ? <p className="px-1 pt-1 text-[12px] text-muted">Loading symbols…</p> : null}
+              {packNames.length > 0 && iconMatches.length === 0 ? <p className="px-1 pt-1 text-[12px] text-muted">No symbols</p> : null}
             </div>
           ) : null}
 
@@ -272,8 +352,8 @@ function NotebookCard({ project, userId }: { project: Project; userId: string })
                 value={titleDraft}
                 maxLength={80}
                 onChange={(event) => setTitleDraft(event.target.value)}
-                aria-label="Notebook title"
-                placeholder="Notebook title"
+                aria-label="Project title"
+                placeholder="Project title"
                 className="h-9 w-full rounded-lg border border-border bg-background px-2.5 text-[13px] text-foreground outline-none placeholder:text-muted"
               />
               <button
@@ -327,7 +407,7 @@ function NotebookCard({ project, userId }: { project: Project; userId: string })
 
           {view === "delete" ? (
             <div className="p-2">
-              <p className="text-[13px] leading-5">Delete this notebook and everything in it?</p>
+              <p className="text-[13px] leading-5">Delete this project and everything in it?</p>
               <p className="mt-1 text-[12px] leading-4 text-muted">Sources, notes and practice sets are removed for good.</p>
               <div className="mt-2 flex gap-1.5">
                 <button

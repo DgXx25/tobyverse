@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FileKindIcon } from "@/components/workspace/file-kind-icon";
+import { MaterialText } from "@/components/workspace/material-text";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { newChipId } from "@/lib/composer/attach";
 import { ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl } from "@/lib/materials/ingest-client";
 import { removeMaterial } from "@/lib/materials/save";
+import { renameMaterial } from "@/lib/materials/store";
 import { MATERIAL_FILE_ACCEPT } from "@/lib/materials/types";
 import type { LibraryFileKind } from "@/lib/library/media";
 import type { Material } from "@/types/material";
@@ -16,19 +18,33 @@ type Pending = { id: string; name: string; state: "uploading" | "error"; error?:
 const UPLOAD_CONCURRENCY = 2;
 const NONE = "__none__";
 
-function kindOf(material: Material): LibraryFileKind {
-  const name = (material.originalName || material.title || "").toLowerCase();
-  switch (material.type) {
-    case "pdf": return "pdf";
-    case "docx": return name.endsWith(".doc") ? "doc" : "docx";
-    case "pptx": return name.endsWith(".ppt") ? "ppt" : "pptx";
-    case "xlsx": return name.endsWith(".csv") ? "csv" : "excel";
-    case "txt": return "txt";
-    case "md": return "md";
-    case "paste": return "notes";
-    case "image": return name.endsWith(".png") ? "png" : "jpg";
-    default: return "other";
-  }
+function kindFromName(name: string, type?: Material["type"]): LibraryFileKind {
+  const lower = name.toLowerCase();
+  if (type === "pdf" || lower.endsWith(".pdf")) return "pdf";
+  if (type === "docx" || lower.endsWith(".docx")) return "docx";
+  if (lower.endsWith(".doc")) return "doc";
+  if (type === "pptx" || lower.endsWith(".pptx")) return "pptx";
+  if (lower.endsWith(".ppt")) return "ppt";
+  if (lower.endsWith(".csv")) return "csv";
+  if (type === "xlsx" || /\.(?:xlsx?|xlsm)$/.test(lower)) return "excel";
+  if (type === "md" || lower.endsWith(".md")) return "md";
+  if (type === "paste") return "notes";
+  if (type === "txt" || lower.endsWith(".txt")) return "txt";
+  if (type === "image" || lower.endsWith(".png")) return "png";
+  if (/\.jpe?g$/.test(lower)) return "jpg";
+  return "other";
+}
+
+function fileStem(name: string): string {
+  return name.trim().toLowerCase().replace(/\.[^.]+$/, "");
+}
+
+function sameFile(entryName: string, material: Material): boolean {
+  const pending = entryName.trim().toLowerCase();
+  const original = (material.originalName || "").trim().toLowerCase();
+  if (original && original === pending) return true;
+  const title = material.title.trim().toLowerCase();
+  return title === pending || title === fileStem(pending);
 }
 
 function statusOf(material: Material): { text: string; tone: "busy" | "error" } | null {
@@ -50,6 +66,8 @@ export function SourcesPane({
   selectedIds,
   onSelectedIds,
   onOpenMaterial,
+  readingId = null,
+  onCloseReading,
   onClose,
   className = "",
 }: {
@@ -59,6 +77,8 @@ export function SourcesPane({
   selectedIds: string[];
   onSelectedIds: (ids: string[]) => void;
   onOpenMaterial: (id: string) => void;
+  readingId?: string | null;
+  onCloseReading?: () => void;
   onClose?: () => void;
   className?: string;
 }) {
@@ -71,8 +91,13 @@ export function SourcesPane({
   const [pasteBody, setPasteBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ id: string; top: number; right: number } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Material | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
+  const visiblePending = pending.filter((entry) => !items.some((item) => sameFile(entry.name, item)));
+  const reading = items.find((item) => item.id === readingId) ?? null;
   const allIds = items.map((item) => item.id);
   const none = selectedIds.length === 1 && selectedIds[0] === NONE;
   const picked = selectedIds.filter((id) => allIds.includes(id));
@@ -168,21 +193,63 @@ export function SourcesPane({
     }
   }
 
+  useEffect(() => {
+    if (!menu) return;
+    function onPointer(event: MouseEvent) {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-source-menu]")) return;
+      setMenu(null);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenu(null);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onPointer, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onPointer, true);
+    };
+  }, [menu]);
+
   async function remove(item: Material) {
     setError(null);
+    setMenu(null);
     try {
       await removeMaterial(item);
-      setConfirmDelete(null);
       if (selectedIds.includes(item.id)) onSelectedIds(selectedIds.filter((id) => id !== item.id));
     } catch (err) {
       setError(err instanceof Error && err.message.trim() ? err.message : "Could not delete the source.");
     }
   }
 
+  function openRename(item: Material) {
+    setMenu(null);
+    setRenameTarget(item);
+    setRenameValue(item.title);
+  }
+
+  async function saveRename() {
+    if (!renameTarget || renaming) return;
+    const next = renameValue.trim();
+    if (!next) return;
+    setRenaming(true);
+    setError(null);
+    try {
+      await renameMaterial(projectId, renameTarget.id, next);
+      setRenameTarget(null);
+    } catch (err) {
+      setError(err instanceof Error && err.message.trim() ? err.message : "Could not rename the source.");
+    } finally {
+      setRenaming(false);
+    }
+  }
+
   return (
     <section
       aria-label="Sources"
-      className={`relative flex min-h-0 flex-col bg-surface ${className}`}
+      className={`relative flex min-h-0 flex-col bg-transparent ${className}`}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -199,6 +266,9 @@ export function SourcesPane({
         void uploadFiles([...event.dataTransfer.files]);
       }}
     >
+      {reading ? (
+        <MaterialText material={reading} onBack={() => onCloseReading?.()} />
+      ) : <>
       <header className="flex h-11 shrink-0 items-center justify-end px-2">
         {onClose ? (
           <button
@@ -220,7 +290,7 @@ export function SourcesPane({
             setAdding(null);
             setAdderOpen(true);
           }}
-          className="flex h-10 w-full items-center justify-center gap-2 rounded-full bg-background text-[14px] text-foreground transition-colors hover:bg-surface-2"
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-full bg-surface-2 text-[14px] text-foreground transition-colors hover:bg-white/10"
         >
           <UiIcon name="plus" size={16} />
           Add sources
@@ -240,19 +310,13 @@ export function SourcesPane({
         ) : null}
 
         <ul className="space-y-0.5">
-          {pending.map((entry) => (
-            <li key={entry.id} className="list-none rounded-lg px-2 py-1.5">
-              <div className="flex items-center gap-2">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center">
-                  {entry.state === "uploading" ? (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border border-muted/40 border-t-foreground" />
-                  ) : (
-                    <UiIcon name="warning" size={15} className="text-red-400" />
-                  )}
-                </span>
+          {visiblePending.map((entry) => (
+            <li key={entry.id} className="list-none">
+              <div className="flex items-center gap-1 rounded-lg px-1 py-1">
+                <FileKindIcon kind={kindFromName(entry.name)} size={22} />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{entry.name}</span>
                 {entry.state === "error" ? (
-                  <span className="flex shrink-0 gap-1 text-[12px]">
+                  <span className="flex shrink-0 gap-1 pr-1 text-[12px]">
                     <button type="button" onClick={() => void retry(entry)} className="text-muted hover:text-foreground">Retry</button>
                     <button
                       type="button"
@@ -263,7 +327,9 @@ export function SourcesPane({
                     </button>
                   </span>
                 ) : (
-                  <span className="shrink-0 text-[12px] text-muted">Uploading…</span>
+                  <span className="flex h-9 w-7 shrink-0 items-center justify-center" aria-label="Uploading">
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border border-muted/40 border-t-foreground" />
+                  </span>
                 )}
               </div>
               {entry.error ? <p className="mt-0.5 pl-9 text-[12px] leading-4 text-red-400">{entry.error}</p> : null}
@@ -273,62 +339,74 @@ export function SourcesPane({
           {items.map((item) => {
             const status = statusOf(item);
             const on = isOn(item.id);
+            const busy = status?.tone === "busy";
+            const menuOpen = menu?.id === item.id;
             return (
-              <li key={item.id} className="group list-none">
-                <div className="flex items-center gap-1 rounded-lg px-1 hover:bg-background">
+              <li
+                key={item.id}
+                className="group relative list-none"
+                onContextMenu={(event) => {
+                  if (busy) return;
+                  event.preventDefault();
+                  setMenu({ id: item.id, top: event.clientY, right: Math.max(8, window.innerWidth - event.clientX) });
+                }}
+              >
+                <div className={`flex items-center rounded-lg px-1 hover:bg-background ${menuOpen ? "bg-background" : ""}`}>
                   <button
                     type="button"
                     onClick={() => onOpenMaterial(item.id)}
                     className="flex min-h-9 min-w-0 flex-1 items-center gap-2 py-1 text-left"
                     title={item.title}
                   >
-                    <FileKindIcon kind={kindOf(item)} size={22} />
-                    <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-[13px] ${on ? "text-foreground" : "text-muted"}`}>{item.title}</span>
-                      {status ? (
-                        <span className={`block truncate text-[11px] ${status.tone === "error" ? "text-red-400" : "text-muted"}`}>{status.text}</span>
-                      ) : null}
-                    </span>
+                    <FileKindIcon kind={kindFromName(item.originalName || item.title, item.type)} size={22} />
+                    <span className={`min-w-0 flex-1 truncate text-[13px] ${on ? "text-foreground" : "text-muted"} ${!busy && (menuOpen ? "pr-8" : "group-hover:pr-8")}`}>{item.title}</span>
                   </button>
-                  {status?.tone === "busy" ? (
+                  {busy ? (
                     <span className="flex h-9 w-7 shrink-0 items-center justify-center" aria-label="Reading">
                       <span className="h-3.5 w-3.5 animate-spin rounded-full border border-muted/40 border-t-foreground" />
                     </span>
                   ) : (
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={on}
-                      aria-label={`Use ${item.title}`}
-                      onClick={() => toggle(item.id)}
-                      className="flex h-9 w-7 shrink-0 items-center justify-center"
-                    >
-                      <Check on={on} />
-                    </button>
-                  )}
-                  {confirmDelete === item.id ? (
-                    <span className="flex shrink-0 items-center gap-1 pr-1 text-[12px]">
-                      <button type="button" onClick={() => void remove(item)} className="text-red-400 hover:underline">Delete</button>
-                      <button type="button" onClick={() => setConfirmDelete(null)} className="text-muted hover:text-foreground">Cancel</button>
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      aria-label={`Remove ${item.title}`}
-                      title="Remove source"
-                      onClick={() => setConfirmDelete(item.id)}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 max-md:opacity-100"
-                    >
-                      <UiIcon name="trash" size={15} />
-                    </button>
+                    <>
+                      <span data-source-menu className="contents">
+                        <button
+                          type="button"
+                          aria-label={`Source actions for ${item.title}`}
+                          aria-expanded={menuOpen}
+                          onClick={(event) => {
+                            if (menuOpen) {
+                              setMenu(null);
+                              return;
+                            }
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setMenu({ id: item.id, top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
+                          }}
+                          className={`absolute right-8 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-muted hover:bg-foreground/10 hover:text-foreground ${
+                            menuOpen ? "opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
+                          }`}
+                        >
+                          <UiIcon name="moreVertical" size={16} />
+                        </button>
+                      </span>
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        aria-label={`Use ${item.title}`}
+                        onClick={() => toggle(item.id)}
+                        className="flex h-9 w-7 shrink-0 items-center justify-center"
+                      >
+                        <Check on={on} />
+                      </button>
+                    </>
                   )}
                 </div>
+                {status?.tone === "error" ? <p className="pl-9 text-[12px] leading-4 text-red-400">{status.text}</p> : null}
               </li>
             );
           })}
         </ul>
 
-        {items.length === 0 && pending.length === 0 ? (
+        {items.length === 0 && visiblePending.length === 0 ? (
           <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-10 text-center">
             <p className="text-[14px] font-medium tracking-tight text-foreground">Saved sources will appear here</p>
             <p className="mx-auto mt-1.5 max-w-[220px] text-[12px] leading-5 text-muted">
@@ -337,6 +415,7 @@ export function SourcesPane({
           </div>
         ) : null}
       </div>
+      </>}
 
       {dragging && !adderOpen ? (
         <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-2xl border border-dashed border-foreground/40 bg-surface/90 text-[14px] text-foreground">
@@ -366,6 +445,44 @@ export function SourcesPane({
         onLink={() => void addLink()}
         onPaste={() => void addPaste()}
       /> : null}
+      {menu ? createPortal(
+        <div data-source-menu className="fixed z-[70] w-[196px] overflow-hidden rounded-xl bg-surface-2 p-1 shadow-xl" style={{ top: menu.top, right: menu.right }}>
+          <button type="button" onClick={() => { const item = items.find((entry) => entry.id === menu.id); if (item) void remove(item); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-foreground hover:bg-background">
+            <UiIcon name="trash" size={16} />
+            Remove source
+          </button>
+          <button type="button" onClick={() => { const item = items.find((entry) => entry.id === menu.id); if (item) openRename(item); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-foreground hover:bg-background">
+            <UiIcon name="edit" size={16} />
+            Rename source
+          </button>
+        </div>,
+        document.body,
+      ) : null}
+      {renameTarget ? createPortal(
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setRenameTarget(null); }}>
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rename-source-title"
+            className="w-full max-w-[440px] rounded-2xl bg-surface p-5 text-foreground shadow-2xl"
+            onSubmit={(event) => { event.preventDefault(); void saveRename(); }}
+          >
+            <h2 id="rename-source-title" className="text-[16px] font-medium tracking-tight">Rename {renameTarget.title}?</h2>
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              aria-label="Source name"
+              className="mt-4 h-10 w-full rounded-xl bg-background px-3 text-[14px] text-foreground outline-none"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setRenameTarget(null)} className="h-9 rounded-full px-4 text-[13px] text-foreground hover:bg-background">Cancel</button>
+              <button type="submit" disabled={renaming || !renameValue.trim()} className="h-9 rounded-full bg-foreground px-4 text-[13px] font-medium text-background disabled:opacity-40">{renaming ? "Saving…" : "Save"}</button>
+            </div>
+          </form>
+        </div>,
+        document.body,
+      ) : null}
     </section>
   );
 }

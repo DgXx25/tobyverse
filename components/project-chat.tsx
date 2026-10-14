@@ -51,7 +51,7 @@ import { getLearningProfile } from "@/lib/memory/profile";
 import { syncUserMemories } from "@/lib/memory/client";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { autoNameChat } from "@/lib/workspace/auto-title";
-import type { StudioRequest } from "@/lib/workspace/studio";
+import { isStudioConfigPrompt, type StudioRequest } from "@/lib/workspace/studio";
 import { isRealUserPrompt, needsAutoTitle, DEFAULT_FIRST_PROMPT, PLACEHOLDER_CHAT_TITLE } from "@/lib/workspace/title";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
 import { workFinishedPrompt, type SetResult } from "@/lib/exercises/session";
@@ -60,7 +60,6 @@ import { recipeForGoal } from "@/lib/core/recipes";
 import { updateProjectActiveArtifact, updateProjectGoal } from "@/lib/projects";
 import { RichContent } from "@/components/rich-content";
 import { ChatExerciseProvider } from "@/components/workspace/chat-exercise-context";
-import { MixedText } from "@/components/visuals/mixed-text";
 import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
 import { IllustrationBlocks } from "@/components/workspace/illustration-blocks";
 import { ClarifyChips } from "@/components/workspace/clarify-chips";
@@ -75,7 +74,7 @@ import {
   uploadStatusText,
   type ComposerStatusState,
 } from "@/components/workspace/composer-status";
-import { CitationProvider, CitedSources } from "@/components/workspace/citations";
+import { CitationProvider } from "@/components/workspace/citations";
 import { usedSources } from "@/lib/rag/sources";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
@@ -107,18 +106,8 @@ type StreamState = {
   blocks?: ChatMessage["blocks"];
   sources?: ChatMessage["sources"];
   memorized?: boolean;
+  quiet?: boolean;
 };
-
-function ExamCard({ question, ka: _ka }: { question: string; ka: boolean }) {
-  return (
-    <blockquote className="note-highlight px-3.5 py-2.5">
-      <p className="mb-1.5 text-[12px] font-medium text-muted">
-        Try this — same move as the example
-      </p>
-      <MixedText text={question} />
-    </blockquote>
-  );
-}
 
 function FollowChips({
   ka: _ka,
@@ -809,6 +798,7 @@ export function ProjectChat({
     skipMemory?: boolean;
     hintAsk?: boolean;
     examAsk?: boolean;
+    replyTo?: string;
     onFirstToken?: () => void;
     signal?: AbortSignal;
   }): Promise<{ text: string; tool: ChatToolCall; memory: Promise<boolean>; sources: NonNullable<ChatMessage["sources"]>; aborted?: boolean }> {
@@ -887,6 +877,7 @@ export function ProjectChat({
           path: pathForModel,
           hintAsk: input.hintAsk,
           examAsk: input.examAsk,
+          replyTo: input.replyTo,
           threadPaper: papersInTurns(messages).length > 0,
         },
       }),
@@ -1024,7 +1015,9 @@ export function ProjectChat({
       leadPath?: boolean;
       hintAsk?: boolean;
       examAsk?: boolean;
+      replyTo?: string;
       userMessageId?: string;
+      studio?: boolean;
     },
   ) {
     let attachments = guest ? [] : (options?.attachments ?? []);
@@ -1048,7 +1041,6 @@ export function ProjectChat({
     let previewIds = guest ? [] : (options?.waitForPreview ?? []).filter(Boolean);
     const analysing = Boolean(ingest) || previewIds.length > 0;
     const assistantId = allocateChatMessageId(project.id, chatThreadId);
-    const firstReply = !options?.skipUser && !messages.some((item) => item.role === "assistant");
 
     sendingRef.current = true;
     const controller = new AbortController();
@@ -1080,9 +1072,10 @@ export function ProjectChat({
                 ])
               : thinkingStatus(promptIsKa(modelPrompt)),
       startedAt: Date.now(),
+      quiet: Boolean(options?.studio),
     });
-    pinBottomRef.current = true;
-    initialScrollRef.current = true;
+    pinBottomRef.current = !options?.studio;
+    initialScrollRef.current = !options?.studio;
 
     const history = historyWithoutCurrentPrompt(historyTurnsFromMessages(messages), modelPrompt);
     let followTopic: string | undefined;
@@ -1173,6 +1166,7 @@ export function ProjectChat({
         skipMemory: options?.skipUser,
         hintAsk: options?.hintAsk,
         examAsk: options?.examAsk,
+        replyTo: options?.replyTo,
         onFirstToken: markFirstToken,
         signal: controller.signal,
       });
@@ -1284,7 +1278,9 @@ export function ProjectChat({
       );
 
       if (artifact?.step) artifactStepsRef.current.set(assistantId, artifact.step);
-      const id = await addChatMessage({
+      const id = options?.studio
+        ? assistantId
+        : await addChatMessage({
         id: assistantId,
         projectId: project.id,
         role: "assistant",
@@ -1301,14 +1297,16 @@ export function ProjectChat({
         memorized: memorizedRef.current.has(assistantId) || undefined,
         threadId: chatThreadId,
       });
-      void streamed.memory.then((saved) => {
-        if (!saved) return;
-        markMemorized(id);
-        void patchChatMessage(project.id, id, { memorized: true }, chatThreadId).catch(() => undefined);
-      });
-      if (guest) {
-        recordGuestAssistantTurn();
-        if (guestCapReached()) setNeedGoogle(true);
+      if (!options?.studio) {
+        void streamed.memory.then((saved) => {
+          if (!saved) return;
+          markMemorized(id);
+          void patchChatMessage(project.id, id, { memorized: true }, chatThreadId).catch(() => undefined);
+        });
+        if (guest) {
+          recordGuestAssistantTurn();
+          if (guestCapReached()) setNeedGoogle(true);
+        }
       }
       if (artifact) {
         if (
@@ -1322,23 +1320,25 @@ export function ProjectChat({
         }
         await rememberActive(artifact, "ready");
       }
-      if (dispatched.suggest && !guest && chatModeRef.current !== "fast" && !isSimpleChatTask(modelPrompt)) {
+      if (!options?.studio && dispatched.suggest && !guest && chatModeRef.current !== "fast" && !isSimpleChatTask(modelPrompt)) {
         setSuggest({ messageId: id, kind: dispatched.suggest });
       }
       const responseFollowups =
-        streamed.tool.name === "answer" && !promptAsk && !artifact && !dispatched.suggest
+        streamed.tool.name === "answer" &&
+        !promptAsk &&
+        !artifact &&
+        !dispatched.suggest &&
+        chatModeRef.current !== "fast" &&
+        !isSimpleChatTask(modelPrompt)
           ? (streamed.tool.args.options ?? [])
               .map((item) => item.trim())
-              .filter(Boolean)
+              .filter((item) => item.endsWith("?") && item.length <= 160)
               .slice(0, 2)
           : [];
-      const prompts = responseFollowups.length > 0
-        ? responseFollowups
-        : firstReply
-          ? ["How can I help you today?", "What topics interest you?"]
-          : [];
-      if (prompts.length > 0) setSuggestedFollowups({ messageId: id, prompts });
-      if (!guest && dispatched.artifact?.kind === "sheet") {
+      if (!options?.studio && responseFollowups.length > 0) {
+        setSuggestedFollowups({ messageId: id, prompts: responseFollowups });
+      }
+      if (!options?.studio && !guest && dispatched.artifact?.kind === "sheet") {
         setFollowup({ kind: "sheet", ka: promptIsKa(modelPrompt), since: Date.now() });
       }
       if (dispatched.openThreadId && pathRef.current) {
@@ -1361,7 +1361,7 @@ export function ProjectChat({
         const partial = stripArtifactMarkup(
           (err as { partial?: string }).partial ?? streamRef.current?.content ?? "",
         ).trim();
-        if (partial) {
+        if (partial && !options?.studio) {
           await addChatMessage({
             id: assistantId,
             projectId: project.id,
@@ -1547,14 +1547,19 @@ export function ProjectChat({
     });
   }
 
+  const studioHandledRef = useRef<number | null>(null);
   useEffect(() => {
     if (!studioRequest || guest || sending || loading) return;
-    onStudioRequestHandled?.(studioRequest.id);
-    void sendPrompt(studioRequest.prompt, {
-      ...(studioRequest.tool
-        ? { acceptedTool: studioRequest.tool, openWhenReady: studioRequest.tool === "create_sheet" }
+    if (studioHandledRef.current === studioRequest.id) return;
+    studioHandledRef.current = studioRequest.id;
+    const request = studioRequest;
+    void sendPrompt(request.prompt, {
+      skipUser: true,
+      studio: true,
+      ...(request.tool
+        ? { acceptedTool: request.tool, openWhenReady: request.tool === "create_sheet" }
         : {}),
-    });
+    }).finally(() => onStudioRequestHandled?.(request.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studioRequest, sending, loading]);
 
@@ -1586,11 +1591,11 @@ export function ProjectChat({
 
   const uploadingChip = chips.find((chip) => chip.status === "uploading" || chip.status === "reading");
   const generateKind =
-    sending && (stream?.intent === "study" || stream?.intent === "rewrite_sheet")
+    sending && !stream?.quiet && (stream?.intent === "study" || stream?.intent === "rewrite_sheet")
       ? "notes"
-      : sending && stream?.intent === "practice"
+      : sending && !stream?.quiet && stream?.intent === "practice"
         ? "practice"
-        : sending && stream?.intent === "plan"
+        : sending && !stream?.quiet && stream?.intent === "plan"
           ? "path"
           : null;
   const composerStatus: ComposerStatusState | null = uploadingChip
@@ -1651,7 +1656,6 @@ export function ProjectChat({
       .filter(Boolean)
       .join("\n\n");
     const view: ChatMessage = { ...message, content: taught, artifact, images, options, promptAsk, blocks };
-    const citedSources = turnSources?.length ? usedSources(content, turnSources) : [];
     const ka = promptIsKa(prev?.role === "user" ? prev.content : "") || threadKa;
     const orientKa = ka || promptIsKa(taught);
     const showOrient = Boolean(nowTitle && taught && !artifact && message.id === teachId);
@@ -1742,11 +1746,6 @@ export function ProjectChat({
               <IllustrationBlocks blocks={blocks} />
             </div>
           ) : null}
-          {promptAsk?.question && !waiting && !taught ? (
-            <ExamCard question={promptAsk.question} ka={orientKa} />
-          ) : examText && !waiting && !taught ? (
-            <ExamCard question={examText} ka={orientKa} />
-          ) : null}
           {images?.length ? (
             <ImageGallery
               images={images}
@@ -1757,7 +1756,6 @@ export function ProjectChat({
               }}
             />
           ) : null}
-          {citedSources.length && !streaming ? <CitedSources sources={citedSources} onOpen={onOpenMaterial} /> : null}
           {showRetry ? (
             <button
               type="button"
@@ -1790,7 +1788,7 @@ export function ProjectChat({
                   onClick={() => void confirmSuggestion(suggest.kind === "exam" ? "exam" : "practice")}
                   className="rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
                 >
-                  {suggest.kind === "exam" ? "Take exam" : "Practice this"}
+                  {suggest.kind === "exam" ? "Make an exam" : "Make a quiz"}
                 </button>
               ) : suggest.kind === "path" ? (
                 <button
@@ -1818,8 +1816,8 @@ export function ProjectChat({
               pathStart={Boolean(isMainThread && path && !pathIsStarted(path))}
               teaching={teachingHere}
               hintLabel="Hint"
-              askQuestion={Boolean(latestAsk?.question)}
-              options={latestAsk?.options ?? []}
+              askQuestion={false}
+              options={[]}
               onAction={(id) => {
                 if (id === "continue") {
                   if (followup) {
@@ -1932,52 +1930,14 @@ export function ProjectChat({
     );
   }
 
-  const streamPending = stream && !messages.some((item) => item.id === stream.id);
+  const streamPending = stream && !stream.quiet && !messages.some((item) => item.id === stream.id);
   const emptyThread = !loading && messages.length === 0 && !stream && !sending;
-
-  function examArticle(id: string, question: string) {
-    return (
-      <article
-        key={`${id}-exam`}
-        data-turn={`${id}-exam`}
-        className="chat-msg chat-msg-assistant"
-      >
-        <ExamCard question={question} ka={threadKa} />
-      </article>
-    );
-  }
-
-  function examFor(
-    message: Pick<ChatMessage, "id" | "role" | "content" | "promptAsk" | "artifact">,
-    live: StreamState | null,
-  ) {
-    if (message.role !== "assistant") return null;
-    const raw = stripArtifactMarkup(live ? live.content : message.content);
-    const ask = (live?.promptAsk ?? message.promptAsk)?.question?.trim();
-    const { taught, exam } = splitTeachingExam(raw, ask);
-    if (!exam || !taught || message.artifact || live?.artifact) return null;
-    return examArticle(message.id, exam);
-  }
 
   function requestHint() {
     const ask = latestAsk?.question;
     if (!ask) return;
     void sendPrompt(hintAskPrompt(ask), { skipUser: true, hintAsk: true });
   }
-
-  const pendingExam =
-    streamPending && stream
-      ? examFor(
-          {
-            id: stream.id,
-            role: "assistant",
-            content: stream.content,
-            promptAsk: stream.promptAsk,
-            artifact: stream.artifact ?? null,
-          },
-          stream,
-        )
-      : null;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1991,9 +1951,9 @@ export function ProjectChat({
               <p className="text-sm text-muted">Loading chat…</p>
             )}
             {messages.map((message, index) => {
+              if (isStudioConfigPrompt(message.content)) return null;
               const prev = messages[index - 1];
               const live = stream && message.id === stream.id ? stream : null;
-              const exam = examFor(message, live);
               return (
               <Fragment key={message.id}>
               <article
@@ -2008,7 +1968,7 @@ export function ProjectChat({
                         type="button"
                         aria-expanded={expandedUserMessages[message.id] === true}
                         onClick={() => setExpandedUserMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}
-                        className={`chat-body rounded-2xl bg-surface-2 px-4 py-2.5 text-left text-foreground ${
+                        className={`prompt-bubble chat-body rounded-2xl bg-surface-2 px-4 py-2.5 text-left text-foreground ${
                           message.content.length > 280 && !expandedUserMessages[message.id] ? "chat-prompt-collapsed" : ""
                         }`}
                       >
@@ -2022,7 +1982,6 @@ export function ProjectChat({
                   assistantInner(message, prev, index, live)
                 )}
               </article>
-              {exam}
               </Fragment>
               );
             })}
@@ -2057,7 +2016,6 @@ export function ProjectChat({
                   stream,
                 )}
               </article>
-              {pendingExam}
               </Fragment>
             ) : null}
           </div>
@@ -2098,7 +2056,7 @@ export function ProjectChat({
               }
               chips={guest ? [] : chips}
               allowAttach={!guest}
-              placeholder={!sending && latestAsk?.question ? "Your answer" : undefined}
+              placeholder={undefined}
               pad={false}
               className="composer-pad"
               onRemoveChip={(id) => {

@@ -34,7 +34,7 @@ export function chatModeSendsToolDeclarations(_mode: ChatMode): boolean {
 
 export const CHAT_MODE_INSTRUCTIONS: Record<ChatMode, string> = {
   auto:
-    "Answer clearly. Match what they asked. Do not interview them or add a check they did not ask for.",
+    "Answer clearly. Match what they asked. Chips under the answer are questions the user would type next, not a recap. Do not interview them or add a check they did not ask for.",
   fast:
     "Keep replies short and plain. Direct answer first. No chips. No extra structure.",
   teacher:

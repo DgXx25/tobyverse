@@ -5,7 +5,7 @@ import Activity01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/e
 import Alert01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Alert01Icon.js";
 import Apple01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Apple01Icon.js";
 import ArrowRight01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ArrowRight01Icon.js";
-import ArrowUp01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ArrowUp01Icon.js";
+import MoveUpIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/MoveUpIcon.js";
 import Atom01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Atom01Icon.js";
 import BacteriaIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/BacteriaIcon.js";
 import Bone01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Bone01Icon.js";
@@ -40,7 +40,8 @@ import Logout01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm
 import LungsIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/LungsIcon.js";
 import Maximize01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Maximize01Icon.js";
 import Medicine01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Medicine01Icon.js";
-import Menu01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Menu01Icon.js";
+import MenuIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/MenuIcon.js";
+import MoreVerticalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/MoreVerticalIcon.js";
 import Message01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Message01Icon.js";
 import Minimize01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Minimize01Icon.js";
 import Moon01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Moon01Icon.js";
@@ -55,8 +56,8 @@ import Search01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm
 import Settings01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Settings01Icon.js";
 import Share01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Share01Icon.js";
 import Shield01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Shield01Icon.js";
-import SidebarLeftIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SidebarLeftIcon.js";
-import SidebarRightIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SidebarRightIcon.js";
+import PanelLeftIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PanelLeftIcon.js";
+import PanelRightIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PanelRightIcon.js";
 import SlidersHorizontalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SlidersHorizontalIcon.js";
 import SparklesIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SparklesIcon.js";
 import SquareLock01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SquareLock01Icon.js";
@@ -73,9 +74,9 @@ import type { IconSvgElement } from "@hugeicons/react";
 
 const ICONS = {
   share: Share01Icon,
-  panel: SidebarLeftIcon,
-  panelLeft: SidebarLeftIcon,
-  panelRight: SidebarRightIcon,
+  sidebar: PanelLeftIcon,
+  sidebarLeft: PanelLeftIcon,
+  sidebarRight: PanelRightIcon,
   close: Cancel01Icon,
   materials: Folder01Icon,
   notes: Notebook01Icon,
@@ -86,14 +87,16 @@ const ICONS = {
   newChat: PencilEdit01Icon,
   projectFolder: Folder01Icon,
   attach: PaperclipIcon,
-  menu: Menu01Icon,
+  menu: MenuIcon,
+  ellipsis: MenuIcon,
   back: ArrowRight01Icon,
   forward: ArrowRight01Icon,
   prev: ArrowRight01Icon,
   chevronDown: ArrowRight01Icon,
   zoomIn: ZoomInAreaIcon,
   zoomOut: ZoomOutAreaIcon,
-  more: Menu01Icon,
+  more: MenuIcon,
+  moreVertical: MoreVerticalIcon,
   edit: PencilEdit01Icon,
   pin: PinIcon,
   trash: Delete02Icon,
@@ -109,7 +112,7 @@ const ICONS = {
   minimize: Minimize01Icon,
   library: LibraryIcon,
   search: Search01Icon,
-  send: ArrowUp01Icon,
+  send: MoveUpIcon,
   appearance: PaintBoardIcon,
   usage: ChartColumnIcon,
   data: Database01Icon,
@@ -229,10 +232,12 @@ export function UiIcon({
   name,
   size = 18,
   className = "",
+  color,
 }: {
   name: UiIconName;
   size?: number;
   className?: string;
+  color?: string;
 }) {
   const icon = ICONS[name];
   if (!icon) return null;
@@ -240,7 +245,7 @@ export function UiIcon({
     <HugeiconsIcon
       icon={icon}
       size={size}
-      color="currentColor"
+      color={color || "currentColor"}
       strokeWidth={1.75}
       className={`${FLIPPED[name] ? "-scale-x-100" : ""} ${name === "chevronDown" ? "rotate-90" : ""} ${className}`}
       aria-hidden="true"

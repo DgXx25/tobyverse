@@ -1,7 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { cert, getApps, initializeApp, refreshToken, type ServiceAccount } from "firebase-admin/app";
+import { applicationDefault, cert, getApps, initializeApp, type App, type ServiceAccount } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
@@ -77,11 +77,47 @@ function firebaseCliRefreshToken(): string | null {
   return null;
 }
 
-const ADMIN_APP = "toby-admin";
+const ADMIN_PREFIX = "toby-admin";
+
+/** Firestore rejects an explicit refresh-token credential. It accepts the same login as application default credentials. */
+function firestoreAccepts(app: App): boolean {
+  const credential = app.options.credential as { implicit?: boolean; privateKey?: string } | undefined;
+  if (!credential) return false;
+  if (typeof credential.privateKey === "string" && credential.privateKey.includes("PRIVATE KEY")) return true;
+  if (credential.implicit === true) return true;
+  return credential.constructor?.name === "ApplicationDefaultCredential";
+}
+
+function publishCliLogin(projectId: string | undefined): boolean {
+  const file = credentialFile();
+  const fileRefresh = file ? asString(file.refresh_token).trim() : "";
+  const token = fileRefresh || firebaseCliRefreshToken();
+  if (!token || runningOnGcp()) return false;
+
+  const envPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  const envFile = envPath ? readJsonFile(envPath) : null;
+  if (envFile && asString(envFile.private_key)) return false;
+  if (envFile && asString(envFile.refresh_token).trim() === token) return true;
+  if (file && fileRefresh === token && !envPath) return true;
+
+  const filePath = path.join(os.tmpdir(), "tobyverse-adc.json");
+  fs.writeFileSync(
+    filePath,
+    JSON.stringify({
+      type: "authorized_user",
+      client_id: (file && asString(file.client_id)) || FIREBASE_CLI_CLIENT_ID,
+      client_secret: (file && asString(file.client_secret)) || FIREBASE_CLI_CLIENT_SECRET,
+      refresh_token: token,
+      ...(projectId ? { quota_project_id: projectId } : {}),
+    }),
+  );
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = filePath;
+  return true;
+}
 
 function adminApp() {
-  const named = getApps().find((app) => app.name === ADMIN_APP);
-  if (named) return named;
+  const ready = getApps().find((app) => app.name.startsWith(ADMIN_PREFIX) && firestoreAccepts(app));
+  if (ready) return ready;
 
   const projectId = firebaseProjectId();
   if (projectId) {
@@ -94,7 +130,7 @@ function adminApp() {
     return initializeApp({
       credential: cert(serviceAccount),
       projectId: serviceAccount.projectId || projectId,
-    }, ADMIN_APP);
+    }, `${ADMIN_PREFIX}-cert`);
   }
 
   const file = credentialFile();
@@ -102,22 +138,14 @@ function adminApp() {
     return initializeApp({
       credential: cert(file as ServiceAccount),
       projectId: asString(file.project_id) || projectId,
-    }, ADMIN_APP);
+    }, `${ADMIN_PREFIX}-cert`);
   }
 
-  const fileRefresh = file ? asString(file.refresh_token).trim() : "";
-  const cliRefresh = firebaseCliRefreshToken();
-  const token = fileRefresh || cliRefresh;
-  if (token) {
+  if (runningOnGcp() || publishCliLogin(projectId)) {
     return initializeApp({
-      credential: refreshToken({
-        type: "authorized_user",
-        client_id: (file && asString(file.client_id)) || FIREBASE_CLI_CLIENT_ID,
-        client_secret: (file && asString(file.client_secret)) || FIREBASE_CLI_CLIENT_SECRET,
-        refresh_token: token,
-      }),
+      credential: applicationDefault(),
       projectId,
-    }, ADMIN_APP);
+    }, `${ADMIN_PREFIX}-adc`);
   }
 
   throw new Error(

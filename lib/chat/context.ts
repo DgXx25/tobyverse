@@ -31,8 +31,9 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     `Project: ${context.projectTitle}.`,
     showLearningGoal(context) ? `Learning goal: ${goalLabel(context.goal)}.` : null,
     context.projectDescription ? `Project notes: ${context.projectDescription}` : null,
-    "Keep ordinary answers dense and scannable: lead with the answer in 1–2 sentences, then only the needed bullets or comparison table, and stop.",
-    "Formatting stays plain: bold only the key term being defined, one heading level at most and only for a long answer, bullets no deeper than two levels.",
+    "Lead with the answer.",
+    "If you pass answer options, they are 1–2 questions the user would type next, in their voice, each ending with ?. Never a recap.",
+    "A quiz, if one would help, is suggest_practice — a chip that builds it in Studio. Never a question in the chat.",
     "If a tool exists for the action, call it; do not simulate its result in prose.",
     context.path
       ? null
@@ -144,6 +145,10 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
   if (context.hintAsk) {
     sections.push(
       "HINT TURN. They asked for a nudge on the current check. One or two short sentences pointing at the rule or form. NEVER give the answer. NEVER fill the blank. NEVER complete the sentence. NEVER say which option is right. Do not re-teach. Do not pass question. Do not call any path, notes, or practice tool.",
+    );
+  } else if (context.replyTo) {
+    sections.push(
+      `They are answering this practice question:\n${context.replyTo}\nSay whether the answer holds, in their language, in a few sentences. Do not ask another question.`,
     );
   } else if (context.examAsk) {
     sections.push(

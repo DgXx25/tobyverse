@@ -262,6 +262,13 @@ function isInternalTutorPrompt(prompt: string): boolean {
   );
 }
 
+function mayAttachQuestion(prompt: string): boolean {
+  const text = prompt.trim();
+  if (text.startsWith("Move-on (not a user request):") || text.startsWith("Exam-only (not a user request):")) return true;
+  if (isInternalTutorPrompt(text)) return false;
+  return wantsPractice(prompt) || wantsExam(prompt) || wantsAdvancePath(prompt);
+}
+
 export function wantsExam(prompt: string): boolean {
   if (isInternalTutorPrompt(prompt)) return false;
   return EXAM_HINT.test(prompt);
@@ -723,6 +730,12 @@ export function gateChatTool(input: {
   ) {
     tool = { name: "answer", args: {} };
   }
+  if ((input.mode === "fast" || isSimpleChatTask(prompt)) && tool.name === "answer" && tool.args.options?.length) {
+    tool = { name: "answer", args: { ...tool.args, options: [] } };
+  }
+  if (tool.name === "answer" && tool.args.question && !mayAttachQuestion(prompt)) {
+    tool = { name: "answer", args: { ...tool.args, question: undefined } };
+  }
 
   if (input.accepted === "search_images") {
     return {
@@ -768,7 +781,7 @@ export function gateChatTool(input: {
   if (pathToolRequested && !askedSheet && input.mode !== "teacher") {
     return { name: "answer", args: {} };
   }
-  if (tool.name === "suggest_practice" && !askedForPractice) {
+  if (tool.name === "suggest_practice" && !askedForPractice && (input.mode === "fast" || isSimpleChatTask(prompt))) {
     tool = { name: "answer", args: {} };
   }
   if (tool.name === "suggest_sheet" && !askedForSheet && input.mode !== "teacher") {

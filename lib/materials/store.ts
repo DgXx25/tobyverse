@@ -2,11 +2,13 @@ import {
   collection,
   deleteDoc,
   doc,
+  getCountFromServer,
   getDocs,
   getDoc,
   onSnapshot,
   serverTimestamp,
   setDoc,
+  updateDoc,
   type DocumentReference,
   type Unsubscribe,
 } from "firebase/firestore";
@@ -198,6 +200,11 @@ export async function getMaterial(projectId: string, materialId: string): Promis
   return mapMaterial(snap.id, projectId, snap.data());
 }
 
+export async function countMaterials(projectId: string): Promise<number> {
+  const snapshot = await getCountFromServer(materialsRef(projectId));
+  return snapshot.data().count;
+}
+
 export async function listMaterials(projectId: string): Promise<Material[]> {
   const snapshot = await getDocs(materialsRef(projectId));
   return snapshot.docs
@@ -245,6 +252,12 @@ export async function patchMaterialPreviewHtml(
   const html = previewHtml.slice(0, PREVIEW_HTML_MAX);
   if (!html) return;
   await setDoc(doc(materialsRef(projectId), materialId), { previewHtml: html }, { merge: true });
+}
+
+export async function renameMaterial(projectId: string, materialId: string, title: string): Promise<void> {
+  const next = title.replace(/\s+/g, " ").trim().slice(0, 180);
+  if (!next) return;
+  await updateDoc(doc(materialsRef(projectId), materialId), { title: next });
 }
 
 export async function deleteMaterialDoc(projectId: string, materialId: string): Promise<void> {

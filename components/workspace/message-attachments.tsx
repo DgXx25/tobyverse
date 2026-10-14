@@ -37,7 +37,7 @@ function AttachmentChip({ item, onOpenMaterial }: { item: ChatAttachment; onOpen
       />
     );
   }
-  const className = "inline-flex h-8 max-w-[220px] items-center gap-1.5 rounded-full border border-border bg-surface-2 pl-1 pr-2.5 text-[11px] leading-none";
+  const className = "inline-flex h-8 max-w-[220px] items-center gap-1.5 rounded-full bg-surface pl-1 pr-2.5 text-[11px] leading-none";
   const badge = (
     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface font-mono text-[8px] font-medium uppercase tracking-wide text-muted">
       {fileTypeBadge(item.type, item.title)}
@@ -92,7 +92,7 @@ function ImageThumb({ path, title, onClick }: { path: string; title: string; onC
 
   if (!url) {
     const content = (
-      <span className="inline-flex h-8 max-w-[160px] items-center gap-1.5 rounded-full border border-border bg-surface-2 pl-1 pr-2.5 text-[11px] leading-none">
+      <span className="inline-flex h-8 max-w-[160px] items-center gap-1.5 rounded-full bg-surface pl-1 pr-2.5 text-[11px] leading-none">
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface font-mono text-[8px] font-medium uppercase tracking-wide text-muted">
           IMG
         </span>
@@ -103,7 +103,7 @@ function ImageThumb({ path, title, onClick }: { path: string; title: string; onC
   }
 
   const content = (
-    <span className="block h-10 w-10 overflow-hidden rounded-xl border border-border bg-surface-2">
+    <span className="block h-10 w-10 overflow-hidden rounded-xl bg-surface">
       <img src={url} alt={title} className="h-full w-full object-cover" />
     </span>
   );

@@ -11,12 +11,12 @@ import type { StudyPath } from "@/types/path";
 import type { StudySheet } from "@/types/study-sheet";
 
 const TILE_COLOR: Record<StudioTile["id"], string> = {
-  practice: "#0a84ff",
-  quiz: "#30d158",
-  flashcards: "#ffd60a",
-  table: "#ff9f0a",
-  notes: "#bf5af2",
-  path: "#ff375f",
+  practice: "var(--file-doc)",
+  quiz: "var(--file-sheet)",
+  flashcards: "var(--tone-yellow)",
+  table: "var(--file-slides)",
+  notes: "var(--file-notes)",
+  path: "var(--tone-pink)",
 };
 
 /**
@@ -105,8 +105,8 @@ export function StudioPane({
         key: `practice:${item.id}`,
         icon: (exam ? "check" : "practice") as UiIconName,
         color: exam ? TILE_COLOR.quiz : TILE_COLOR.practice,
-        title: `${exam ? "Quiz" : "Practice"} · ${count}`,
-        meta: exam ? "Quiz" : "Practice",
+        title: `${exam ? "Exam" : "Quiz"} · ${count}`,
+        meta: exam ? "Exam" : "Quiz",
         open: () => onOpenPractice(item.id),
       };
     }),
@@ -121,7 +121,7 @@ export function StudioPane({
             type="button"
             disabled={busy}
             onClick={() => openTile(tile)}
-            className="flex h-11 items-center gap-2 rounded-full bg-background px-3 text-left transition-colors hover:bg-surface-2 disabled:opacity-60"
+            className="flex h-11 items-center gap-2 rounded-full bg-surface-2 px-3 text-left transition-colors hover:bg-white/10 disabled:opacity-60"
           >
             <span className="inline-flex shrink-0" style={{ color: TILE_COLOR[tile.id] }}>
               <UiIcon name={tile.icon} size={18} />
@@ -134,7 +134,7 @@ export function StudioPane({
       </div>
 
       {busy && generatingLabel ? (
-        <div className="flex h-12 items-center gap-3 rounded-2xl bg-background px-3">
+        <div className="flex h-12 items-center gap-3 rounded-2xl bg-surface-2 px-3">
           <span className="studio-spin" aria-hidden />
           <span className="min-w-0">
             <span className="block truncate text-[14px] text-foreground">Generating {generatingLabel}…</span>
@@ -146,7 +146,7 @@ export function StudioPane({
         <ul className="space-y-1">
           {outputs.map((item) => (
             <li key={item.key} className="list-none">
-              <button type="button" onClick={item.open} className="flex w-full items-center gap-3 rounded-2xl bg-background px-3 py-2.5 text-left hover:bg-surface-2">
+              <button type="button" onClick={item.open} className="flex w-full items-center gap-3 rounded-2xl bg-surface-2 px-3 py-2.5 text-left hover:bg-white/10">
                 <span className="inline-flex shrink-0" style={{ color: item.color }}>
                   <UiIcon name={item.icon} size={18} />
                 </span>
@@ -162,7 +162,7 @@ export function StudioPane({
 
       {noteOpen ? (
         <form
-          className="rounded-2xl bg-background p-2.5"
+          className="rounded-2xl bg-surface-2 p-2.5"
           onSubmit={(event) => {
             event.preventDefault();
             void saveNote();
@@ -192,7 +192,7 @@ export function StudioPane({
           </div>
         </form>
       ) : (
-        <button type="button" onClick={() => setNoteOpen(true)} className="flex h-11 items-center gap-2 rounded-full bg-background px-3 text-[14px] font-medium text-foreground hover:bg-surface-2">
+        <button type="button" onClick={() => setNoteOpen(true)} className="flex h-11 items-center gap-2 rounded-full bg-surface-2 px-3 text-[14px] font-medium text-foreground hover:bg-white/10">
           <UiIcon name="plus" size={16} />
           Add note
         </button>
@@ -305,7 +305,7 @@ function Choice<T extends string>({
             type="button"
             aria-pressed={value === option}
             onClick={() => onChange(option)}
-            className={`h-8 rounded-full px-3 text-[13px] ${value === option ? "bg-foreground text-background" : "bg-background text-foreground hover:bg-surface-2"}`}
+            className={`h-8 rounded-full px-3 text-[13px] ${value === option ? "bg-foreground text-background" : "bg-background text-foreground hover:bg-surface"}`}
           >
             {option}
           </button>

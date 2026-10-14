@@ -258,7 +258,7 @@ export function PracticeSession({
   const total = order.length || items.length || ids.length || 1;
   const progress =
     stage === "done" || stage === "review-intro" ? 100 : ((index + (checked ? 1 : 0)) / total) * 100;
-  const compact = layout === "chat";
+  const compact = layout !== "page";
   const hideExit = stage === "done" || stage === "review-intro";
   const playing = stage === "play";
   const screenKey = stage === "play" ? (currentId ?? "empty") : stage;
@@ -272,7 +272,7 @@ export function PracticeSession({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-transparent">
-      <header className={`flex shrink-0 items-center gap-3 ${compact ? "h-10 px-3" : "h-12 px-4"}`}>
+      <header className={`flex shrink-0 items-center gap-3 ${compact ? "h-10 pl-3 pr-3 md:pr-14" : "h-12 pl-4 pr-4 md:pr-14"}`}>
         {hideExit ? (
           <span className="w-8" aria-hidden />
         ) : (
@@ -301,8 +301,8 @@ export function PracticeSession({
         <AnimatePresence initial={false} mode="wait" onExitComplete={releaseFooter}>
           <motion.div
             key={screenKey}
-            className={`flex h-full min-h-0 w-full items-center justify-center overflow-y-auto overflow-x-hidden ${
-              compact ? "px-5 pb-[5.75rem] pt-5" : "px-8 pb-[6.5rem] pt-8"
+            className={`flex h-full min-h-0 w-full items-start justify-center overflow-y-auto overflow-x-hidden max-md:justify-stretch ${
+              compact ? "px-3 pb-24 pt-4 max-md:px-4 max-md:pt-3" : "px-8 pb-[6.5rem] pt-8"
             }`}
             initial={{ opacity: 0, x: shift }}
             animate={{ opacity: 1, x: 0 }}
@@ -379,7 +379,7 @@ export function PracticeSession({
                     <UiIcon name={lastCorrect ? "check" : "x"} size={22} />
                   </span>
                   <p
-                    className="truncate text-lg font-medium"
+                    className={`truncate font-medium ${compact ? "text-sm" : "text-lg"}`}
                     style={{
                       color: lastCorrect
                         ? "color-mix(in srgb, #22c55e 82%, var(--text))"
@@ -396,7 +396,9 @@ export function PracticeSession({
             type="button"
             disabled={actionDisabled}
             onClick={() => (playing && !checked && !isConnect && !advancing ? void onCheck() : onContinue())}
-            className={`relative z-10 shrink-0 rounded-2xl px-8 py-3 text-sm font-semibold uppercase tracking-wide ${
+            className={`relative z-10 shrink-0 rounded-2xl text-sm font-semibold uppercase tracking-wide ${
+              compact ? "px-4 py-2.5" : "px-8 py-3"
+            } ${
               footerOpen
                 ? lastCorrect
                   ? "bg-[#22c55e] text-white"

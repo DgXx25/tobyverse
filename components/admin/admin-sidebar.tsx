@@ -36,7 +36,7 @@ export function AdminSidebar() {
           <span className="block h-6 w-6 bg-current" style={{ WebkitMask: "url(/logo.svg) center / contain no-repeat", mask: "url(/logo.svg) center / contain no-repeat" }} />
           {!narrow ? <span className="text-[13px] font-bold">beta</span> : null}
         </Link>
-        <button type="button" onClick={mobile ? () => setMobileNavOpen(false) : toggleCollapse} aria-label={mobile ? "Close menu" : narrow ? "Expand sidebar" : "Collapse sidebar"} className="flex h-8 w-8 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-foreground"><UiIcon name={narrow ? "panelRight" : "panelLeft"} size={18} /></button>
+        <button type="button" onClick={mobile ? () => setMobileNavOpen(false) : toggleCollapse} aria-label={mobile ? "Close menu" : narrow ? "Expand sidebar" : "Collapse sidebar"} className="flex h-8 w-8 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-foreground"><UiIcon name={narrow ? "sidebarRight" : "sidebarLeft"} size={18} /></button>
       </div>
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-[13px] py-2">
         {ITEMS.map((item) => {

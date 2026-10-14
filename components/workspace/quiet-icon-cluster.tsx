@@ -135,7 +135,7 @@ export function QuietIconCluster({
             action.disabled
               ? "pointer-events-none cursor-default bg-transparent text-muted opacity-35"
               : action.active
-                ? "cursor-pointer bg-surface-2 text-foreground"
+                ? "cursor-pointer bg-transparent text-foreground"
                 : "cursor-pointer bg-transparent text-muted hover:text-foreground"
           }`}
         >

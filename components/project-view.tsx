@@ -25,11 +25,10 @@ import { ProjectChat } from "@/components/project-chat";
 import { ProjectLoading } from "@/components/project-loading";
 import { ArtifactPanel, type ArtifactFocus, type ArtifactTabId } from "@/components/workspace/artifact-panel";
 import { SourcesPane } from "@/components/workspace/sources-pane";
-import { LibraryFilePreview } from "@/components/library-file-preview";
-import type { LibraryItem } from "@/lib/library/items";
 import type { StudioRequest, StudioTile } from "@/lib/workspace/studio";
 import { useShell } from "@/components/workspace/shell-context";
 import { QuietIconCluster, type QuietIconAction } from "@/components/workspace/quiet-icon-cluster";
+import { UiIcon } from "@/components/workspace/ui-icon";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import type { ActiveArtifactStatus } from "@/types/project";
@@ -110,7 +109,7 @@ export function ProjectView({
 }) {
   const { user } = useAuth();
   const router = useRouter();
-  const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setMobileTopActions, setProjectShare } = useShell();
+  const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setProjectShare } = useShell();
   const [project, setProject] = useState<Project | null>(null);
   const [bootstrapMessages, setBootstrapMessages] = useState<ChatMessage[]>(initialMessages ?? []);
   const [olderCursor, setOlderCursor] = useState<string | null>(initialOlderCursor ?? null);
@@ -134,10 +133,10 @@ export function ProjectView({
   const [resizing, setResizing] = useState(false);
   const [panelView, setPanelView] = useState<ArtifactTabId>("studio");
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [mobileSourcesOpen, setMobileSourcesOpen] = useState(false);
+  const [phone, setPhone] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"chat" | "sources" | "studio">("chat");
   const [studioRequest, setStudioRequest] = useState<StudioRequest | null>(null);
-  const [sourcePreviewId, setSourcePreviewId] = useState<string | null>(null);
-  const [chatBusy, setChatBusy] = useState(false);
+  const [readingId, setReadingId] = useState<string | null>(null);
   const studioSeq = useRef(0);
   const sourcesWidthRef = useRef(0);
   const [notesLive, setNotesLive] = useState<NotesLiveState | null>(null);
@@ -152,7 +151,6 @@ export function ProjectView({
   const prefsRef = useRef<WorkspacePrefs | null>(null);
   const widthRef = useRef(420);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const savedLayout = useRef<{ width: number } | null>(null);
   const materialReturn = useRef<{ focus: ArtifactFocus | null; panelOpen: boolean } | null>(null);
   widthRef.current = artifactWidth;
   sourcesWidthRef.current = sourcesOpen ? sourcesWidth : 0;
@@ -175,10 +173,18 @@ export function ProjectView({
   }, [getWorkspaceWidth]);
 
   useLayoutEffect(() => {
-    const desktop = isDesktop();
-    setSourcesOpen(desktop && (readFlag(SOURCES_KEY) ?? true));
-    setPanelOpen(desktop && (readFlag(STUDIO_KEY) ?? true));
-    setSourcesWidth(readWidth(SOURCES_WIDTH_KEY, SOURCES_DEFAULT, SOURCES_MIN, SOURCES_MAX));
+    const mq = window.matchMedia("(max-width: 767px)");
+    function apply() {
+      const mobile = mq.matches;
+      setPhone(mobile);
+      if (mobile) return;
+      setSourcesOpen(readFlag(SOURCES_KEY) ?? true);
+      setPanelOpen(readFlag(STUDIO_KEY) ?? true);
+      setSourcesWidth(readWidth(SOURCES_WIDTH_KEY, SOURCES_DEFAULT, SOURCES_MIN, SOURCES_MAX));
+    }
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
   }, [projectId]);
 
   useEffect(() => {
@@ -324,7 +330,7 @@ export function ProjectView({
       return;
     }
     setFocus(next);
-    setPanelOpen(true);
+    revealStudio();
     if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     if (next.kind !== "material" && "title" in next) rememberActive(next, "open");
     setPendingPanel(null);
@@ -369,13 +375,13 @@ export function ProjectView({
       return;
     }
     setFocus(next);
-    setPanelOpen(true);
+    revealStudio();
     if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     rememberActive(next, "open");
   }
 
   function openMaterial(id: string) {
-    setSourcePreviewId(id);
+    setReadingId(id);
   }
 
   function closeMaterial() {
@@ -383,7 +389,7 @@ export function ProjectView({
     materialReturn.current = null;
     if (previous?.panelOpen) {
       setFocus(previous.focus);
-      setPanelOpen(true);
+      revealStudio();
       return;
     }
     closePanel();
@@ -401,7 +407,7 @@ export function ProjectView({
         return;
       }
       setFocus({ kind: "sheet", id: "", title: "Notes" });
-      setPanelOpen(true);
+      revealStudio();
       ensureMinWidth(MIN_NOTES);
       return;
     }
@@ -409,12 +415,13 @@ export function ProjectView({
       const base = current ?? { title: "Notes", blocks: [], status: CREATING_NOTES_STATUS };
       return {
         title: event.title?.trim() || base.title,
-        blocks: event.blocks ?? (event.block ? [...base.blocks, event.block] : base.blocks),
+        blocks: event.blocks ?? base.blocks,
+        content: event.content ?? base.content,
         status: event.status === undefined ? base.status : event.status,
         sheetId: event.sheetId || base.sheetId,
       };
     });
-    setPanelOpen(true);
+    revealStudio();
     ensureMinWidth(MIN_NOTES);
     if (event.sheetId) {
       if (keepPathPanel()) return;
@@ -434,7 +441,7 @@ export function ProjectView({
     if (event === "start") {
       setPathLive({ title: "Path", courses: [], status: "Mapping the path…" });
       setFocus({ kind: "path", id: "", title: "Path" });
-      setPanelOpen(true);
+      revealStudio();
       ensureMinWidth(MIN_NOTES);
       return;
     }
@@ -447,7 +454,7 @@ export function ProjectView({
         pathId: event.pathId || base.pathId,
       };
     });
-    setPanelOpen(true);
+    revealStudio();
     ensureMinWidth(MIN_NOTES);
     if (event.pathId) {
       setFocus({ kind: "path", id: event.pathId, title: event.title || "Path" });
@@ -491,23 +498,14 @@ export function ProjectView({
 
   function startPractice(artifact: ChatArtifact) {
     const ids = artifact.ids?.length ? artifact.ids : [artifact.id];
-    if (!session) {
-      savedLayout.current = { width: widthRef.current };
-    }
-    setSidebarHidden(true);
     setSession({ setId: artifact.id, ids, mode: artifact.mode === "exam" ? "exam" : "practice" });
-    setPanelOpen(true);
-    const expanded = Math.round(window.innerWidth * 0.62);
-    setArtifactWidth(Math.min(Math.round(window.innerWidth * 0.78), Math.max(420, expanded)));
+    revealStudio();
     rememberActive(artifact, "in_progress");
   }
 
   function exitSession() {
     setSession(null);
     setSidebarHidden(false);
-    if (savedLayout.current) {
-      setArtifactWidth(savedLayout.current.width);
-    }
   }
 
   function setSources(open: boolean) {
@@ -551,27 +549,17 @@ export function ProjectView({
   }, [ensureMinWidth]);
 
   const panelToggleAction: QuietIconAction = {
-    id: "panel",
+    id: "sidebar",
     label: panelOpen ? "Hide Studio" : "Show Studio",
-    icon: "panelRight",
+    icon: "sidebarRight",
     onClick: () => setStudio(!panelOpen),
   };
   const sourcesToggleAction: QuietIconAction = {
     id: "sources",
-    label: sourcesOpen || mobileSourcesOpen ? "Hide sources" : "Show sources",
-    icon: "panelLeft",
-    onClick: () => {
-      if (isDesktop()) setSources(!sourcesOpen);
-      else setMobileSourcesOpen((open) => !open);
-    },
+    label: sourcesOpen ? "Hide sources" : "Show sources",
+    icon: "sidebarLeft",
+    onClick: () => setSources(!sourcesOpen),
   };
-  const paneToggles = [sourcesToggleAction, panelToggleAction];
-
-  useEffect(() => {
-    setMobileTopActions(<QuietIconCluster size={18} actions={paneToggles} />);
-    return () => setMobileTopActions(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setMobileTopActions, projectId, panelOpen, sourcesOpen, mobileSourcesOpen]);
 
   useEffect(() => {
     setProjectShare({
@@ -649,6 +637,13 @@ export function ProjectView({
     window.addEventListener("mouseup", up);
   }
 
+  function revealStudio() {
+    setPanelOpen(true);
+    setMobilePane("studio");
+  }
+
+  const studioShown = phone ? mobilePane === "studio" : panelOpen;
+
   if (!user) return null;
 
   if (!project) {
@@ -666,14 +661,15 @@ export function ProjectView({
   }
 
   return (
-    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 flex-1 overflow-hidden bg-transparent ${resizing ? "pane-resizing" : ""}`}>
+    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-transparent ${resizing ? "pane-resizing" : ""}`}>
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
       <div
         aria-hidden="true"
         className="artifact-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
         style={{ width: sourcesOpen ? sourcesWidth : 0 }}
       />
       <div
-        className={`artifact-panel-slot absolute inset-y-0 left-0 z-30 hidden max-w-full bg-surface shrink-0 overflow-hidden md:block ${
+        className={`artifact-panel-slot edge-stroke absolute inset-y-0 left-0 z-30 hidden max-w-full bg-surface md:rounded-tr-2xl shrink-0 overflow-hidden md:block ${
           sourcesOpen ? "pointer-events-auto" : "pointer-events-none"
         }`}
         style={{ width: sourcesOpen ? sourcesWidth : 0 }}
@@ -681,34 +677,34 @@ export function ProjectView({
         inert={sourcesOpen ? undefined : true}
       >
         <div
-          className={`h-full shrink-0 transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${sourcesOpen ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-y-0 left-0 h-full overflow-hidden transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${sourcesOpen ? "opacity-100" : "opacity-0"}`}
           style={{ width: sourcesWidth, minWidth: sourcesWidth }}
         >
           <SourcesPane
-            className="h-full bg-surface"
+            className="h-full"
             projectId={project.id}
             userId={user.uid}
             items={materials}
             selectedIds={selectedIds}
             onSelectedIds={setSelectedIds}
             onOpenMaterial={openMaterial}
+            readingId={readingId}
+            onCloseReading={() => setReadingId(null)}
           />
         </div>
         <button type="button" aria-label="Resize sources" onMouseDown={onSourcesResizeStart} className="absolute inset-y-0 right-0 z-10 hidden w-2 cursor-col-resize md:block" />
       </div>
-      {mobileSourcesOpen ? (
+      {mobilePane === "sources" ? (
         <SourcesPane
-          className="absolute inset-0 z-[35] md:hidden"
+          className="absolute inset-0 z-[35] bg-background md:hidden"
           projectId={project.id}
           userId={user.uid}
           items={materials}
           selectedIds={selectedIds}
           onSelectedIds={setSelectedIds}
-          onOpenMaterial={(id) => {
-            setMobileSourcesOpen(false);
-            openMaterial(id);
-          }}
-          onClose={() => setMobileSourcesOpen(false)}
+          onOpenMaterial={openMaterial}
+          readingId={readingId}
+          onCloseReading={() => setReadingId(null)}
         />
       ) : null}
       <div className="pointer-events-none absolute left-3 top-1 z-40 hidden md:flex">
@@ -717,7 +713,7 @@ export function ProjectView({
       <div className="pointer-events-none absolute right-3 top-1 z-40 hidden md:flex">
         <QuietIconCluster className="pointer-events-auto" size={18} actions={[panelToggleAction]} />
       </div>
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
+      <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${mobilePane === "chat" ? "" : "max-md:hidden"}`}>
         {shareNotice ? (
           <div
             role={shareNotice === "error" ? "alert" : "status"}
@@ -757,7 +753,6 @@ export function ProjectView({
           chatLayoutWidth={panelOpen ? artifactWidth : 0}
           studioRequest={studioRequest}
           onStudioRequestHandled={(id) => setStudioRequest((current) => (current?.id === id ? null : current))}
-          onBusyChange={setChatBusy}
         />
       </div>
       <div
@@ -766,25 +761,27 @@ export function ProjectView({
         style={{ width: panelOpen ? artifactWidth : 0 }}
       />
       <div
-        className={`artifact-panel-slot absolute inset-y-0 right-0 z-30 max-w-full bg-surface shrink-0 overflow-hidden ${
+        className={`artifact-panel-slot edge-stroke absolute inset-y-0 right-0 z-30 max-w-full bg-surface md:rounded-tl-2xl shrink-0 overflow-hidden ${
+          mobilePane === "studio" ? "mobile-page max-md:pointer-events-auto" : "max-md:hidden"
+        } ${
           panelExpanded
             ? "max-md:max-w-none"
             : "max-md:top-0 max-md:bottom-0 max-md:h-auto max-md:!w-full max-md:max-w-none"
         } ${
           resizing ? "artifact-panel-resizing" : ""
-        } ${panelOpen ? "pointer-events-auto" : "pointer-events-none"}`}
+        } ${studioShown ? "pointer-events-auto" : "pointer-events-none"}`}
         style={{
-          width: panelOpen ? (panelExpanded ? "100%" : artifactWidth) : 0,
+          width: studioShown ? (phone || panelExpanded ? "100%" : artifactWidth) : 0,
           ["--composer-height" as string]: `${composerHeight}px`,
         }}
-        aria-hidden={!panelOpen}
-        inert={panelOpen ? undefined : true}
+        aria-hidden={!studioShown}
+        inert={studioShown ? undefined : true}
       >
         <div
-          className={`h-full shrink-0 transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${panelOpen ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-y-0 right-0 h-full overflow-hidden transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${studioShown ? "opacity-100" : "opacity-0"}`}
           style={{
-            width: panelExpanded ? "100%" : artifactWidth,
-            minWidth: panelExpanded ? undefined : artifactWidth,
+            width: phone || panelExpanded ? "100%" : artifactWidth,
+            minWidth: phone || panelExpanded ? undefined : artifactWidth,
           }}
         >
           <ArtifactPanel
@@ -792,12 +789,13 @@ export function ProjectView({
             userId={user.uid}
             listedProject
             onStudioCreate={createFromStudio}
-            studioBusy={chatBusy || studioRequest !== null}
-            generatingLabel={studioRequest?.label ?? (chatBusy ? "Studio" : null)}
+            studioBusy={studioRequest !== null || notesLive != null || pathLive != null}
+            generatingLabel={
+              studioRequest?.label ?? (notesLive != null || pathLive != null ? "Studio" : null)
+            }
             focus={focus}
             session={session}
             onResizeStart={onResizeStart}
-            onClosePanel={closePanel}
             onCloseMaterial={closeMaterial}
             onStartPractice={startPractice}
             onExitSession={exitSession}
@@ -812,32 +810,33 @@ export function ProjectView({
           />
         </div>
       </div>
-      {sourcePreviewId ? (
-        <LibraryFilePreview
-          target={{ projectId: project.id, id: sourcePreviewId, title: materials.find((item) => item.id === sourcePreviewId)?.title }}
-          items={materials.map((item): LibraryItem => ({
-            key: `material:${item.projectId}:${item.id}`,
-            kind: "material",
-            id: item.id,
-            projectId: item.projectId,
-            projectTitle: project.title,
-            title: item.title,
-            preview: item.extractedTextPreview,
-            meta: item.type,
-            createdAt: item.createdAt,
-            materialType: item.type,
-            sizeBytes: item.sizeBytes,
-            pageCount: item.pageCount,
-            hasImages: item.hasImages,
-            images: item.images,
-            storagePath: item.storagePath,
-            previewPagePath: item.previewPagePath,
-          }))}
-          onSelect={(item) => setSourcePreviewId(item.id)}
-          onDeleted={() => setSourcePreviewId(null)}
-          onClose={() => setSourcePreviewId(null)}
-        />
-      ) : null}
+      </div>
+      <nav aria-label="Workspace" className="mobile-tabbar flex shrink-0 border-t border-border bg-background md:hidden">
+        {(
+          [
+            ["chat", "Chat", "chat"],
+            ["sources", "Sources", "materials"],
+            ["studio", "Studio", "spark"],
+          ] as const
+        ).map(([id, label, icon]) => (
+          <button
+            key={id}
+            type="button"
+            aria-current={mobilePane === id ? "page" : undefined}
+            onClick={() => {
+              const active = document.activeElement;
+              if (active instanceof HTMLElement) active.blur();
+              setMobilePane(id);
+            }}
+            className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px] ${
+              mobilePane === id ? "text-foreground" : "text-muted"
+            }`}
+          >
+            <UiIcon name={icon} size={18} />
+            {label}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

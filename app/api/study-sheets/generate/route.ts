@@ -9,6 +9,19 @@ function encodeSse(payload: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+function noteText(blocks: unknown[]): string {
+  return blocks
+    .flatMap((block) => {
+      if (!block || typeof block !== "object") return [];
+      const row = block as Record<string, unknown>;
+      const bits = [row.title, row.text, row.formula, row.content].filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      );
+      return bits.length ? [bits.join("\n")] : [];
+    })
+    .join("\n\n");
+}
+
 function compileSources(sources: unknown[]): string {
   return sources
     .flatMap((item) => {
@@ -79,11 +92,8 @@ export async function POST(request: Request) {
     "Write for a student who knows nothing yet. Meaning first. Never a jargon label or a formula without saying what it is.",
     instruction ? `Instruction: ${instruction}` : null,
     currentTitle ? `Current title: ${currentTitle}` : null,
-    currentBlocks.length
-      ? `Current note blocks (replace in place, same note):\n${clipText(JSON.stringify(currentBlocks), SHEET_TOTAL_CHARS)}`
-      : null,
-    currentContent && currentBlocks.length === 0
-      ? `Legacy note text to rebuild as blocks:\n${clipText(currentContent, SHEET_TOTAL_CHARS)}`
+    currentContent || currentBlocks.length
+      ? `Current note to rewrite as text:\n${clipText(currentContent || noteText(currentBlocks), SHEET_TOTAL_CHARS)}`
       : null,
     compiled.trim() ? `Sources:\n${clipText(compiled, SHEET_TOTAL_CHARS)}` : null,
   ]
@@ -99,9 +109,7 @@ export async function POST(request: Request) {
         for await (const event of streamNotesDocument(userPrompt, { usage: usage.report })) {
           if (request.signal.aborted) break;
           if (event.type === "status") send({ status: event.status });
-          else if (event.type === "title") send({ title: event.title });
-          else if (event.type === "block") send({ block: event.block });
-          else if (event.type === "done") send({ done: true, title: event.title, blocks: event.blocks });
+          else if (event.type === "done") send({ done: true, title: event.title, content: event.content });
           else if (event.type === "error") {
             send({ error: event.error });
             break;

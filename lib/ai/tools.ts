@@ -64,17 +64,17 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "answer",
     description:
-      "Answer an ordinary question or complete a direct text task in the user's language. Use it when no more specific action tool is needed. Pass question only when the user explicitly asked for a check or to move on. Do not add chips, a quiz, or a confirmation question to a simple request.",
+      "Answer an ordinary question or complete a direct text task in the user's language. Use it when no more specific action tool is needed. Pass question only when the user explicitly asked for a check or to move on. After an explanation, pass 1–2 options that are the next questions the user would type. Do not add chips or a quiz to a simple request.",
     parameters: {
       type: "object",
       properties: {
         question: {
           type: "string",
-          description: "Only when they asked to move on or for a check: a sentence to complete, same shape as the example. Separate message. Not yes/no. Not \"what is this called?\" / \"which tense describes…\".",
+          description: "Only when they asked to practice or to move on. One short markdown heading they can answer. A table or display math may follow in the same string. Not a restatement of the explanation.",
         },
         options: {
           type: "array",
-          description: "Optional 2-4 short tap answers that are candidate FORMS (will finish / will have finished), not topic names. Same language. Do not include Other/სხვა.",
+          description: "1–2 questions the user would type next, in their voice and language, each ending with ?. Not a summary, not a statement of the answer, not a question from you to them. Omit on a one-step fact. On a real check, these are candidate forms instead.",
           items: { type: "string" },
         },
       },
@@ -160,7 +160,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "suggest_practice",
     description:
-      "Offer a practice or exam chip after a short briefing when the user is exploring rather than directly ordering a set. Use mode exam when they asked to be tested. Do not use after an ordinary explanation or for form-writing. Use create_practice instead for a slash, accepted chip, or direct creation request.",
+      "Offer a Studio quiz chip after an explanation when working the idea would help. Do not write the quiz, a question, or a check in the chat. Do not use it for a one-line fact, a simple task, or Fast. Use create_practice for a slash, accepted chip, or direct request.",
     parameters: {
       type: "object",
       properties: {

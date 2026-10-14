@@ -8,18 +8,16 @@ import { subscribeStudyPaths } from "@/lib/paths/store";
 import { liveStudyPath } from "@/lib/paths/model";
 import { PathView } from "@/components/workspace/path-view";
 import { StatusWait } from "@/components/workspace/status-wait";
-import { formatBytes, shortDate } from "@/lib/format";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
 import type { SetResult } from "@/lib/exercises/session";
 import { PracticeSession } from "@/components/exercises/practice-session";
+import { RichContent } from "@/components/rich-content";
 import { NoteDocument, NoteTitle } from "@/components/visuals/note-document";
 import { VisualList } from "@/components/visuals/visual-block";
 import { QuietIconCluster } from "@/components/workspace/quiet-icon-cluster";
-import { MaterialViewer } from "@/components/workspace/material-viewer";
 import { ProjectSettingsPane } from "@/components/workspace/project-settings-pane";
-import { LibraryCardThumb } from "@/components/library-media";
 import { FileKindIcon } from "@/components/workspace/file-kind-icon";
-import { LibraryFilePreview } from "@/components/library-file-preview";
+import { MaterialText } from "@/components/workspace/material-text";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { StudioPane } from "@/components/workspace/studio-pane";
 import { createStudySheet } from "@/lib/study-sheets/store";
@@ -28,7 +26,6 @@ import { useAuth } from "@/components/auth-provider";
 import { isGuestUser } from "@/lib/guest";
 import type { ChatArtifact, ChatMessage } from "@/types/chat";
 import type { Material } from "@/types/material";
-import type { LibraryItem } from "@/lib/library/items";
 import type { PathLiveState, StudyPath } from "@/types/path";
 import type { NotesLiveState, StudySheet } from "@/types/study-sheet";
 import type { VisualBlock } from "@/types/visual";
@@ -45,7 +42,6 @@ export function ArtifactPanel({
   focus,
   session,
   onResizeStart,
-  onClosePanel,
   onCloseMaterial,
   onStartPractice,
   onExitSession,
@@ -67,7 +63,6 @@ export function ArtifactPanel({
   focus: ArtifactFocus | null;
   session: { setId: string; ids: string[]; mode?: "practice" | "exam" } | null;
   onResizeStart: (event: MouseEvent) => void;
-  onClosePanel?: () => void;
   onCloseMaterial?: () => void;
   onStartPractice: (artifact: ChatArtifact) => void;
   onExitSession: () => void;
@@ -230,11 +225,9 @@ export function ArtifactPanel({
 
   const selectedMaterial = materials.find((item) => item.id === materialId) ?? null;
   const selectedSheet = sheets.find((item) => item.id === sheetId) ?? null;
-  const selectedSet = practiceSets.find((item) => item.id === practiceId) ?? null;
   const hideTopBar = Boolean(session) ||
     (tab === "materials" && Boolean(selectedMaterial)) ||
     (tab === "sheets" && (Boolean(selectedSheet) || Boolean(liveNote))) ||
-    (tab === "practice" && Boolean(selectedSet)) ||
     (tab === "path" && Boolean(selectedPath || livePath));
 
   useLayoutEffect(() => {
@@ -245,7 +238,7 @@ export function ArtifactPanel({
     if (!liveNote || liveNote.status || !liveNote.sheetId || !onLiveSettled) return;
     const saved = sheets.find((item) => item.id === liveNote.sheetId) ?? selectedSheet;
     if (!saved || saved.id !== liveNote.sheetId) return;
-    if (!notesMatch(saved.blocks, liveNote.blocks)) return;
+    if (!notesReady(saved, liveNote)) return;
     onLiveSettled();
   }, [liveNote, selectedSheet, sheets, onLiveSettled]);
 
@@ -263,7 +256,7 @@ export function ArtifactPanel({
         onMouseDown={onResizeStart}
         className="absolute inset-y-0 left-0 z-10 hidden w-2 cursor-col-resize md:block"
       />
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
         {session ? (
           <PracticeSession
             projectId={projectId}
@@ -280,13 +273,7 @@ export function ArtifactPanel({
         ) : (
           <>
             {tab === "materials" && selectedMaterial ? null : hideTopBar ? null : (
-            <header className="flex h-11 shrink-0 items-center gap-1 bg-surface py-0 pl-2 pr-12">
-              {onClosePanel ? (
-                <button type="button" onClick={onClosePanel} aria-label="Back to chat" title="Back to chat" className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[12px] text-muted transition-colors hover:bg-surface-2 hover:text-foreground md:hidden">
-                  <UiIcon name="back" size={16} />
-                  <span>Chat</span>
-                </button>
-              ) : null}
+            <header className="flex h-11 shrink-0 items-center gap-1 bg-transparent py-0 pl-2 pr-12">
               <nav className="flex min-w-0 flex-1 items-center">
                 <QuietIconCluster
                   size={18}
@@ -347,10 +334,8 @@ export function ArtifactPanel({
                     }
                   }}
                   onOpenPractice={(id) => {
-                    setTab("practice");
-                    setPracticeId(id);
                     const found = practiceSets.find((item) => item.id === id);
-                    if (found) onActivate?.(found);
+                    if (found) onStartPractice(found);
                   }}
                   onOpenPath={() => setTab("path")}
                   onAddNote={async ({ title, text }) => {
@@ -415,15 +400,11 @@ export function ArtifactPanel({
               {tab === "practice" && (
                 <PracticeView
                   items={practiceSets}
-                  selected={selectedSet}
                   progress={progress}
                   onSelect={(id) => {
-                    setPracticeId(id);
                     const found = practiceSets.find((item) => item.id === id);
-                    if (found) onActivate?.(found);
+                    if (found) onStartPractice(found);
                   }}
-                  onBack={() => setPracticeId(null)}
-                  onStart={(artifact) => onStartPractice(artifact)}
                 />
               )}
             </div>
@@ -502,75 +483,38 @@ function MaterialsView({
         </div>
       );
     }
-    if (usesOverlayPreview(selected)) {
-      const previewItems: LibraryItem[] = items.map((item) => ({
-        key: `material:${item.projectId}:${item.id}`, kind: "material", id: item.id,
-        projectId: item.projectId, projectTitle: "", title: item.title,
-        preview: item.extractedTextPreview, meta: item.type, createdAt: item.createdAt,
-        materialType: item.type, sizeBytes: item.sizeBytes, pageCount: item.pageCount,
-        hasImages: item.hasImages, images: item.images, storagePath: item.storagePath,
-        previewPagePath: item.previewPagePath,
-      }));
-      return <>
-        <MaterialGrid items={items} selectedId={selectedId} onSelect={onSelect} />
-        <LibraryFilePreview
-          key={selected.id}
-          target={{ projectId: selected.projectId, id: selected.id, title: selected.title }}
-          items={previewItems}
-          onSelect={(item) => onSelect(item.id)}
-          onDeleted={() => undefined}
-          onClose={onCloseSelected}
-        />
-      </>;
-    }
-    return <MaterialViewer key={selected.id} material={selected} onClose={onCloseSelected} onBack={() => onSelect(null)} />;
+    return <MaterialText key={selected.id} material={selected} onBack={() => onSelect(null)} />;
   }
 
   return <MaterialGrid items={items} selectedId={selectedId} onSelect={onSelect} />;
 }
 
-function MaterialGrid({ items, selectedId, onSelect }: {
+function MaterialGrid({ items, onSelect }: {
   items: Material[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
   return (
-    <div className="artifact-grid-container">
-      <div className="artifact-tile-grid">
+    <ul className="space-y-0.5 px-2 py-2">
       {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          onClick={() => onSelect(item.id)}
-          className={`group min-w-0 text-left ${selectedId === item.id ? "opacity-80" : ""}`}
-        >
-          <div className="artifact-panel-block aspect-[4/3] overflow-hidden rounded-2xl">
-            <LibraryCardThumb item={{
-              key: `material:${item.projectId}:${item.id}`, kind: "material", id: item.id,
-              projectId: item.projectId, projectTitle: "", title: item.title,
-              preview: item.extractedTextPreview, meta: item.type, createdAt: item.createdAt,
-              materialType: item.type, sizeBytes: item.sizeBytes, pageCount: item.pageCount,
-              hasImages: item.hasImages, images: item.images, storagePath: item.storagePath,
-              previewPagePath: item.previewPagePath,
-            }} />
-          </div>
-          <p className="mt-2 truncate text-[13px] text-foreground">{item.title}</p>
-          <p className="mt-0.5 truncate text-[12px] text-muted">
-            {[item.type.toUpperCase(), formatBytes(item.sizeBytes), shortDate(item.createdAt)].filter(Boolean).join(" · ")}
-          </p>
-        </button>
+        <li key={item.id} className="list-none">
+          <button
+            type="button"
+            onClick={() => onSelect(item.id)}
+            className="flex w-full items-center px-2 py-2 text-left"
+          >
+            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{item.title}</span>
+          </button>
+        </li>
       ))}
-      </div>
-    </div>
+    </ul>
   );
 }
 
-function usesOverlayPreview(material: Material): boolean {
-  return material.type === "pptx" || material.type === "docx" || material.type === "xlsx" || /\.(?:ppt|pptx|doc|docx|xls|xlsx)$/i.test(material.originalName || material.storagePath);
-}
-
-function notesMatch(a: VisualBlock[], b: VisualBlock[]): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+function notesReady(saved: StudySheet, live: NotesLiveState): boolean {
+  const content = live.content?.trim() ?? "";
+  if (content) return (saved.prose || saved.content).trim() === content;
+  return JSON.stringify(saved.blocks) === JSON.stringify(live.blocks);
 }
 
 function formatDateTime(iso: string | null): string {
@@ -607,13 +551,14 @@ function SheetsView({
       !selected ||
       !liveNote?.sheetId ||
       selected.id !== liveNote.sheetId ||
-      !notesMatch(selected.blocks, liveNote.blocks));
+      !notesReady(selected, liveNote));
 
   if (showLive && liveNote) {
     return (
       <LiveNoteView
         title={liveNote.title || "Notes"}
         blocks={liveNote.blocks}
+        content={liveNote.content}
         status={liveNote.status}
         onBack={onBack}
       />
@@ -667,22 +612,18 @@ function SheetsView({
 function LiveNoteView({
   title,
   blocks,
+  content,
   status,
   onBack,
 }: {
   title: string;
   blocks: VisualBlock[];
+  content?: string;
   status: string | null;
   onBack: () => void;
 }) {
-  const scrollerRef = useRef<HTMLDivElement>(null);
   const busy = Boolean(status);
-
-  useLayoutEffect(() => {
-    const node = scrollerRef.current;
-    if (!node) return;
-    node.scrollTop = node.scrollHeight;
-  }, [blocks.length, status]);
+  const prose = content?.trim() ?? "";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -702,61 +643,30 @@ function LiveNoteView({
           <ArtifactBack label={title} onBack={onBack} flush />
         </div>
       </div>
-      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <NoteTitle text={title} />
-        <VisualList blocks={blocks} appear />
-      </div>
+      {busy ? (
+        <div className="min-h-0 flex-1" />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <NoteTitle text={title} />
+          {blocks.length > 0 ? <VisualList blocks={blocks} /> : prose ? <RichContent text={prose} /> : null}
+        </div>
+      )}
     </div>
   );
 }
 
 function PracticeView({
   items,
-  selected,
   progress,
   onSelect,
-  onBack,
-  onStart,
 }: {
   items: ChatArtifact[];
-  selected: ChatArtifact | null;
   progress: Record<string, number>;
   onSelect: (id: string) => void;
-  onBack: () => void;
-  onStart: (artifact: ChatArtifact) => void;
 }) {
   if (items.length === 0) {
     return (
       <EmptyState title="No practice sets yet" body="Ask to practice a topic in chat. Generated sets will land here." />
-    );
-  }
-
-  if (selected) {
-    const count = selected.count ?? selected.ids?.length ?? 0;
-    const saved = progress[selected.id] ?? 0;
-    return (
-      <div className="flex h-full min-h-0 flex-col">
-        <ArtifactBack label={`${selected.mode === "exam" ? "Exam" : "Practice set"} · ${count}`} onBack={onBack} />
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 py-10 text-center">
-          <p className="text-[15px] font-medium tracking-tight text-foreground">
-            {selected.mode === "exam" ? "Exam" : "Practice set"} · {count} items
-          </p>
-          <p className="mt-2 max-w-[240px] text-[13px] leading-5 text-muted">
-            {saved > 0
-              ? `Resume from item ${saved + 1}.`
-              : selected.mode === "exam"
-                ? "One check each. About 50% counts as a pass."
-                : "Work through mistakes until you finish."}
-          </p>
-          <button
-            type="button"
-            onClick={() => onStart(selected)}
-            className="mt-5 rounded-full border border-border px-4 py-1.5 text-[13px] text-foreground hover:bg-surface-2"
-          >
-            {saved > 0 ? "Continue" : "Start"}
-          </button>
-        </div>
-      </div>
     );
   }
 
@@ -772,7 +682,7 @@ function PracticeView({
             onClick={() => onSelect(item.id)}
             className="artifact-panel-block block w-full rounded-xl px-3 py-2.5 text-left hover:bg-surface-2"
           >
-            <p className="truncate text-[13px] text-foreground">Practice set · {count} items</p>
+            <p className="truncate text-[13px] text-foreground">Quiz · {count} items</p>
             <p className="mt-0.5 text-[11px] text-muted">{saved > 0 ? `Saved at ${saved + 1}` : "Ready to start"}</p>
           </button>
         );

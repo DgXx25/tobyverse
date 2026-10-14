@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Fragment, forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { authHeaders } from "@/lib/api/client";
 import { gradeObjective, isObjectiveType, isProblemTypeForHints } from "@/lib/exercises/grade";
@@ -130,7 +130,7 @@ export const ExercisePlayer = forwardRef<
   }
 
   return (
-    <div className={`mx-auto w-full ${item.type === "paper" ? "" : "max-w-xl"} ${checked ? "pointer-events-none" : ""}`}>
+    <div className={`mx-auto w-full min-w-0 max-md:max-w-none ${item.type === "paper" ? "" : item.type === "connect" ? "max-w-2xl" : "max-w-lg"} ${checked ? "pointer-events-none" : ""}`}>
       <div>
         {item.type === "mcq" && (
           <McqPlay data={item.data as McqPayload} checked={checked} onSelect={(id) => setAnswer(id, Boolean(id))} />
@@ -288,6 +288,43 @@ function connectClass(state: "idle" | "pick" | "ok" | "bad" | "done") {
 const CONNECT_TONE =
   "disabled:opacity-100 transition-[border-color,background-color,opacity,color] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
+function shuffleItems<T>(items: T[]): T[] {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const swap = next[i];
+    next[i] = next[j];
+    next[j] = swap;
+  }
+  return next;
+}
+
+/** Left and right are shuffled independently, then right is nudged so a match is not across from its partner. */
+function layoutConnect(data: ConnectPayload): { left: ConnectPayload["left"]; right: ConnectPayload["right"] } {
+  const left = shuffleItems(data.left);
+  const partner = new Map(data.pairs.map((pair) => [pair.leftId, pair.rightId]));
+  const right = shuffleItems(data.right);
+  const n = Math.min(left.length, right.length);
+  if (n < 2) return { left, right };
+
+  for (let pass = 0; pass < n; pass += 1) {
+    for (let i = 0; i < n; i += 1) {
+      if (right[i].id !== partner.get(left[i].id)) continue;
+      for (let j = 0; j < n; j += 1) {
+        if (j === i) continue;
+        const iFree = right[j].id !== partner.get(left[i].id);
+        const jFree = right[i].id !== partner.get(left[j].id);
+        if (!iFree || !jFree) continue;
+        const swap = right[i];
+        right[i] = right[j];
+        right[j] = swap;
+        break;
+      }
+    }
+  }
+  return { left, right };
+}
+
 function McqPlay({
   data,
   onSelect,
@@ -312,7 +349,7 @@ function McqPlay({
               setPicked(option.id);
               onSelect(option.id);
             }}
-            className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-4 text-left text-[15px] leading-6 disabled:opacity-90 ${optionClass(choiceState(picked === option.id, checked, option.id === data.correctOptionId))}`}
+            className={`flex w-full min-w-0 items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm leading-5 break-words disabled:opacity-90 ${optionClass(choiceState(picked === option.id, checked, option.id === data.correctOptionId))}`}
           >
             <CatalogVisual kind={option.visual?.kind} id={option.visual?.id} className="shrink-0" />
             <span>{option.text}</span>
@@ -350,7 +387,7 @@ function TrueFalsePlay({
               setPicked(option.value);
               onSelect(option.value);
             }}
-            className={`block w-full rounded-2xl border px-4 py-4 text-left text-[15px] leading-6 disabled:opacity-90 ${optionClass(choiceState(picked === option.value, checked, option.value === data.answer))}`}
+            className={`block w-full rounded-2xl border px-3 py-3 text-left text-sm leading-5 disabled:opacity-90 ${optionClass(choiceState(picked === option.value, checked, option.value === data.answer))}`}
           >
             {option.label}
           </button>
@@ -374,6 +411,7 @@ function ConnectPlay({
   checked: boolean;
 }) {
   const reduceMotion = useReducedMotion();
+  const [columns] = useState(() => layoutConnect(data));
   const [selected, setSelected] = useState<string | null>(null);
   const [locked, setLocked] = useState<{ leftId: string; rightId: string }[]>([]);
   const [faded, setFaded] = useState<Set<string>>(() => new Set());
@@ -434,35 +472,49 @@ function ConnectPlay({
 
   return (
     <div>
-      <p className="text-lg font-medium leading-7 text-foreground">{data.prompt}</p>
+      <p className="text-lg font-medium leading-7 text-foreground md:text-xl">{data.prompt}</p>
       <StemVisual visual={data.visual} />
-      <div className="mt-6 grid grid-cols-2 gap-3">
-        <div className="space-y-2">
-          {data.left.map((item) => (
+      <div className="mt-5 grid grid-cols-2 items-start gap-x-3 gap-y-2.5">
+        {columns.left.map((item, index) => {
+          const match = columns.right[index];
+          return (
+            <Fragment key={item.id}>
+              <button
+                type="button"
+                disabled={checked || lockedLeft.has(item.id) || Boolean(miss)}
+                onClick={() => setSelected(item.id)}
+                className={`block w-full min-w-0 break-words rounded-xl border px-3 py-3 text-left text-[15px] leading-5 ${CONNECT_TONE} ${connectClass(tone(item.id, "left"))}`}
+              >
+                {item.text}
+              </button>
+              {match ? (
+                <button
+                  type="button"
+                  disabled={checked || lockedRight.has(match.id) || Boolean(miss)}
+                  onClick={() => pickRight(match.id)}
+                  className={`block w-full min-w-0 break-words rounded-xl border px-3 py-3 text-left text-[15px] leading-5 ${CONNECT_TONE} ${connectClass(tone(match.id, "right"))}`}
+                >
+                  {match.text}
+                </button>
+              ) : (
+                <span />
+              )}
+            </Fragment>
+          );
+        })}
+        {columns.right.slice(columns.left.length).map((item) => (
+          <Fragment key={item.id}>
+            <span />
             <button
-              key={item.id}
-              type="button"
-              disabled={checked || lockedLeft.has(item.id) || Boolean(miss)}
-              onClick={() => setSelected(item.id)}
-              className={`block w-full rounded-2xl border px-4 py-3 text-left text-sm ${CONNECT_TONE} ${connectClass(tone(item.id, "left"))}`}
-            >
-              {item.text}
-            </button>
-          ))}
-        </div>
-        <div className="space-y-2">
-          {data.right.map((item) => (
-            <button
-              key={item.id}
               type="button"
               disabled={checked || lockedRight.has(item.id) || Boolean(miss)}
               onClick={() => pickRight(item.id)}
-              className={`block w-full rounded-2xl border px-4 py-3 text-left text-sm ${CONNECT_TONE} ${connectClass(tone(item.id, "right"))}`}
+              className={`block w-full min-w-0 break-words rounded-xl border px-3 py-3 text-left text-[15px] leading-5 ${CONNECT_TONE} ${connectClass(tone(item.id, "right"))}`}
             >
               {item.text}
             </button>
-          ))}
-        </div>
+          </Fragment>
+        ))}
       </div>
     </div>
   );
@@ -637,7 +689,7 @@ function CaseTreePlay({
                   setPicked(choice.id);
                   onSelect(choice.isCorrect !== false);
                 }}
-                className={`block w-full rounded-2xl border px-4 py-4 text-left text-[15px] leading-6 ${optionClass(choiceState(picked === choice.id, checked, choice.isCorrect !== false))}`}
+                className={`block w-full break-words rounded-2xl border px-3 py-3 text-left text-sm leading-5 ${optionClass(choiceState(picked === choice.id, checked, choice.isCorrect !== false))}`}
               >
                 {choice.label}
               </button>

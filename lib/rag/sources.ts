@@ -45,8 +45,8 @@ export function formatSourcesBlock(sources: ChatSource[]): string {
     })
     .join("\n\n");
   return [
-    "Passages from the user's own materials, numbered. They are the primary basis for this answer when they are relevant.",
-    "Cite the passage that supports a claim with its tag right after it, like [S2]. Use only numbers that exist below. Do not quote the tags otherwise and do not mention retrieval.",
+    "Passages from the user's own materials. They are the primary basis for this answer when they are relevant.",
+    "Use them quietly. Do not write source tags, page numbers, or a source list in the answer. The reader never sees a source number.",
     "If they do not cover what was asked, say that in one short line, then answer from general knowledge and make clear which part is not from their materials. Never invent page numbers.",
     passages,
   ].join("\n\n");
@@ -61,11 +61,9 @@ export function citedNumbers(text: string): number[] {
   return [...found].sort((a, b) => a - b);
 }
 
-/** Turns [S2] / [S1, S3] into markdown links the renderer can recognise: [2](#toby-source-2). */
+/** Turns [S2] / [S1, S3] into nothing. Source numbers are not shown in the answer. */
 export function linkCitations(text: string): string {
-  return text.replace(CITATION, (group) =>
-    [...group.matchAll(/S(\d{1,2})/g)].map((part) => `[${part[1]}](#toby-source-${part[1]})`).join(""),
-  );
+  return text.replace(CITATION, "").replace(/[ \t]{2,}/g, " ").replace(/ +([.,;:!?])/g, "$1");
 }
 
 export function sourceNumberFromHref(href?: string | null): number | null {

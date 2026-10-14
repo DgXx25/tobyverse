@@ -40,7 +40,7 @@ export function CitationMark({ n }: { n: number }) {
       onClick={() => context?.onOpen?.(source.materialId)}
       title={source.snippet ? `${label}\n\n${source.snippet}` : label}
       aria-label={`Source ${n}: ${label}`}
-      className="mx-[2px] inline-flex h-[17px] min-w-[17px] -translate-y-px items-center justify-center rounded-full border border-border bg-surface-2 px-1 align-baseline text-[10px] font-medium leading-none text-muted transition-colors hover:border-foreground/30 hover:text-foreground"
+      className="mx-[2px] inline-flex h-[17px] min-w-[17px] -translate-y-px items-center justify-center rounded-full bg-surface px-1 align-baseline text-[10px] font-medium leading-none text-muted transition-colors hover:text-foreground"
     >
       {n}
     </button>
@@ -66,9 +66,9 @@ export function CitedSources({
             type="button"
             onClick={() => onOpen?.(source.materialId)}
             title={source.snippet || describe(source)}
-            className="inline-flex h-7 max-w-[min(100%,260px)] items-center gap-1.5 rounded-full border border-border bg-surface px-2 text-[12px] leading-none text-muted transition-colors hover:border-foreground/25 hover:text-foreground"
+            className="inline-flex h-7 max-w-[min(100%,260px)] items-center gap-1.5 rounded-full bg-surface px-2 text-[12px] leading-none text-muted transition-colors hover:text-foreground"
           >
-            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-2 text-[10px] font-medium text-foreground">
+            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-surface text-[10px] font-medium text-foreground">
               {source.n}
             </span>
             <span className="min-w-0 truncate">{source.title}</span>
