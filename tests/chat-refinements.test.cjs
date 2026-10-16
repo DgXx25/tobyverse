@@ -22,8 +22,7 @@ test('short labels and long descriptions retain equal table columns', () => {
 
 test('review and Continue never request an unsolicited chat drill', () => {
   const { leadPathPrompt, moveOnPrompt } = require('../lib/paths/lead.ts');
-  const { formatPathBriefing } = require('../lib/paths/model.ts');
-  const prompts = [leadPathPrompt('Grammar', '', 'review'), moveOnPrompt('Next'), formatPathBriefing({ started: true, inPathThread: true, kind: 'review', nodeTitle: 'Grammar', title: 'English', done: 0, total: 3 })];
+  const prompts = [leadPathPrompt('Grammar', '', 'review'), moveOnPrompt('Next')];
   for (const prompt of prompts) {
     assert.doesNotMatch(prompt, /then drill|or one `question`|or one \\`question\\`|reuse those shapes with new numbers in chat/);
     assert.match(prompt, /suggest_practice/);

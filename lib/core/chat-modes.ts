@@ -27,21 +27,14 @@ export function chatModeTools(mode: ChatMode): readonly ChatToolName[] {
   return eligibleChatToolNames(asChatMode(mode));
 }
 
-/** Every reply style sends the same registry filtered only by eligibility. */
+/** Every mode sends the same registry filtered only by eligibility. */
 export function chatModeSendsToolDeclarations(_mode: ChatMode): boolean {
   return true;
 }
 
-export const CHAT_MODE_INSTRUCTIONS: Record<ChatMode, string> = {
-  auto:
-    "Answer clearly. Match what they asked. Chips under the answer are questions the user would type next, not a recap. Do not interview them or add a check they did not ask for.",
-  fast:
-    "Keep replies concise and plain, preserving essential context. Direct answer first. Choose a format that helps the request. No chips.",
-  teacher:
-    "When they are learning, a hint before the answer may help. Match their request; do not force a lesson or simplification. Never add a quiz they did not ask for.",
-};
+/** Compatibility exports for consumers such as the admin inventory. Modes add no prompt text. */
+export const CHAT_MODE_INSTRUCTIONS: Record<ChatMode, string> = { auto: "", fast: "", teacher: "" };
 
-export function chatSystemInstruction(mode: ChatMode, extra?: string): string {
-  const base = CHAT_MODE_INSTRUCTIONS[asChatMode(mode)];
-  return extra ? `${base}\n\n${extra}` : base;
+export function chatSystemInstruction(_mode: ChatMode, extra?: string): string {
+  return extra ?? "";
 }

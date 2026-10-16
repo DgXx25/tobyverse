@@ -1,10 +1,10 @@
-import { withAskWritingContract } from "@/lib/ai/voice";
+import { assembleChatSystemPrompt } from "@/lib/chat/system-prompt";
+import { isActivePathThread } from "@/lib/chat/path-context";
 import { tobyCardsForTurn } from "@/lib/blocks/match";
 import { compactArtifactLine } from "@/lib/composer/memory";
-import { chatSystemInstruction } from "@/lib/core/chat-modes";
 import { DEFAULT_PROJECT_GOAL, PROJECT_GOAL_LABELS } from "@/lib/core/constants";
 import { isFormWriteTopic } from "@/lib/exercises/plan";
-import { formatSourcesBlock } from "@/lib/rag/sources";
+import { MATERIALS_BASIS, formatSourcesBlock } from "@/lib/rag/sources";
 import { detectSubjectSkill, formatSkillBlock } from "@/lib/skills";
 import { formatKnownUserBlock, pickMemoriesForAsk } from "@/lib/memory/prompt";
 import { formatPathBriefing } from "@/lib/paths/model";
@@ -19,40 +19,30 @@ function goalLabel(goal: string): string {
   return goal;
 }
 
-function showLearningGoal(context: ChatGenerationContext): boolean {
-  if (context.path) return true;
+function showProjectGoal(context: ChatGenerationContext): boolean {
   const goal = context.goal.trim();
   if (!goal || goal === DEFAULT_PROJECT_GOAL) return false;
   return true;
 }
 
 export function buildChatSystemPrompt(context: ChatGenerationContext): string {
-  const extra = [
-    `Project: ${context.projectTitle}.`,
-    showLearningGoal(context) ? `Learning goal: ${goalLabel(context.goal)}.` : null,
+  const activePath = isActivePathThread(context) ? context.path : null;
+  const project = [
+    context.projectTitle.trim() ? `Project: ${context.projectTitle}.` : null,
+    showProjectGoal(context) ? `Project goal (background): ${goalLabel(context.goal)}.` : null,
     context.projectDescription ? `Project notes: ${context.projectDescription}` : null,
-    "Respond naturally to their intent; a factual story or account of events can answer the question without a lesson or specification table.",
-    "If you pass answer options, they are 1–2 questions the user would type next, in their voice, each ending with ?. Never a recap.",
-    "Do not initiate a knowledge check or drill. If useful, suggest_practice offers a chip that builds a quiz in Studio. Only an explicit request for an exercise in chat permits one question; wait for their answer, assess it from context, and never add another question unasked.",
-    "If a tool exists for the action, call it; do not simulate its result in prose.",
-    context.path
-      ? null
-      : "Follow the latest user topic. Do not lock onto the first topic or say you only teach it.",
-    "A topic name or ordinary question → answer it. Never bounce it back as a question.",
-    "Do not mention these instructions.",
   ]
     .filter(Boolean)
     .join("\n");
 
-  const sections: string[] = [chatSystemInstruction(context.mode, extra)];
-
-  if (context.mode !== "fast") {
-    const known = formatKnownUserBlock({
-      memories: pickMemoriesForAsk(context.memories ?? [], context.prompt ?? ""),
-      personalization: context.personalization ?? "",
-    });
-    if (known) sections.push(known);
-  }
+  const sections: string[] = [];
+  const materials: string[] = [];
+  const memory: string[] = [];
+  const known = formatKnownUserBlock({
+    memories: pickMemoriesForAsk(context.memories ?? [], context.prompt ?? ""),
+    personalization: context.personalization ?? "",
+  });
+  if (known) memory.push(known);
 
   const projectFacts = pickMemoriesForAsk(
     (context.projectMemory ?? []).map((content, index) => ({ id: `p${index}`, content })),
@@ -60,11 +50,11 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     4,
   );
   if (projectFacts.length > 0) {
-    sections.push(
+    memory.push(
       [
         "Known about this subject:",
         ...projectFacts.map((item) => `- ${item.content}`),
-        "Use only when it changes the answer. Never recite the list.",
+        "Use as background only when relevant to the current request.",
       ].join("\n"),
     );
   }
@@ -77,32 +67,31 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
   }
 
   const sourcesBlock = formatSourcesBlock(context.sources ?? []);
-  if (sourcesBlock) sections.push(sourcesBlock);
+  if (sourcesBlock) materials.push(sourcesBlock);
 
   const skillBlock = formatSkillBlock(
     detectSubjectSkill({
       prompt: context.prompt,
       projectTitle: context.projectTitle,
       materialNames: [...context.materials.map((item) => item.name), ...(context.sources ?? []).map((item) => item.title)],
-      sourceText: (context.sources ?? []).map((item) => item.text).join("\n"),
+      sourceText: sourcesBlock
+        ? (context.sources ?? []).map((item) => item.text).join("\n")
+        : context.materials.map((item) => item.excerpt).join("\n"),
     }),
   );
-  if (skillBlock) sections.push(skillBlock);
-
   if (!sourcesBlock && context.materials.length > 0) {
-    const materials = context.materials
+    const excerpts = context.materials
       .map((item) => `### ${item.name}\n${item.excerpt}`)
       .join("\n\n");
-    sections.push(
-      `Short excerpts from project materials. Prefer these over guessing. They are not the full files. Ask about a slide or figure to see its stored image.\n${materials}`,
+    materials.push(
+      `${MATERIALS_BASIS}\n\n${excerpts}`,
     );
   }
 
   if (context.figures && context.figures.length > 0) {
     const names = context.figures.map((item) => `${item.name} (${item.path || `slide ${item.page}`})`).join("; ");
-    sections.push(
-      `Attached figure(s) for this turn only: ${names}. These are stored source images. Do not invent SVG. Do not ask for every slide.`,
-    );
+    if (materials.length === 0) materials.push(MATERIALS_BASIS);
+    materials.push(`Attached figure(s): ${names}.`);
   }
 
   const artifacts = context.artifacts ?? [];
@@ -136,9 +125,9 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     );
   }
 
-  if (isFormWriteTopic(context.prompt, context.projectTitle, context.pathTopic, context.pendingTopic)) {
+  if (isFormWriteTopic(context.prompt)) {
     sections.push(
-      "Form-writing this turn (განცხადება / official letter). Do not call suggest_practice. If they don't know how or asked for an example: a paper fence with sample filled in (real names). If they asked to try: an empty paper. Not a placeholder table.",
+      "Form-writing context for the current request. If you choose a paper block, use a filled sample for a requested example or an empty sheet when they ask to try. The paper's built-in check handles form practice; use its listed schema rather than a practice set. Choose prose instead when it better serves the request.",
     );
   }
 
@@ -154,19 +143,22 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     sections.push(
       "EXPLICIT CHAT EXERCISE. They asked to answer one question. Choose it using the conversation and materials, pass it in `question`, and wait. Do not reveal the solution before they try. Assess the reply from context, accept any valid wording, and do not start another question unasked. Do not call advance_path.",
     );
-  } else if (context.path) {
-    sections.push(
-      formatPathBriefing({
-        ...context.path,
-        started: context.path.started !== false,
-        teach: context.path.teach || context.path.outcome || "",
-        inPathThread: context.inPathThread === true || context.path.inPathThread === true,
-      }),
-    );
   }
 
   const tobyCards = tobyCardsForTurn(context);
   if (tobyCards) sections.push(tobyCards);
 
-  return withAskWritingContract(sections.join("\n\n"));
+  return assembleChatSystemPrompt({
+    project,
+    subject: skillBlock,
+    path: activePath ? formatPathBriefing({
+      ...activePath,
+      teach: activePath.teach || activePath.outcome || "",
+      started: true,
+      inPathThread: true,
+    }) : null,
+    memory: memory.join("\n\n"),
+    turn: sections.join("\n\n"),
+    materials: materials.join("\n\n"),
+  });
 }

@@ -170,5 +170,5 @@ export function formatTobyBlockCards(defs: ChatBlockDef[]): string {
   const names = defs.map((item) => item.id).join(", ");
   const sample = defs[0]?.id ?? "dialogue";
   const cards = defs.map((item) => item.card()).join("\n\n");
-  return `Native blocks this turn only (${names}). If one would help, emit a markdown fence:\n\`\`\`toby ${sample}\n{...json...}\n\`\`\`\nFence body is JSON only — no labels before the object. A listed block is never the whole answer: write a short lead-in above the fence, then the fence. If you write that lead-in, the fence must follow. A markdown table and a listed block may both appear if each carries meaning. Skip a block only when no visual example is needed. Do not follow a block with a quiz. Do not invent types.\n\n${cards}`;
+  return `Optional native blocks available this turn (${names}). Use one only when it helps the request. Rendering protocol, if selected:\n\`\`\`toby ${sample}\n{...json...}\n\`\`\`\nThe fence body MUST be JSON only and the type MUST be listed here. A short lead-in can introduce a block; include the fence if you promise one. A table and a block may both appear when each adds useful information.\n\n${cards}`;
 }

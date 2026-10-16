@@ -2,6 +2,7 @@ import { CHAT_BLOCK_KINDS } from "@/lib/blocks/kinds";
 import type { ChatBlockDef } from "@/lib/blocks/types";
 import type { ChatGenerationContext } from "@/types/chat";
 import { formatTobyBlockCards } from "@/lib/blocks/registry";
+import { isActivePathThread } from "@/lib/chat/path-context";
 
 const MAX_CARDS = 2;
 
@@ -43,10 +44,10 @@ for (const def of CHAT_BLOCK_KINDS) {
 }
 
 function haystack(context: ChatGenerationContext): string {
-  const path = context.path;
+  const path = isActivePathThread(context) ? context.path : null;
   return [
     context.prompt,
-    context.pathTopic,
+    path ? context.pathTopic : null,
     context.pendingTopic,
     context.projectTitle,
     context.goal,
@@ -66,7 +67,7 @@ function wordsIn(text: string): string[] {
 
 /** O(words in the turn). Catalog size does not change prompt cost. */
 export function matchChatBlocks(context: ChatGenerationContext): ChatBlockDef[] {
-  if (context.hintAsk || context.examAsk || context.mode === "fast") return [];
+  if (context.hintAsk || context.examAsk) return [];
   const prompt = context.prompt?.trim() ?? "";
   if (prompt && isSimpleChatTask(prompt)) return [];
   const text = haystack(context);

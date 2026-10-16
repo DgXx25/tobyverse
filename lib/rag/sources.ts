@@ -2,6 +2,7 @@ import { pageLabel } from "@/lib/rag/format";
 import type { ChatSource, ChatSourceRef } from "@/types/chat";
 
 export const SOURCE_SNIPPET_CHARS = 200;
+export const MATERIALS_BASIS = "User materials are the primary basis when relevant.";
 const CITATION = /\[(?:S\d{1,2})(?:\s*[,;]\s*S\d{1,2})*\]/g;
 
 type Retrieved = {
@@ -44,12 +45,7 @@ export function formatSourcesBlock(sources: ChatSource[]): string {
       return `[S${source.n}] ${where}\n${source.text}`;
     })
     .join("\n\n");
-  return [
-    "Passages from the user's own materials. They are the primary basis for this answer when they are relevant.",
-    "Use them quietly. Do not write source tags, page numbers, or a source list in the answer. The reader never sees a source number.",
-    "If they do not cover what was asked, say that in one short line, then answer from general knowledge and make clear which part is not from their materials. Never invent page numbers.",
-    passages,
-  ].join("\n\n");
+  return `${MATERIALS_BASIS}\n\n${passages}`;
 }
 
 /** Citation numbers the reply actually used, ascending. */

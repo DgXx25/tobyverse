@@ -80,7 +80,7 @@ export function formatKnownUserBlock(input: {
   return [
     "Known about this user:",
     ...lines.map((line) => `- ${line}`),
-    "Use only when it changes the answer (name, level, exam date, preferred language, job). Never recite the list.",
+    "Optional background and preferences. Use only when relevant; the current request takes priority over remembered preferences. Learning preferences do not by themselves request tutoring or a fixed format.",
   ].join("\n");
 }
 

@@ -95,7 +95,7 @@ export const SUBJECT_SKILLS: readonly SubjectSkill[] = [
       "ეკონომიკ", "ბაზარ", "ინფლაცი", "მიწოდებ", "მოთხოვნ", "მშპ", "ფისკალურ", "მონეტარულ", "ბუღალტ", "ფინანს", "მარკეტინგ", "მოგება",
     ],
     write:
-      "Define a term in a clause, state the direction of an effect and why, and keep units and time periods explicit. Use a table only when comparing two or more cases side by side.",
+      "When relevant, define unfamiliar terms briefly, explain the direction of an effect, and keep units and time periods explicit. A table can help compare cases across several attributes.",
   },
   {
     id: "language",
@@ -105,7 +105,7 @@ export const SUBJECT_SKILLS: readonly SubjectSkill[] = [
       "გრამატიკ", "ლექსიკ", "დრო ", "ზმნა", "გამოთქმ", "იდიომ", "ენათმეცნიერ", "სინტაქს", "მართლწერ",
     ],
     write:
-      "For a rule, give the pattern, when to reach for it, and one tight natural example. Translate only when asked or when it unlocks the example. Keep target-language examples idiomatic and short.",
+      "For a requested grammar explanation, a pattern, usage context, and a natural example can help. Keep target-language examples idiomatic. For translations or edits, follow the requested task and level of detail.",
   },
   {
     id: "programming",
@@ -143,21 +143,49 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const MATCHERS = new Map<string, RegExp[]>();
+// These stems occur frequently outside their subject; repetition is not stronger evidence.
+const AMBIGUOUS = new Set([
+  "function", "code", "program", "api", "cell", "reaction", "organic", "compound", "acid",
+  "market", "supply", "demand", "profit", "patient", "article", "contract", "population",
+  "author", "novel", "narrat", "verb", "tense", "syntax", "law", "mechanic", "velocity",
+  "თემა", "კოდ", "ბაზა", "ბაზარ", "მიწოდებ", "მოთხოვნ", "მოგება", "რეაქცი",
+  "ნაერთ", "პაციენტ", "მუხლი", "ავტორ", "მოსახლეობ", "სიჩქარ", "დრო", "ფუნქცი",
+]);
+const LATIN_STEMS = new Set([
+  "derivativ", "geometr", "trigonometr", "probabilit", "statistic", "physic", "mechanic",
+  "kinematic", "thermodynamic", "electromagnet", "chemi", "molecul", "stoichiometr",
+  "biolog", "genetic", "ecosystem", "photosynthes", "organism", "medicin", "anatom",
+  "physiolog", "pharmac", "diagnos", "symptom", "histor", "econom", "program", "vocabular",
+  "linguistic", "literatur", "philosoph", "narrat", "geograph", "geolog", "atmospher",
+]);
+const MATCHERS = new Map<string, { pattern: RegExp; strong: boolean }[]>();
 
-function matchersFor(skill: SubjectSkill): RegExp[] {
+function matchersFor(skill: SubjectSkill): { pattern: RegExp; strong: boolean }[] {
   let cached = MATCHERS.get(skill.id);
   if (!cached) {
-    cached = skill.keywords.map((word) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapeRegExp(word.trim())}`, "iu"));
+    cached = skill.keywords.map((word) => {
+      const term = word.trim();
+      // Keep intentional stems and Georgian inflections; complete words and level codes need an end boundary.
+      const suffix = term === "math" ? "(?:s|ematics|ematical)?"
+        : term === "physic" ? "(?:s|ist(?:s)?)"
+        : LATIN_STEMS.has(term) || /[ა-ჰ]/u.test(term) ? "[\\p{L}]*"
+        : /[a-z]$/i.test(term) ? "(?:s|es)?" : "";
+      return {
+        pattern: new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapeRegExp(term)}${suffix}(?=$|[^\\p{L}\\p{N}])`, "iu"),
+        strong: !AMBIGUOUS.has(term),
+      };
+    });
     MATCHERS.set(skill.id, cached);
   }
   return cached;
 }
 
-function distinctHits(skill: SubjectSkill, text: string): number {
+function distinctHits(skill: SubjectSkill, text: string, strongOnly = false): number {
   if (!text) return 0;
   let hits = 0;
-  for (const pattern of matchersFor(skill)) if (pattern.test(text)) hits += 1;
+  for (const { pattern, strong } of matchersFor(skill)) {
+    if ((!strongOnly || strong) && pattern.test(text)) hits += 1;
+  }
   return hits;
 }
 
@@ -169,30 +197,37 @@ export type SkillSignals = {
   sourceText?: string;
 };
 
-const MIN_SCORE = 3;
 const SOURCE_SCAN_CHARS = 6000;
 
-/** Weighted keyword evidence: what they ask and name counts more than what the sources happen to contain. */
+/** Only qualified evidence scores. Current clear topics outrank possibly stale project metadata. */
 export function scoreSkills(signals: SkillSignals): { skill: SubjectSkill; score: number }[] {
   const prompt = signals.prompt ?? "";
   const title = signals.projectTitle ?? "";
   const names = (signals.materialNames ?? []).join("\n");
   const source = (signals.sourceText ?? "").slice(0, SOURCE_SCAN_CHARS);
-  return SUBJECT_SKILLS.map((skill) => ({
-    skill,
-    score: distinctHits(skill, prompt) * 2 + distinctHits(skill, title) * 2 + distinctHits(skill, names) * 2 + distinctHits(skill, source),
-  })).sort((a, b) => b.score - a.score);
+  const hasClearQuestion = SUBJECT_SKILLS.some((skill) => distinctHits(skill, prompt, true) > 0);
+  return SUBJECT_SKILLS.map((skill) => {
+    const questionHits = distinctHits(skill, prompt, true);
+    if (hasClearQuestion) return { skill, score: questionHits * 3 };
+    const isSubjectName = (value: string) => [skill.id, skill.label.toLowerCase()].includes(value.trim().toLowerCase());
+    const namedHits = distinctHits(skill, title, true) + distinctHits(skill, names, true) +
+      (isSubjectName(title) || signals.materialNames?.some(isSubjectName) ? 1 : 0);
+    const sourceHits = distinctHits(skill, source);
+    // One specific named signal is enough; passages need several distinct terms, including a specific one.
+    const sourceScore = sourceHits >= 3 && distinctHits(skill, source, true) > 0 ? sourceHits : 0;
+    return { skill, score: namedHits * 3 + sourceScore };
+  }).sort((a, b) => b.score - a.score);
 }
 
 /** The one skill that clearly fits, or null. A tie or weak evidence means no skill rather than a wrong one. */
 export function detectSubjectSkill(signals: SkillSignals): SubjectSkill | null {
   const [best, next] = scoreSkills(signals);
-  if (!best || best.score < MIN_SCORE) return null;
-  if (next && next.score === best.score) return null;
+  if (!best || best.score < 3) return null;
+  if (next && best.score - next.score < 2) return null;
   return best.skill;
 }
 
 export function formatSkillBlock(skill: SubjectSkill | null): string {
   if (!skill) return "";
-  return `Writing conventions for ${skill.label.toLowerCase()} (wording and notation only; they add no lesson, quiz or recap, and the request still comes first): ${skill.write}`;
+  return `Optional writing conventions for ${skill.label.toLowerCase()}. Apply only to relevant parts of the current request; these preferences do not require a lesson or a fixed structure. ${skill.write}`;
 }

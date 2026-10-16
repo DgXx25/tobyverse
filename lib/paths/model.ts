@@ -118,22 +118,17 @@ export function pathIsStarted(path: Pick<StudyPath, "started">): boolean {
 
 export function formatPathBriefing(briefing: PathBriefing): string {
   const brief = (briefing.teach || briefing.outcome || "").trim();
-  const tutor = brief ? ` Tutor brief (do not dump this as an outline to the student): ${brief}` : "";
-  const why = briefing.why?.trim() ? ` Why: ${briefing.why.trim()}` : "";
   if (briefing.started === false) {
     return `Draft study path "${briefing.title}" (${briefing.total} topics, ${briefing.courseCount} course(s)${briefing.kind === "review" ? ", exam-review" : ""}). It is NOT started. Do not teach yet. Do not call advance_path. They may ask to change the map — then call create_path again. If they say they are ready to start (დავიწყოთ / let's start / continue), call start_path — that opens a child thread; this chat stays free. Never write [artifact ...] in chat. Never dump the week list.`;
   }
   if (!briefing.inPathThread) {
     return `A study path "${briefing.title}" exists as an artifact in this project. This is the main chat — answer the user's request. Do not teach the path here. Do not dump the topic list. Do not call advance_path. If they want to start or reopen the plan, call start_path. Materials stay on the project.`;
   }
-  const review =
-    briefing.kind === "review"
-      ? " This is exam review: explain the current topic using the materials. Do not initiate a drill or knowledge check. At most offer suggest_practice when useful. create_practice only when they explicitly ask or accept the chip. Do not generate notes unless asked."
-      : "";
-  const nextHint = briefing.nextTitle
-    ? ` You MAY hint "შემდეგი: ${briefing.nextTitle} — მზად ხარ?" when they look ready. Never dump the rest of the path.`
-    : "";
-  return `Active path thread. Current topic only: "${briefing.nodeTitle}" (${briefing.courseTitle}, ${briefing.done}/${briefing.total}, ${briefing.nodeStatus || "current"}).${tutor}${why}${review}${nextHint} If they asked something else, answer that request only — do not turn it into this lesson, and do not skip ahead. Otherwise explain THIS node like a capable assistant: short useful talk, a table and/or a listed block with a lead-in above the fence. This node only. Then wait. They may ask a question; if they do, answer it and stay. Do NOT pass \`question\` while explaining. Do not write a quiz, "Question:", or fill-in in the body. Continue / შემდეგი may offer suggest_practice when useful; never initiate a question, drill, or fill-in. Wait for their request. Call advance_path only when they look ready: practice/exam score, or they said გაიარე / next topic. NEVER advance on a greeting, thanks, or ok. NEVER "which tense/form would you use to describe…". NEVER "what is this called?". Never yes/no "did you get it?". Never create_path or restart_path. Never write [artifact ...] or card ids in chat. If they are lost, change the approach — do not repeat the same lecture. Do not list other nodes. create_sheet only if they asked. You MAY call suggest_sheet after the explanation. Never create_practice unless they asked or accepted a practice chip. Stay on this node until they move on.`;
+  return [
+    `Current node: "${briefing.nodeTitle}".`,
+    brief ? `Context: ${brief}` : null,
+    "Use tools only when explicitly requested or accepted.",
+  ].filter(Boolean).join("\n");
 }
 
 function firstTodoInCourse(course: PathCourse): PathNode | null {

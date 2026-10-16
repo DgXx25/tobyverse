@@ -87,8 +87,8 @@ export const dialogueBlock: ChatBlockDef<DialogueBlock> = {
   when: "Two characters using the form in a short exchange — not a tense quiz. Prose above the block.",
   schema: dialogueSchema,
   card: () =>
-    `dialogue — two characters using the form (not bubbles, not a tense quiz). Never the whole answer: a short lead-in ABOVE the fence, then the block. Do not put a quiz, "Question:", or fill-in under it.
+    `Optional dialogue — two characters using a form in a short exchange. A brief lead-in can introduce it when useful.
 Fence: \`\`\`toby dialogue
 JSON: {"speakers":[{"id":"a","emoji":"🐶"},{"id":"b","emoji":"🐱"}],"lines":[{"speaker":"a","text":"I have never been to Paris.","gloss":"პარიზში არასდროს ვყოფილვარ."},{"speaker":"b","text":"Really? You should go."}],"mark":"have never been"}
-2 speakers, 2–4 lines. emoji = the character — pick a FRESH pairing this turn (👦+👨, 🐶+🐱, 🦊+🦉, 👵+👧, …). Two different faces. Never default to 🧔 and 👩. text beside it. gloss optional under the line. optional note = one short line under the path.`,
+2 speakers, 2–4 lines. emoji identifies the character; use distinct characters. text beside it. gloss optional under the line. optional note = one short line under the path.`,
 };

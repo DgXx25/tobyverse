@@ -1,4 +1,5 @@
 export type { AIProvider, GenerateOptions } from "@/lib/ai/types";
+export { CORE_SYSTEM_INSTRUCTION } from "@/lib/ai/core-instruction";
 export {
   GeminiProvider,
   generateText,

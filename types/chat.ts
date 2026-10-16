@@ -204,7 +204,7 @@ export type ChatGenerationContext = {
   personalization?: string;
   /** Hidden hint on the current exam — never reveal the answer. */
   hintAsk?: boolean;
-  /** Hidden Continue after a path bite — ask the check, do not advance. */
+  /** Explicit request for a single exercise in chat; Continue alone does not set this. */
   examAsk?: boolean;
   /** The student is answering this practice question. Grade it; do not ask another. */
   replyTo?: string;

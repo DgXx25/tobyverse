@@ -103,6 +103,7 @@ test("skills are wording only and never add a ritual", () => {
     assert.doesNotMatch(skill.write, /always (end|finish|close)|quiz the|end with a question|recap/i);
   }
   const block = formatSkillBlock(SUBJECT_SKILLS[0]);
-  assert.match(block, /add no lesson, quiz or recap/);
-  assert.match(block, /request still comes first/);
+  assert.match(block, /Optional writing conventions/);
+  assert.match(block, /Apply only to relevant parts of the current request/);
+  assert.match(block, /do not require a lesson or a fixed structure/);
 });

@@ -100,7 +100,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "illustrate",
     description:
-      "Emit one or more typed catalog blocks under a short answer when the idea is clearer visually. Use it for a shape or curve, a comparison, a formula, ordered steps, or a cycle. Use only graph, compare_vs, formula_card, steps, flow, or cycle blocks and keep labels in the user's language. Do not use it for yes/no questions, one-line definitions, study sheets, or image generation.",
+      "Optionally emit typed catalog blocks when a visual materially helps the request: a shape or curve, comparison, formula, ordered steps, or cycle. Use only graph, compare_vs, formula_card, steps, flow, or cycle blocks and keep labels in the user's language. This tool renders in chat; study sheets and image generation use their own tools.",
     parameters: {
       type: "object",
       properties: {
