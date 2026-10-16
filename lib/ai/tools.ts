@@ -286,7 +286,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "search_images",
     description:
-      "Find external photos, maps, charts, or diagrams only when the user explicitly asks for them or refers to an attached figure. Pass the full topic in the user's language and optionally cap the result count. Add one short introductory line, while results render separately. Do not invent URLs, dump link lists, or use this when illustrate catalog blocks are the better fit.",
+      "Find external photos, maps, charts, or diagrams only when the user explicitly asks for them or refers to an attached figure. Pass the full topic in the user's language and optionally cap the result count. After the search, introduce the images briefly and answer the user's question; results render separately in a gallery. Do not print raw results or image URLs. Use illustrate when catalog blocks are a better fit.",
     parameters: {
       type: "object",
       properties: {

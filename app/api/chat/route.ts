@@ -14,8 +14,10 @@ import { retrieveChunks } from "@/lib/rag/server";
 import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
 import { papersInTurns } from "@/lib/blocks/paper-thread";
 import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
+import { allowImageSearch, clampImageCount, searchWebImages } from "@/lib/images/search";
+import { toChatImageHit } from "@/lib/images/hits";
 import { adminErrorResponse, assertAdminRequest } from "@/lib/admin/assert";
-import { CHAT_MODES, type ChatArtifact, type ChatSource, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
+import { CHAT_MODES, type ChatArtifact, type ChatImageHit, type ChatSource, type ChatFigureContext, type ChatGenerationContext, type ChatMode, type ChatTurn } from "@/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -330,6 +332,37 @@ export async function POST(request: Request) {
           Boolean(getAIProvider().generateToolStream) &&
           chatModeSendsToolDeclarations(mode);
         let toolSent = false;
+        let imageResults: ChatImageHit[] | undefined;
+        const executeTool = async (call: ChatToolCall): Promise<unknown> => {
+          if (call.name !== "search_images") return { ok: true, tool: call.name };
+          if (guestContext.hintAsk || guestContext.examAsk) return { images: [], error: "This turn is a chat exercise or hint, not an image request." };
+          imageResults ??= [];
+          if (!allowImageSearch(session.uid)) return { images: [], error: "Image search rate limit reached. Answer using the available context." };
+          try {
+            const query = call.args.query?.trim() || prompt;
+            const statusQuery = query.slice(0, 72);
+            const searching = /[\u10A0-\u10FF]/.test(prompt)
+              ? `ვეძებ ფოტოებს „${statusQuery}“…`
+              : `Searching photos for “${statusQuery}”…`;
+            controller.enqueue(encodeSse({ status: searching }));
+            const hits = await searchWebImages(query, clampImageCount(call.args.count), { usage: usageReporter });
+            const found = hits.map(toChatImageHit);
+            const seen = new Set(imageResults.map((hit) => hit.url));
+            for (const hit of found) {
+              if (!seen.has(hit.url)) imageResults.push(hit);
+              seen.add(hit.url);
+            }
+            return { images: found.map(({ title, source }) => ({ title, source })) };
+          } catch (error) {
+            console.warn("[chat-images] search failed", error instanceof Error ? error.message : error);
+            return { images: [], error: "Image search unavailable. Answer using the available context." };
+          }
+        };
+        const sendImageTool = async (tool: ChatToolCall) => {
+          if (imageResults === undefined) await executeTool(tool);
+          controller.enqueue(encodeSse({ tool, images: imageResults ?? [] }));
+          toolSent = true;
+        };
         let pendingProviderText = "";
         const explicit = guestContext.hintAsk || guestContext.examAsk
           ? null
@@ -369,11 +402,14 @@ export async function POST(request: Request) {
                 : undefined,
             images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
             usage: usageReporter,
+            executeTool,
           })) {
             if (part.tool && !raw) {
               raw = part.tool;
               const preview = raw;
-              if (
+              if (preview.name === "search_images" && !guestContext.examAsk && !guestContext.hintAsk) {
+                await sendImageTool(preview);
+              } else if (
                 preview &&
                 !guestContext.examAsk &&
                 !toolStreamsText(preview.name) &&
@@ -414,7 +450,8 @@ export async function POST(request: Request) {
             pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
           });
           const preview = raw;
-          if (toolStreamsText(preview.name) && pendingProviderText.trim()) {
+          if (preview.name === "search_images") await sendImageTool(preview);
+          else if (toolStreamsText(preview.name) && pendingProviderText.trim()) {
             streamed = true;
             controller.enqueue(encodeSse({ delta: pendingProviderText }));
           } else if (!supportsTools && toolStreamsText(preview.name)) {

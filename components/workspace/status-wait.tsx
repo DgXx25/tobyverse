@@ -25,6 +25,7 @@ export function StatusWait({
   timer = false,
   settled = false,
   savedStep,
+  savedActivity = [],
   className = "text-sm",
 }: {
   label: string;
@@ -34,6 +35,8 @@ export function StatusWait({
   /** Finished turn: no shimmer. */
   settled?: boolean;
   savedStep?: ChatArtifactStep;
+  /** Brief app-observed actions for the completed turn. Never model reasoning. */
+  savedActivity?: string[];
   className?: string;
 }) {
   const fallback = useRef(since ?? Date.now());
@@ -65,27 +68,39 @@ export function StatusWait({
     return () => window.clearTimeout(slideRef.current);
   }, [label, current]);
 
+  const canExpand = settled && current.startsWith("Worked for ") && (savedActivity.length > 0 || Boolean(savedStep));
   return (
-    <div className={`flex min-w-0 items-center gap-2 ${className}`}>
-      <span className="status-wait-clip min-w-0 flex-1">
-        {outgoing ? (
-          <span className={`status-wait-line status-wait-out ${settled ? "text-muted" : "status-shimmer"}`}>{outgoing}</span>
+    <div className={`flex min-w-0 flex-col gap-1 ${className}`}>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="status-wait-clip min-w-0 flex-1">
+          {outgoing ? (
+            <span className={`status-wait-line status-wait-out ${settled ? "text-muted" : "status-shimmer"}`}>{outgoing}</span>
+          ) : null}
+          {canExpand ? (
+            <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="status-wait-line text-left text-muted">
+              {current}
+            </button>
+          ) : (
+            <span key={current} className={`status-wait-line ${settled ? "text-muted" : "status-shimmer"}${outgoing ? " status-wait-in" : ""}`}>
+              {current}
+            </span>
+          )}
+        </span>
+        {timer ? (
+          <span className="shrink-0 tabular-nums text-muted">{formatWait(now - fallback.current)}</span>
         ) : null}
-        {settled && savedStep && current.startsWith("Worked for ") ? (
-          <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="status-wait-line text-left text-muted">
-            {current}
-          </button>
-        ) : (
-          <span key={current} className={`status-wait-line ${settled ? "text-muted" : "status-shimmer"}${outgoing ? " status-wait-in" : ""}`}>
-            {current}
-          </span>
-        )}
-      </span>
-      {timer ? (
-        <span className="shrink-0 tabular-nums text-muted">{formatWait(now - fallback.current)}</span>
-      ) : null}
-      {expanded && savedStep ? (
-        <span className="text-xs text-muted">{[savedStep.from, savedStep.to].filter(Boolean).join(" → ")}{savedStep.done != null ? ` · ${savedStep.done}${savedStep.total != null ? `/${savedStep.total}` : ""}` : ""}</span>
+      </div>
+      {expanded ? (
+        <div className="pl-1 text-xs text-muted">
+          {savedActivity.length ? (
+            <ul className="ml-3 list-disc space-y-0.5">
+              {savedActivity.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+            </ul>
+          ) : null}
+          {savedStep ? (
+            <p>{[savedStep.from, savedStep.to].filter(Boolean).join(" → ")}{savedStep.done != null ? ` · ${savedStep.done}${savedStep.total != null ? `/${savedStep.total}` : ""}` : ""}</p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

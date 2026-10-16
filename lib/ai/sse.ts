@@ -1,6 +1,7 @@
 import type { ChatToolCall } from "@/lib/ai/tools";
 import { parseToolCall } from "@/lib/ai/tools";
-import type { ChatSourceRef } from "@/types/chat";
+import type { ChatImageHit, ChatSourceRef } from "@/types/chat";
+import { parseSearchHits } from "@/lib/images/hits";
 import { GUEST_CAP_CODE, GuestCapError } from "@/lib/guest";
 
 export async function readSseStream(
@@ -17,6 +18,8 @@ export async function readChatSse(
     onDelta?: (delta: string) => void;
     onTool?: (tool: ChatToolCall) => void;
     onSources?: (sources: ChatSourceRef[]) => void;
+    onImages?: (images: ChatImageHit[]) => void;
+    onStatus?: (status: string) => void;
   },
 ): Promise<{ text: string; tool: ChatToolCall | null }> {
   if (!response.body) {
@@ -51,6 +54,8 @@ export async function readChatSse(
         delta?: string;
         tool?: { name?: unknown; args?: unknown };
         sources?: ChatSourceRef[];
+        images?: unknown;
+        status?: unknown;
         error?: string;
         done?: boolean;
       };
@@ -60,15 +65,16 @@ export async function readChatSse(
       }
 
       if (Array.isArray(payload.sources)) handlers?.onSources?.(payload.sources);
-
-      if (payload.delta) {
-        text += payload.delta;
-        handlers?.onDelta?.(payload.delta);
-      }
+      if (typeof payload.status === "string" && payload.status.trim()) handlers?.onStatus?.(payload.status.trim());
 
       if (payload.tool && !tool) {
         tool = parseToolCall(payload.tool.name, payload.tool.args);
         if (tool) handlers?.onTool?.(tool);
+      }
+      if (Array.isArray(payload.images)) handlers?.onImages?.(parseSearchHits(payload.images));
+      if (payload.delta) {
+        text += payload.delta;
+        handlers?.onDelta?.(payload.delta);
       }
     }
   }

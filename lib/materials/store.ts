@@ -96,9 +96,14 @@ function mergeImages(images: unknown, imagePaths: unknown): MaterialImage[] {
 
 function asIndex(value: unknown): MaterialIndex | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const row = value as { status?: unknown; chunks?: unknown };
+  const row = value as { status?: unknown; chunks?: unknown; nextPage?: unknown; total?: unknown };
   const status = row.status === "ready" || row.status === "failed" ? row.status : "indexing";
-  return { status, chunks: typeof row.chunks === "number" ? row.chunks : 0 };
+  return {
+    status,
+    chunks: typeof row.chunks === "number" ? row.chunks : 0,
+    ...(typeof row.nextPage === "number" ? { nextPage: row.nextPage } : {}),
+    ...(typeof row.total === "number" ? { total: row.total } : {}),
+  };
 }
 
 function mapMaterial(id: string, projectId: string, data: Record<string, unknown>): Material {

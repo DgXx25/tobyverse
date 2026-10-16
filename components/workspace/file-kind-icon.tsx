@@ -1,29 +1,26 @@
 "use client";
 
 import { HugeiconsIcon } from "@hugeicons/react";
-import Csv01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Csv01Icon.js";
-import Doc01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Doc01Icon.js";
 import File01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/File01Icon.js";
-import FileSpreadsheetIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FileSpreadsheetIcon.js";
-import Image01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Image01Icon.js";
+import FileImageIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FileImageIcon.js";
+import GalleryVerticalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/GalleryVerticalIcon.js";
+import GoogleDocIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/GoogleDocIcon.js";
+import GoogleSheetIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/GoogleSheetIcon.js";
 import Notebook01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Notebook01Icon.js";
-import Pdf01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Pdf01Icon.js";
-import Ppt01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Ppt01Icon.js";
-import Txt01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Txt01Icon.js";
+import NotepadTextIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/NotepadTextIcon.js";
 import type { IconSvgElement } from "@hugeicons/react";
 import type { LibraryFileKind } from "@/lib/library/media";
 
-const ICONS: Record<LibraryFileKind, IconSvgElement> = {
-  pdf: Pdf01Icon,
-  doc: Doc01Icon,
-  docx: Doc01Icon,
-  csv: Csv01Icon,
-  excel: FileSpreadsheetIcon,
-  ppt: Ppt01Icon,
-  pptx: Ppt01Icon,
-  jpg: Image01Icon,
-  png: Image01Icon,
-  txt: Txt01Icon,
+const ICONS: Record<Exclude<LibraryFileKind, "pdf">, IconSvgElement> = {
+  doc: GoogleDocIcon,
+  docx: GoogleDocIcon,
+  csv: GoogleSheetIcon,
+  excel: GoogleSheetIcon,
+  ppt: GalleryVerticalIcon,
+  pptx: GalleryVerticalIcon,
+  jpg: FileImageIcon,
+  png: FileImageIcon,
+  txt: NotepadTextIcon,
   md: File01Icon,
   notes: Notebook01Icon,
   other: File01Icon,
@@ -31,12 +28,12 @@ const ICONS: Record<LibraryFileKind, IconSvgElement> = {
 
 const LABELS: Record<LibraryFileKind, string> = {
   pdf: "PDF",
-  doc: "Word document",
-  docx: "Word document",
-  csv: "CSV spreadsheet",
-  excel: "Spreadsheet",
-  ppt: "PowerPoint",
-  pptx: "PowerPoint",
+  doc: "Google Docs or Word document",
+  docx: "Google Docs or Word document",
+  csv: "Google Sheets or CSV spreadsheet",
+  excel: "Google Sheets spreadsheet",
+  ppt: "Slides",
+  pptx: "Slides",
   jpg: "JPG image",
   png: "PNG image",
   txt: "Text",
@@ -66,6 +63,29 @@ export function FileKindIcon({ kind, size = 48, className = "" }: {
   size?: number;
   className?: string;
 }) {
+  if (kind === "pdf") {
+    return (
+      <span
+        role="img"
+        aria-label={LABELS.pdf}
+        className={`inline-block shrink-0 ${TINTS.pdf} ${className}`}
+        style={{
+          width: size,
+          height: size,
+          backgroundColor: "currentColor",
+          maskImage: "url('/icons/Materials/pdf.svg')",
+          maskPosition: "center",
+          maskRepeat: "no-repeat",
+          maskSize: "contain",
+          WebkitMaskImage: "url('/icons/Materials/pdf.svg')",
+          WebkitMaskPosition: "center",
+          WebkitMaskRepeat: "no-repeat",
+          WebkitMaskSize: "contain",
+        }}
+      />
+    );
+  }
+
   return (
     <HugeiconsIcon
       icon={ICONS[kind]}

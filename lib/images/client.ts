@@ -1,5 +1,7 @@
 import { authHeaders } from "@/lib/api/client";
-import { IMAGE_SEARCH_DEFAULT, type ImageSearchHit, snapWikiThumbUrl } from "@/lib/images/types";
+import { IMAGE_SEARCH_DEFAULT, type ImageSearchHit } from "@/lib/images/types";
+import { parseSearchHits } from "@/lib/images/hits";
+export { toChatImageHit } from "@/lib/images/hits";
 import type { ChatImageHit } from "@/types/chat";
 
 export class ImageSearchRequestError extends Error {
@@ -10,22 +12,6 @@ export class ImageSearchRequestError extends Error {
     this.name = "ImageSearchRequestError";
     this.status = status;
   }
-}
-
-export function toChatImageHit(hit: ImageSearchHit): ChatImageHit {
-  const url = snapWikiThumbUrl(hit.url);
-  const thumbnail = snapWikiThumbUrl(hit.thumbnail || hit.url);
-  return {
-    url,
-    thumb: thumbnail || url,
-    thumbnail: thumbnail || url,
-    title: hit.alt,
-    alt: hit.alt,
-    source: hit.source,
-    license: "",
-    credit: "",
-    kind: "web",
-  };
 }
 
 /** Public search URLs only — never uploads or stored files. */
@@ -40,32 +26,6 @@ export function toImageAttach(hit: ChatImageHit): ImageSearchHit | null {
     alt: (hit.alt || hit.title || "").trim(),
     source: (hit.source || "").trim() || "web",
   };
-}
-
-function parseSearchHits(value: unknown): ChatImageHit[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const row = item as Record<string, unknown>;
-    const url = typeof row.url === "string" ? row.url.trim() : "";
-    const thumbnail =
-      (typeof row.thumbnail === "string" ? row.thumbnail.trim() : "") ||
-      (typeof row.thumb === "string" ? row.thumb.trim() : "") ||
-      url;
-    const alt =
-      (typeof row.alt === "string" ? row.alt.trim() : "") ||
-      (typeof row.title === "string" ? row.title.trim() : "");
-    const source = typeof row.source === "string" ? row.source.trim() : "";
-    if (!url || !/^https:\/\//i.test(url)) return [];
-    return [
-      toChatImageHit({
-        url,
-        thumbnail: /^https:\/\//i.test(thumbnail) ? thumbnail : url,
-        alt,
-        source: source || "web",
-      }),
-    ];
-  });
 }
 
 export async function searchImagesClient(query: string, count = IMAGE_SEARCH_DEFAULT): Promise<ChatImageHit[]> {

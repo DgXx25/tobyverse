@@ -121,7 +121,7 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     sections.push("The user already asked to plan. This message is the missing course. Brief once, then suggest_path.");
   } else if (context.priorClarify && context.pendingKind === "images") {
     sections.push(
-      "The user already asked for photos. This message is the topic. Call search_images. Write one short line in their language. Do not invent URLs. Do not dump a link list.",
+      "The user already asked for photos. This message supplies the topic. Call search_images, then introduce the images briefly and answer their request. The gallery displays results separately.",
     );
   }
 

@@ -11,6 +11,7 @@ export type ToolLoopResult = {
   text: string;
   tool: ChatToolCall | null;
   rounds: number;
+  functionResponses: Array<{ name: string; response: unknown }>;
 };
 
 export async function runToolLoop(input: {
@@ -19,6 +20,8 @@ export async function runToolLoop(input: {
     functionResponses: Array<{ name: string; response: unknown }>;
   }) => Promise<ToolLoopTurn>;
   execute: (call: ChatToolCall) => Promise<unknown>;
+  /** Hand a completed tool back to the provider for a streamed text-only continuation. */
+  stopAfterTool?: (call: ChatToolCall) => boolean;
   maxRounds?: number;
 }): Promise<ToolLoopResult> {
   const maxRounds = Math.max(1, Math.min(3, input.maxRounds ?? 3));
@@ -45,9 +48,12 @@ export async function runToolLoop(input: {
       functionResponses.push({ name: call.name, response });
     }
 
-    if (text.trim()) return { text, tool: selected, rounds };
+    if (selected && input.stopAfterTool?.(selected)) {
+      return { text: "", tool: selected, rounds, functionResponses };
+    }
+    if (text.trim()) return { text, tool: selected, rounds, functionResponses };
     if (calls.length === 0) break;
   }
 
-  return { text: "", tool: selected, rounds };
+  return { text: "", tool: selected, rounds, functionResponses };
 }

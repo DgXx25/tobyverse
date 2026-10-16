@@ -53,7 +53,49 @@ function asBlob(data: Blob | Uint8Array, contentType: string): Blob {
 
 export type MaterialStorageUpload = { path: string; sizeBytes: number; contentType: string; reservedBytes: number };
 
-async function uploadInChunks(path: string, blob: Blob, contentType: string, token: string, reservePool: boolean, originalName?: string): Promise<MaterialStorageUpload> {
+type UploadSessionProgress = MaterialStorageUpload & { offset: number; done: boolean; error?: string };
+
+function putUploadChunk(
+  url: string,
+  chunk: Blob,
+  offset: number,
+  token: string,
+  onProgress: (loaded: number) => void,
+): Promise<UploadSessionProgress> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("PUT", url);
+    request.setRequestHeader("Authorization", `Bearer ${token}`);
+    request.setRequestHeader("Content-Type", "application/octet-stream");
+    request.setRequestHeader("x-upload-offset", String(offset));
+    request.upload.onprogress = (event) => onProgress(event.loaded);
+    request.onerror = () => reject(new StorageUploadError("Upload interrupted. Please retry the file.", { kind: "network" }));
+    request.onload = () => {
+      let body: UploadSessionProgress = { path: "", sizeBytes: 0, contentType: "", reservedBytes: 0, offset, done: false };
+      try {
+        body = JSON.parse(request.responseText) as UploadSessionProgress;
+      } catch {
+        // Keep the HTTP status as the useful error when the server response is not JSON.
+      }
+      if (request.status < 200 || request.status >= 300) {
+        reject(new StorageUploadError(body.error || `Upload failed (${request.status}).`, { status: request.status }));
+        return;
+      }
+      resolve(body);
+    };
+    request.send(chunk);
+  });
+}
+
+async function uploadInChunks(
+  path: string,
+  blob: Blob,
+  contentType: string,
+  token: string,
+  reservePool: boolean,
+  originalName?: string,
+  onProgress?: (fraction: number) => void,
+): Promise<MaterialStorageUpload> {
   const headers = { Authorization: `Bearer ${token}` };
   const init = await fetch("/api/materials/upload-session", {
     method: "POST",
@@ -65,15 +107,18 @@ async function uploadInChunks(path: string, blob: Blob, contentType: string, tok
   const url = `/api/materials/upload-session?id=${encodeURIComponent(started.id)}`;
   let result: MaterialStorageUpload | undefined;
   const progress = async (method: "PUT" | "GET", chunk?: Blob, offset?: number) => {
-    const response = await fetch(url, {
-      method,
-      headers: { ...headers, ...(chunk ? { "Content-Type": "application/octet-stream", "x-upload-offset": String(offset) } : {}) },
-      body: chunk,
-      cache: "no-store",
-    });
-    const body = await response.json() as MaterialStorageUpload & { offset: number; done: boolean; error?: string };
-    if (!response.ok) throw new StorageUploadError(body.error || `Upload failed (${response.status}).`, { status: response.status });
+    let body: UploadSessionProgress;
+    if (method === "PUT" && chunk && typeof offset === "number") {
+      body = await putUploadChunk(url, chunk, offset, token, (loaded) => {
+        if (blob.size > 0) onProgress?.(Math.min(1, (offset + loaded) / blob.size));
+      });
+    } else {
+      const response = await fetch(url, { method, headers, cache: "no-store" });
+      body = await response.json() as UploadSessionProgress;
+      if (!response.ok) throw new StorageUploadError(body.error || `Upload failed (${response.status}).`, { status: response.status });
+    }
     if (body.done) result = body;
+    if (blob.size > 0) onProgress?.(Math.min(1, body.offset / blob.size));
     return { offset: body.offset, done: body.done };
   };
   try {
@@ -91,7 +136,7 @@ async function postStorageUpload(
   path: string,
   data: Blob | Uint8Array | string,
   contentType: string,
-  options: { reservePool?: boolean; originalName?: string } = {},
+  options: { reservePool?: boolean; originalName?: string; onProgress?: (fraction: number) => void } = {},
 ): Promise<MaterialStorageUpload> {
   const user = await requireSignedInUser();
   if (!user.uid) {
@@ -109,7 +154,7 @@ async function postStorageUpload(
     throw new Error("Storage upload failed: signed in, but getIdToken() returned no token.");
   }
   if (blob.size > RESUMABLE_UPLOAD_THRESHOLD) {
-    return uploadInChunks(path, blob, contentType, token, options.reservePool === true, options.originalName);
+    return uploadInChunks(path, blob, contentType, token, options.reservePool === true, options.originalName, options.onProgress);
   }
   const form = new FormData();
   form.set("path", path);
@@ -122,27 +167,36 @@ async function postStorageUpload(
     form.set("file", blob, filename);
     form.set("fileName", options.originalName || filename);
   }
-  let response: Response;
-  try {
-    response = await fetch("/api/materials/upload", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
-  } catch {
-    throw new StorageUploadError("Network error. Try again.", { kind: "network" });
-  }
-  const body = (await response.json().catch(() => ({}))) as {
+  const body = await new Promise<{
     error?: string;
     path?: string;
     sizeBytes?: number;
     contentType?: string;
     reservedBytes?: number;
-  };
-  if (!response.ok) {
-    const detail = body.error?.trim() || `Storage upload failed (${response.status}).`;
-    throw new StorageUploadError(detail, { status: response.status });
-  }
+  }>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/materials/upload");
+    request.setRequestHeader("Authorization", `Bearer ${token}`);
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) options.onProgress?.(event.loaded / event.total);
+    };
+    request.onerror = () => reject(new StorageUploadError("Network error. Try again.", { kind: "network" }));
+    request.onload = () => {
+      let payload: { error?: string; path?: string; sizeBytes?: number; contentType?: string; reservedBytes?: number } = {};
+      try {
+        payload = JSON.parse(request.responseText) as typeof payload;
+      } catch {
+        // Keep the HTTP status as the useful error when the server response is not JSON.
+      }
+      if (request.status < 200 || request.status >= 300) {
+        reject(new StorageUploadError(payload.error?.trim() || `Storage upload failed (${request.status}).`, { status: request.status }));
+        return;
+      }
+      options.onProgress?.(1);
+      resolve(payload);
+    };
+    request.send(form);
+  });
   return {
     path: body.path || path,
     sizeBytes: Number.isFinite(body.sizeBytes) ? Number(body.sizeBytes) : (typeof data === "string" ? new TextEncoder().encode(data).byteLength : blob.size),
@@ -163,7 +217,7 @@ export async function uploadMaterialBytes(
   path: string,
   data: Blob | Uint8Array,
   contentType: string,
-  options?: { reservePool?: boolean; originalName?: string },
+  options?: { reservePool?: boolean; originalName?: string; onProgress?: (fraction: number) => void },
 ): Promise<MaterialStorageUpload> {
   return postStorageUpload(path, data, contentType, options);
 }

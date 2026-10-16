@@ -12,6 +12,7 @@ import {
 } from "@/lib/materials/storage";
 import { inferMaterialType, materialFileName, mimeFromName } from "@/lib/materials/types";
 import type { MaterialImage, MaterialType } from "@/types/material";
+import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
 
 export type MaterialIngestFailurePhase = "storage" | "extract" | "network";
 
@@ -55,6 +56,7 @@ export type IngestSource =
   | { kind: "url"; url: string; title?: string };
 
 export type IngestPhase = "uploading" | "reading";
+export type IngestProgress = { phase: IngestPhase; percent?: number };
 
 export type PreparedMaterial = {
   projectId: string;
@@ -197,6 +199,7 @@ export async function prepareMaterialIngest(input: {
   userId: string;
   source: IngestSource;
   onPhase?: (phase: IngestPhase) => void;
+  onProgress?: (progress: IngestProgress) => void;
 }): Promise<PreparedMaterial> {
   const signedIn = await requireSignedInUser();
   const userId = signedIn.uid;
@@ -213,9 +216,11 @@ export async function prepareMaterialIngest(input: {
 
   try {
     input.onPhase?.("uploading");
+    input.onProgress?.({ phase: "uploading", percent: 0 });
     const uploaded = await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime, {
       reservePool: true,
       originalName: source.kind === "file" ? source.file.name : payload.originalName,
+      onProgress: (fraction) => input.onProgress?.({ phase: "uploading", percent: Math.round(fraction * 100) }),
     });
     storagePath = uploaded.path;
     sizeBytes = uploaded.sizeBytes;
@@ -224,6 +229,7 @@ export async function prepareMaterialIngest(input: {
     storageUploaded = true;
 
     input.onPhase?.("reading");
+    input.onProgress?.({ phase: "reading" });
     let data: ExtractResponse;
     if (source.kind === "file" && payload.type === "pdf") {
       await writeMaterialDoc(projectId, ref.id, {
@@ -257,9 +263,14 @@ export async function prepareMaterialIngest(input: {
           await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
         }
         if (!response) throw new MaterialIngestError("Network error while reading PDF pages. Retry to resume.", { phase: "network", storageSaved: true });
-        data = (await response.json()) as ExtractResponse & { done?: boolean };
-        if (!response.ok) throw new MaterialIngestError(data.error ?? "PDF extraction failed.", { phase: "extract", status: response.status, storageSaved: true });
-        completed = (data as ExtractResponse & { done?: boolean }).done === true;
+        const progressData = (await response.json()) as ExtractResponse & { done?: boolean; pageCount?: number; nextPage?: number };
+        data = progressData;
+        if (!response.ok) throw new MaterialIngestError(progressData.error ?? "PDF extraction failed.", { phase: "extract", status: response.status, storageSaved: true });
+        if (typeof progressData.pageCount === "number" && progressData.pageCount > 0 && typeof progressData.nextPage === "number") {
+          const percent = Math.min(100, Math.round(((progressData.nextPage - 1) / progressData.pageCount) * 100));
+          input.onProgress?.({ phase: "reading", percent });
+        }
+        completed = progressData.done === true;
       }
       data.type = "pdf";
       data.indexed = true;
@@ -500,7 +511,9 @@ export async function ingestMaterial(input: {
   projectId: string;
   userId: string;
   source: IngestSource;
+  onProgress?: (progress: IngestProgress) => void;
 }): Promise<string> {
+  clearUntouchedNotebook(input.projectId);
   const prepared = await prepareMaterialIngest(input);
   try {
     return await finalizeMaterialIngest(prepared);
@@ -515,11 +528,13 @@ export async function ingestMaterialFile(input: {
   userId: string;
   file: File;
   title?: string;
+  onProgress?: (progress: IngestProgress) => void;
 }): Promise<string> {
   return ingestMaterial({
     projectId: input.projectId,
     userId: input.userId,
     source: { kind: "file", file: input.file, title: input.title },
+    onProgress: input.onProgress,
   });
 }
 

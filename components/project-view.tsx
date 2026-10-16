@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { asChatMode } from "@/lib/core/chat-modes";
 import { DEFAULT_CHAT_THREAD_ID } from "@/lib/core/constants";
 import { loadSavedChatMode, saveChatMode, writeLocalChatMode } from "@/lib/workspace/chat-mode";
@@ -110,6 +110,7 @@ export function ProjectView({
 }) {
   const { user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setProjectShare } = useShell();
   const [project, setProject] = useState<Project | null>(null);
   const [bootstrapMessages, setBootstrapMessages] = useState<ChatMessage[]>(initialMessages ?? []);
@@ -127,6 +128,8 @@ export function ProjectView({
   const [panelExpanded, setPanelExpanded] = useState(false);
   const [panelOwnChrome, setPanelOwnChrome] = useState(false);
   const [composerHeight, setComposerHeight] = useState(128);
+  const activeRouteProjectId = pathname.match(/^\/(?:p|c)\/([^/]+)/)?.[1] ?? null;
+  const isActiveProjectView = activeRouteProjectId === projectId;
   const [focus, setFocus] = useState<ArtifactFocus | null>(null);
   const [session, setSession] = useState<{ setId: string; ids: string[]; mode?: "practice" | "exam" } | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(420);
@@ -352,6 +355,10 @@ export function ProjectView({
   }
 
   useEffect(() => {
+    if (!isActiveProjectView) {
+      setProjectSettings(null);
+      return;
+    }
     if (!project) {
       setProjectSettings(null);
       return;
@@ -364,7 +371,7 @@ export function ProjectView({
     });
     return () => setProjectSettings(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, deleting, deleteError]);
+  }, [project, deleting, deleteError, isActiveProjectView]);
 
   function keepPathPanel() {
     return panelOpen && (focus?.kind === "path" || panelView === "path");
@@ -564,6 +571,10 @@ export function ProjectView({
   };
 
   useEffect(() => {
+    if (!isActiveProjectView) {
+      setProjectShare(null);
+      return;
+    }
     setProjectShare({
       active: shareActive,
       busy: sharing,
@@ -571,7 +582,7 @@ export function ProjectView({
     });
     return () => setProjectShare(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setProjectShare, shareActive, sharing, projectId, threadId]);
+  }, [setProjectShare, shareActive, sharing, projectId, threadId, isActiveProjectView]);
 
   function clampPane(width: number, min: number, max: number, other: number) {
     const workspace = workspaceRef.current?.clientWidth || window.innerWidth;

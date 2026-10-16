@@ -10,13 +10,20 @@ import { ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl } from "@/li
 import { removeMaterial } from "@/lib/materials/save";
 import { renameMaterial } from "@/lib/materials/store";
 import { MATERIAL_FILE_ACCEPT } from "@/lib/materials/types";
+import { positionContextMenu } from "@/lib/workspace/context-menu-position";
+import { markProjectActivityComplete } from "@/lib/workspace/project-activity";
 import type { LibraryFileKind } from "@/lib/library/media";
 import type { Material } from "@/types/material";
 
-type Pending = { id: string; name: string; state: "uploading" | "error"; error?: string; file?: File };
+type Pending = { id: string; name: string; state: "uploading" | "error"; error?: string; file?: File; phase?: "uploading" | "reading"; progress?: number };
 
 const UPLOAD_CONCURRENCY = 2;
+const UPLOAD_PROGRESS_WEIGHT = 0.4;
 const NONE = "__none__";
+
+function totalIngestProgress(phasePercent: number): number {
+  return Math.min(99, Math.round(UPLOAD_PROGRESS_WEIGHT * 100 + (1 - UPLOAD_PROGRESS_WEIGHT) * phasePercent));
+}
 
 function kindFromName(name: string, type?: Material["type"]): LibraryFileKind {
   const lower = name.toLowerCase();
@@ -47,12 +54,51 @@ function sameFile(entryName: string, material: Material): boolean {
   return title === pending || title === fileStem(pending);
 }
 
-function statusOf(material: Material): { text: string; tone: "busy" | "error" } | null {
+function statusOf(material: Material): { text: string; tone: "busy" | "error"; progress?: number } | null {
   if (material.status === "failed" || material.index?.status === "failed") return { text: "Could not read", tone: "error" };
   if (material.status === "uploading" || material.status === "processing" || material.index?.status === "indexing") {
-    return { text: "Reading…", tone: "busy" };
+    const nextPage = material.index?.nextPage;
+    const pageProgress = material.type === "pdf" && material.pageCount > 0 && typeof nextPage === "number"
+      ? Math.min(100, Math.max(0, Math.round(((nextPage - 1) / material.pageCount) * 100)))
+      : typeof material.index?.total === "number" && material.index.total > 0
+        ? Math.min(100, Math.max(0, Math.round((material.index.chunks / material.index.total) * 100)))
+        : undefined;
+    const progress = pageProgress == null ? Math.round(UPLOAD_PROGRESS_WEIGHT * 100) : totalIngestProgress(pageProgress);
+    return { text: "Reading…", tone: "busy", progress };
   }
   return null;
+}
+
+function ProgressCircle({ value, label }: { value?: number; label: string }) {
+  const size = 20;
+  const radius = 8;
+  const circumference = 2 * Math.PI * radius;
+  const progress = typeof value === "number" ? Math.min(100, Math.max(0, value)) : undefined;
+  return (
+    <span className="relative flex h-5 w-5 shrink-0 items-center justify-center" role="img" aria-label={progress == null ? label : `${label} ${progress}%`}>
+      {progress == null ? (
+        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-muted/40 border-t-foreground" />
+      ) : (
+        <>
+          <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true" className="-rotate-90">
+            <circle cx="10" cy="10" r={radius} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-border" />
+            <circle
+              cx="10"
+              cy="10"
+              r={radius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - progress / 100)}
+              className="text-foreground transition-[stroke-dashoffset] duration-300"
+            />
+          </svg>
+        </>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -91,7 +137,7 @@ export function SourcesPane({
   const [pasteBody, setPasteBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ id: string; top: number; right: number } | null>(null);
+  const [menu, setMenu] = useState<{ id: string; top: number; right: number; pointer?: { x: number; y: number } } | null>(null);
   const [renameTarget, setRenameTarget] = useState<Material | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -121,20 +167,37 @@ export function SourcesPane({
 
   async function uploadOne(entry: Pending, file: File) {
     try {
-      await ingestMaterialFile({ projectId, userId, file });
+      await ingestMaterialFile({
+        projectId,
+        userId,
+        file,
+        onProgress: ({ phase, percent }) => {
+          setPending((current) => current.map((item) => (item.id === entry.id
+            ? {
+                ...item,
+                phase,
+                progress: phase === "uploading"
+                  ? (typeof percent === "number" ? Math.round(percent * UPLOAD_PROGRESS_WEIGHT) : undefined)
+                  : (typeof percent === "number" ? totalIngestProgress(percent) : Math.round(UPLOAD_PROGRESS_WEIGHT * 100)),
+              }
+            : item)));
+        },
+      });
       setPending((current) => current.filter((item) => item.id !== entry.id));
     } catch (err) {
       const message = err instanceof Error && err.message.trim() ? err.message : "Upload failed.";
       setPending((current) =>
         current.map((item) => (item.id === entry.id ? { ...item, state: "error", error: message, file } : item)),
       );
+    } finally {
+      markProjectActivityComplete(projectId);
     }
   }
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
     setError(null);
-    const entries = files.map((file) => ({ id: newChipId(), name: file.name, state: "uploading" as const }));
+    const entries = files.map((file) => ({ id: newChipId(), name: file.name, state: "uploading" as const, phase: "uploading" as const, progress: 0 }));
     setPending((current) => [...current, ...entries]);
     let cursor = 0;
     const worker = async () => {
@@ -150,7 +213,7 @@ export function SourcesPane({
   async function retry(entry: Pending) {
     if (!entry.file) return;
     const file = entry.file;
-    setPending((current) => current.map((item) => (item.id === entry.id ? { ...item, state: "uploading", error: undefined } : item)));
+    setPending((current) => current.map((item) => (item.id === entry.id ? { ...item, state: "uploading", phase: "uploading", progress: 0, error: undefined } : item)));
     await uploadOne(entry, file);
   }
 
@@ -172,6 +235,7 @@ export function SourcesPane({
       setError(err instanceof Error && err.message.trim() ? err.message : "Could not add the link.");
     } finally {
       setBusy(false);
+      markProjectActivityComplete(projectId);
     }
   }
 
@@ -190,6 +254,7 @@ export function SourcesPane({
       setError(err instanceof Error && err.message.trim() ? err.message : "Could not save the text.");
     } finally {
       setBusy(false);
+      markProjectActivityComplete(projectId);
     }
   }
 
@@ -256,6 +321,7 @@ export function SourcesPane({
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
+        event.stopPropagation();
         setDragging(true);
       }}
       onDragLeave={(event) => {
@@ -265,6 +331,7 @@ export function SourcesPane({
       onDrop={(event) => {
         if (!event.dataTransfer.files.length) return;
         event.preventDefault();
+        event.stopPropagation();
         setDragging(false);
         void uploadFiles([...event.dataTransfer.files]);
       }}
@@ -330,8 +397,8 @@ export function SourcesPane({
                     </button>
                   </span>
                 ) : (
-                  <span className="flex h-9 w-7 shrink-0 items-center justify-center" aria-label="Uploading">
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border border-muted/40 border-t-foreground" />
+                  <span className="flex h-9 w-7 shrink-0 items-center justify-center">
+                    <ProgressCircle value={entry.progress} label={entry.phase === "reading" ? "Reading" : "Uploading"} />
                   </span>
                 )}
               </div>
@@ -351,7 +418,7 @@ export function SourcesPane({
                 onContextMenu={(event) => {
                   if (busy) return;
                   event.preventDefault();
-                  setMenu({ id: item.id, top: event.clientY, right: Math.max(8, window.innerWidth - event.clientX) });
+                  setMenu({ id: item.id, top: event.clientY, right: 0, pointer: { x: event.clientX, y: event.clientY } });
                 }}
               >
                 <div className={`source-item flex min-w-0 items-center overflow-hidden rounded-lg px-1 ${menuOpen ? "source-item-active" : ""}`}>
@@ -365,8 +432,8 @@ export function SourcesPane({
                     <span className={`min-w-0 flex-1 truncate text-[13px] text-foreground ${!busy && (menuOpen ? "pr-8" : "group-hover:pr-8")}`}>{item.title}</span>
                   </button>
                   {busy ? (
-                    <span className="flex h-9 w-7 shrink-0 items-center justify-center" aria-label="Reading">
-                      <span className="h-3.5 w-3.5 animate-spin rounded-full border border-muted/40 border-t-foreground" />
+                    <span className="flex h-9 w-7 shrink-0 items-center justify-center">
+                      <ProgressCircle value={status?.progress} label="Reading" />
                     </span>
                   ) : (
                     <>
@@ -449,7 +516,13 @@ export function SourcesPane({
         onPaste={() => void addPaste()}
       /> : null}
       {menu ? createPortal(
-        <div data-source-menu className="fixed z-[70] w-[196px] overflow-hidden rounded-xl bg-surface-2 p-1 shadow-xl" style={{ top: menu.top, right: menu.right }}>
+        <div
+          data-source-menu
+          className="fixed z-[70] w-[196px] overflow-hidden rounded-xl bg-surface-2 p-1 shadow-xl"
+          style={menu.pointer
+            ? positionContextMenu(menu.pointer.x, menu.pointer.y, 196, 84, window.innerWidth, window.innerHeight)
+            : { top: menu.top, right: menu.right }}
+        >
           <button type="button" onClick={() => { const item = items.find((entry) => entry.id === menu.id); if (item) void remove(item); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-foreground hover:bg-background">
             <UiIcon name="trash" size={16} />
             Remove source
@@ -542,6 +615,7 @@ function AddSourcesDialog({
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes("Files")) return;
           event.preventDefault();
+          event.stopPropagation();
           setOver(true);
         }}
         onDragLeave={(event) => {
@@ -551,6 +625,8 @@ function AddSourcesDialog({
         onDrop={(event) => {
           if (!event.dataTransfer.files.length) return;
           event.preventDefault();
+          // Portal events also reach SourcesPane; only this drop zone should upload the files.
+          event.stopPropagation();
           setOver(false);
           onFiles([...event.dataTransfer.files]);
         }}

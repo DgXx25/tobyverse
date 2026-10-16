@@ -19,6 +19,7 @@ import {
   projectIconFor,
 } from "@/lib/workspace/project-icons";
 import { notebookTitle } from "@/lib/workspace/title";
+import { positionContextMenu } from "@/lib/workspace/context-menu-position";
 import { useNotebooks } from "@/lib/workspace/use-notebooks";
 import type { Project } from "@/types/project";
 
@@ -166,6 +167,7 @@ type MenuView = "main" | "icon" | "folder" | "rename" | "delete";
 function NotebookCard({ project, userId, sourceCount }: { project: Project; userId: string; sourceCount?: number }) {
   const { theme } = useTheme();
   const [open, setOpen] = useState(false);
+  const [contextPoint, setContextPoint] = useState<{ x: number; y: number } | null>(null);
   const [view, setView] = useState<MenuView>("main");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +179,16 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
   const rootRef = useRef<HTMLDivElement>(null);
   const icon = projectIconFor(project);
   const folder = normalizeFolder(project.folder);
+  const contextMenuSize = view === "icon"
+    ? { width: 236, height: 330 }
+    : view === "folder"
+      ? { width: 236, height: 210 }
+      : view === "rename"
+        ? { width: 236, height: 105 }
+        : { width: 236, height: 165 };
+  const contextMenuPosition = contextPoint
+    ? positionContextMenu(contextPoint.x, contextPoint.y, contextMenuSize.width, contextMenuSize.height, window.innerWidth, window.innerHeight)
+    : null;
 
   useEffect(() => {
     if (!open) return;
@@ -241,6 +253,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
       onContextMenu={(event) => {
         event.preventDefault();
         show("main");
+        setContextPoint({ x: event.clientX, y: event.clientY });
         setOpen(true);
       }}
     >
@@ -265,6 +278,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {
+          setContextPoint(null);
           show("main");
           setOpen((current) => !current);
         }}
@@ -276,7 +290,8 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
       {open ? (
         <div
           role="menu"
-          className="absolute right-2 top-11 z-30 w-[236px] rounded-xl border border-border bg-surface-2 p-1 text-[13px] text-foreground shadow-xl"
+          className={`${contextPoint ? "fixed z-[80]" : "absolute right-2 top-11 z-30"} w-[236px] rounded-xl border border-border bg-surface-2 p-1 text-[13px] text-foreground shadow-xl`}
+          style={contextMenuPosition ?? undefined}
         >
           {view === "main" ? (
             <>

@@ -20,6 +20,10 @@ export type MaterialIndexStatus = "indexing" | "ready" | "failed";
 export type MaterialIndex = {
   status: MaterialIndexStatus;
   chunks: number;
+  /** Next PDF page to read; enables a truthful page-processing progress indicator. */
+  nextPage?: number;
+  /** Total text chunks for a non-PDF material index. */
+  total?: number;
 };
 
 export type Material = {

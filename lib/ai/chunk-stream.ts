@@ -50,7 +50,7 @@ export function snapToWord(text: string, index: number, lookahead = 14): number 
  */
 export function createChunkBuffer(
   onUpdate: (text: string) => void,
-  options?: { scheduler?: Scheduler },
+  options?: { scheduler?: Scheduler; deltaMode?: "append" },
 ) {
   const scheduler = options?.scheduler ?? browserScheduler;
   let full = "";
@@ -104,7 +104,8 @@ export function createChunkBuffer(
 
   return {
     push(delta: string) {
-      full = mergeStreamDelta(full, delta);
+      // SSE delta events are incremental: repeated pipes/newlines are meaningful Markdown.
+      full = options?.deltaMode === "append" ? full + delta : mergeStreamDelta(full, delta);
       ensureRunning();
     },
     /** Resolves once the visible text has caught up with what has been received (bounded). */

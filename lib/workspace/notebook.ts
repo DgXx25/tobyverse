@@ -2,6 +2,7 @@ import { createProject, reserveProjectId } from "@/lib/projects";
 import { loadSavedChatMode } from "@/lib/workspace/chat-mode";
 import { UNTITLED_NOTEBOOK_TITLE } from "@/lib/workspace/title";
 import { projectHomePath } from "@/lib/workspace/routes";
+import { markUntouchedNotebook } from "@/lib/workspace/draft-notebook";
 
 /**
  * A new notebook exists the moment you ask for it: "Untitled notebook", empty, ready for sources.
@@ -17,5 +18,6 @@ export async function createNotebook(input: { userId: string; folder?: string })
     folder: input.folder,
     createThread: true,
   });
+  markUntouchedNotebook(id);
   return { id, path: projectHomePath(id) };
 }

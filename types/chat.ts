@@ -87,6 +87,8 @@ export type ChatMessage = {
   blocks?: VisualBlock[];
   /** Passages from the project's materials this answer was grounded in. */
   sources?: ChatSourceRef[];
+  /** Short user-visible actions taken for this reply; never model reasoning. */
+  activity?: string[];
   /** True when this turn saved a long-term memory fact. */
   memorized?: boolean;
   /** UI-visible outcome when the assistant turn stopped before completing. */

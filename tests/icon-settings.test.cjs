@@ -18,8 +18,9 @@ test("workspace symbols use the free Hugeicons set", () => {
     assert.ok(icon.includes(name), `missing hugeicon ${name}`);
   }
   assert.match(kindIcon, /@hugeicons\/core-free-icons/);
-  assert.match(kindIcon, /Pdf01Icon/);
-  assert.match(kindIcon, /Doc01Icon/);
+  assert.match(kindIcon, /GoogleDocIcon/);
+  assert.match(kindIcon, /GoogleSheetIcon/);
+  assert.match(kindIcon, /\/icons\/Materials\/pdf\.svg/);
   assert.match(media, /return "jpg"/);
   assert.match(media, /return "png"/);
   assert.match(project, /icon: "panelRight"/);
@@ -34,9 +35,21 @@ test("file kind tiles use the uploaded format assets", () => {
   const kindIcon = read("components/workspace/file-kind-icon.tsx");
   const media = read("lib/library/media.ts");
 
-  for (const name of ["pdf", "doc", "docx", "csv", "excel", "ppt", "pptx", "jpg", "png"]) {
+  for (const name of ["doc", "docx", "csv", "excel", "ppt", "pptx", "jpg", "png"]) {
     assert.match(kindIcon, new RegExp(`${name}:\\s*\\w+Icon`), `missing ${name} icon`);
   }
+  assert.match(kindIcon, /\/icons\/Materials\/pdf\.svg/);
+  assert.match(kindIcon, /GoogleDocIcon/);
+  assert.match(kindIcon, /GoogleSheetIcon/);
+  assert.match(kindIcon, /doc:\s*GoogleDocIcon/);
+  assert.match(kindIcon, /docx:\s*GoogleDocIcon/);
+  assert.match(kindIcon, /csv:\s*GoogleSheetIcon/);
+  assert.match(kindIcon, /excel:\s*GoogleSheetIcon/);
+  assert.match(kindIcon, /jpg:\s*FileImageIcon/);
+  assert.match(kindIcon, /png:\s*FileImageIcon/);
+  assert.match(kindIcon, /ppt:\s*GalleryVerticalIcon/);
+  assert.match(kindIcon, /pptx:\s*GalleryVerticalIcon/);
+  assert.match(kindIcon, /txt:\s*NotepadTextIcon/);
   assert.match(media, /return "doc"/);
   assert.match(media, /return "csv"/);
   assert.match(media, /return "excel"/);

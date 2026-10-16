@@ -9,6 +9,7 @@ import { ShellProvider, useShell } from "@/components/workspace/shell-context";
 import { WhatsNewModal } from "@/components/whats-new-modal";
 import { ChatSearch } from "@/components/chat-search";
 import { ChatModeSync } from "@/components/account/chat-mode-sync";
+import { ProjectTabKeepAlive } from "@/components/workspace/project-tab-keep-alive";
 
 const SettingsModal = dynamic(() => import("@/components/workspace/settings-modal").then((mod) => mod.SettingsModal), { ssr: false });
 const AccountSheet = dynamic(() => import("@/components/account-sheet").then((mod) => mod.AccountSheet), { ssr: false });
@@ -60,7 +61,9 @@ function AppShellFrame({ userId, children }: { userId: string; children: React.R
         <Topbar />
       </div>
       <main className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-        <div className="page-y-scroll flex h-0 min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        <div className="page-y-scroll flex h-0 min-h-0 min-w-0 flex-1 flex-col">
+          <ProjectTabKeepAlive>{children}</ProjectTabKeepAlive>
+        </div>
       </main>
       {settingsOpen ? <SettingsModal /> : null}
       {accountSheetOpen ? <AccountSheet /> : null}

@@ -56,6 +56,8 @@ export type ChatDispatchContext = {
   count?: number;
   pendingKind?: PendingKind | null;
   attachments?: ChatAttachment[];
+  /** Completed server image search, including an empty result; undefined uses the legacy client fallback. */
+  imageSearchResults?: ChatImageHit[];
   onStatus?: (status: string) => void;
   onNotesEvent?: (event: { status?: string | null; title?: string; block?: VisualBlock; blocks?: VisualBlock[]; sheetId?: string }) => void;
   onPathEvent?: (event: { status?: string | null; title?: string; courses?: PathCourse[]; pathId?: string }) => void;
@@ -140,10 +142,7 @@ function imageFoundLine(_prompt: string): string {
 }
 
 function photoCaption(text: string, fallback: string): string {
-  const clean = stripArtifactMarkup(text)
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const clean = stripArtifactMarkup(text).trim();
   return clean || fallback;
 }
 
@@ -314,9 +313,7 @@ async function runEditPractice(ctx: ChatDispatchContext): Promise<ChatDispatchRe
     intent: "edit",
     content: `Updated practice set · ${ids.length} items`,
     artifact: {
-      kind: "practice",
-      id: active.id,
-      title: active.mode === "exam" ? "Exam" : "Quiz",
+      ...activeToChatArtifact(active),
       count: ids.length,
       ids,
     },
@@ -343,9 +340,7 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
     intent: "append",
     content: `Updated practice set · ${nextIds.length} items`,
     artifact: {
-      kind: "practice",
-      id: active.id,
-      title: active.mode === "exam" ? "Exam" : "Quiz",
+      ...activeToChatArtifact(active),
       count: nextIds.length,
       ids: nextIds,
     },
@@ -363,7 +358,7 @@ async function runSearchImages(ctx: ChatDispatchContext): Promise<ChatDispatchRe
     limit: count,
   });
   const seen = new Set(local.map((hit) => hit.thumb || hit.url).filter(Boolean));
-  const imageAttaches = await searchImagesClient(query, count);
+  const imageAttaches = ctx.imageSearchResults ?? await searchImagesClient(query, count);
   const web = imageAttaches.flatMap((hit) => {
     const key = hit.thumb || hit.url;
     if (!key || seen.has(key) || !toImageAttach(hit)) return [];

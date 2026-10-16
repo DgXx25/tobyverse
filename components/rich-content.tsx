@@ -88,47 +88,49 @@ function ChatTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
   const even = view.compact.every((shrink) => !shrink);
   return (
     <div className="chat-table">
-      <table className={even ? "chat-table-even" : undefined}>
-        <colgroup>
-          {view.compact.map((shrink, index) => (
-            <col key={index} className={shrink ? "chat-table-compact" : undefined} />
-          ))}
-        </colgroup>
-        <thead>
-          <tr>
-            {view.headers.map((cell, index) => (
-              <th
-                key={index}
-                rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-                colSpan={cell.colSpan && cell.colSpan > 1 ? cell.colSpan : undefined}
-                className={cell.className || undefined}
-              >
-                <MixedText text={cell.text} />
-              </th>
+      <div className="chat-table-scroll">
+        <table className={even ? "chat-table-even" : undefined}>
+          <colgroup>
+            {view.compact.map((shrink, index) => (
+              <col key={index} className={shrink ? "chat-table-compact" : undefined} />
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {view.body.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => {
-                if (!cell) return null;
-                const Tag = cell.header ? "th" : "td";
-                return (
-                  <Tag
-                    key={cellIndex}
-                    rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-                    colSpan={cell.colSpan && cell.colSpan > 1 ? cell.colSpan : undefined}
-                    className={cell.className || undefined}
-                  >
-                    <TableCellRich text={cell.text} pair={cell.pair} />
-                  </Tag>
-                );
-              })}
+          </colgroup>
+          <thead>
+            <tr>
+              {view.headers.map((cell, index) => (
+                <th
+                  key={index}
+                  rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+                  colSpan={cell.colSpan && cell.colSpan > 1 ? cell.colSpan : undefined}
+                  className={cell.className || undefined}
+                >
+                  <MixedText text={cell.text} />
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {view.body.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => {
+                  if (!cell) return null;
+                  const Tag = cell.header ? "th" : "td";
+                  return (
+                    <Tag
+                      key={cellIndex}
+                      rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+                      colSpan={cell.colSpan && cell.colSpan > 1 ? cell.colSpan : undefined}
+                      className={cell.className || undefined}
+                    >
+                      <TableCellRich text={cell.text} pair={cell.pair} />
+                    </Tag>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -188,7 +190,9 @@ const MarkdownBody = memo(function MarkdownBody({
           pre: ({ children }) => <>{children}</>,
           table: ({ children }) => (
             <div className="chat-table">
-              <table>{children}</table>
+              <div className="chat-table-scroll">
+                <table>{children}</table>
+              </div>
             </div>
           ),
           thead: ({ children }) => <thead>{children}</thead>,

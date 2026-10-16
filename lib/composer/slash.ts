@@ -16,7 +16,7 @@ export type SlashItem = {
   command: string;
   label: string;
   hint: string;
-  icon: "spark" | "zap" | "book" | "practice" | "notes" | "plan" | "search";
+  icon: "spark" | "zap" | "book" | "practice" | "notes" | "plan" | "search" | "check";
 };
 
 export const SLASH_MODES: SlashItem[] = [
@@ -34,7 +34,7 @@ export const SLASH_SKILLS: SlashItem[] = [
 
 export const COMPOSER_SKILL_META: Record<
   ComposerSkill,
-  { label: string; placeholder: string; intent: ComposerIntent; icon: "practice" | "notes" | "plan" | "search" }
+  { label: string; placeholder: string; intent: ComposerIntent; icon: "practice" | "notes" | "plan" | "search" | "check" }
 > = {
   practice: { label: "Quiz", placeholder: "What should the quiz cover?", intent: "practice", icon: "check" },
   notes: { label: "Note", placeholder: "What should I take notes on?", intent: "study", icon: "notes" },

@@ -236,6 +236,7 @@ export class GeminiProvider implements AIProvider {
     const firstParts = toPromptParts(prompt, options.images);
     const result = await runToolLoop({
       maxRounds: options.toolChoice ? 1 : 3,
+      stopAfterTool: (call) => call.name === "search_images",
       callModel: async ({ round, functionResponses }) => {
         const message: Content =
           round === 1
@@ -262,10 +263,37 @@ export class GeminiProvider implements AIProvider {
       execute: async (call) =>
         chatToolDefinition(call.name).execute({
           call,
-          invoke: async (current) => ({ ok: true, tool: current.name }),
+          invoke: options.executeTool ?? (async (current) => ({ ok: true, tool: current.name })),
         }),
     });
     if (result.tool) yield { tool: result.tool };
+    if (result.tool?.name === "search_images") {
+      // Keep the raw signed function-call replay, then supply the actual result.
+      // Override ANY from an explicit image selection so this call can answer in text.
+      const answer = await generative.generateContentStream({
+        contents: [
+          ...contents,
+          {
+            role: "user",
+            parts: [
+              ...result.functionResponses.map(({ name, response }) => ({
+                functionResponse: {
+                  name,
+                  response: response && typeof response === "object" ? response as object : { result: response ?? null },
+                },
+              })),
+            ],
+          },
+        ],
+        toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.NONE } },
+      });
+      for await (const chunk of answer.stream) {
+        const text = loopParts(chunk.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("");
+        if (text) yield { text };
+      }
+      reportGeminiResponse(options, model, await answer.response);
+      return;
+    }
     if (result.text) yield { text: result.text };
   }
 }

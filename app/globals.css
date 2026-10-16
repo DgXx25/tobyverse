@@ -307,15 +307,20 @@ html.dark .prompt-bubble {
 html.light .topbar-tabs .sidebar-item-active,
 html.light .topbar-tabs .sidebar-item-active:hover,
 html.light .topbar-tabs .sidebar-item-active:has(:focus-visible) {
-  background: var(--item-active-bg);
+  background: var(--panel-bg);
   cursor: default;
 }
 
 html.dark .topbar-tabs .sidebar-item-active,
 html.dark .topbar-tabs .sidebar-item-active:hover,
 html.dark .topbar-tabs .sidebar-item-active:has(:focus-visible) {
-  background: var(--item-active-bg);
+  background: var(--panel-bg);
   cursor: default;
+}
+
+html.light .project-card:hover,
+html.light .project-card:focus-visible {
+  background-color: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
 }
 
 .sidebar-project-control,
@@ -1005,8 +1010,15 @@ html.ios-standalone.marketing::before {
 .chat-table {
   width: 100%;
   margin: 20px 0;
-  overflow-x: auto;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
   background: transparent;
+}
+
+.chat-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .chat-body > .chat-table:first-child {
@@ -1528,7 +1540,7 @@ html.ios-standalone.marketing::before {
 
 .note-card {
   background: var(--surface-2);
-  border: none;
+  border: 1px solid var(--panel-border);
   border-radius: 18px;
 }
 
@@ -1791,7 +1803,8 @@ html.ios-standalone.marketing::before {
   margin: 20px 0;
   overflow: hidden;
   border-radius: 16px;
-  background: var(--surface-2);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
   color: var(--text);
   font-family: inherit;
   font-size: 15px;
@@ -1858,6 +1871,11 @@ html.ios-standalone.marketing::before {
   font-family: inherit;
   font-size: inherit;
   line-height: inherit;
+}
+
+.chat-block[data-kind="math"] .chat-block-body,
+.chat-block[data-kind="math"] .katex-display-host {
+  overflow-y: hidden;
 }
 
 .chat-block-body pre,

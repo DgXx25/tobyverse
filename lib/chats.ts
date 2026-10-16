@@ -32,6 +32,7 @@ import { collectThreadReferences } from "@/lib/sharing/thread-references";
 import type { VisualBlock } from "@/types/visual";
 import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole, ChatSourceRef, ChatThread, ChatThreadKind, PendingKind } from "@/types/chat";
 import type { ExerciseType } from "@/types/exercise";
+import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
 
 function isPermissionDenied(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -190,6 +191,9 @@ function mapMessage(
     images: asImages(data.images),
     blocks: parseNoteBlocks(data.blocks),
     sources: asSources(data.sources),
+    activity: Array.isArray(data.activity)
+      ? data.activity.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 100)).filter(Boolean).slice(0, 5)
+      : undefined,
     memorized: data.memorized === true ? true : undefined,
     responseStatus: data.responseStatus === "stopped" || data.responseStatus === "failed" ? data.responseStatus : undefined,
     createdAt: toIsoDate(data.createdAt) ?? toIsoDate(data.createdAtClient),
@@ -561,6 +565,7 @@ export async function setChatThreadMode(
     },
     { merge: true },
   );
+  clearUntouchedNotebook(projectId);
 }
 
 export function allocateChatMessageId(
@@ -587,6 +592,7 @@ export async function addChatMessage(input: {
   images?: ChatImageHit[];
   blocks?: VisualBlock[];
   sources?: ChatSourceRef[];
+  activity?: string[];
   memorized?: boolean;
   responseStatus?: ChatMessage["responseStatus"];
 }): Promise<string> {
@@ -623,11 +629,12 @@ export async function addChatMessage(input: {
       ...(images !== undefined ? { images } : {}),
       ...(input.blocks?.length ? { blocks: input.blocks } : {}),
       ...(input.sources?.length ? { sources: input.sources } : {}),
-      ...(input.sources?.length ? { sources: input.sources } : {}),
+      ...(input.activity?.length ? { activity: input.activity.slice(0, 5).map((item) => item.trim().slice(0, 100)).filter(Boolean) } : {}),
       ...(input.memorized ? { memorized: true } : {}),
       ...(input.responseStatus ? { responseStatus: input.responseStatus } : {}),
     }),
   );
+  clearUntouchedNotebook(input.projectId);
 
   await updateDoc(chatRef(input.projectId, threadId), {
     updatedAt: serverTimestamp(),
@@ -644,7 +651,7 @@ export async function addChatMessage(input: {
 export async function patchChatMessage(
   projectId: string,
   messageId: string,
-  patch: { content?: string; images?: ChatImageHit[]; attachments?: ChatAttachment[]; memorized?: boolean },
+  patch: { content?: string; images?: ChatImageHit[]; attachments?: ChatAttachment[]; memorized?: boolean; activity?: string[] },
   threadId = DEFAULT_CHAT_THREAD_ID,
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
@@ -657,6 +664,7 @@ export async function patchChatMessage(
     });
   }
   if (patch.memorized) payload.memorized = true;
+  if (patch.activity !== undefined) payload.activity = patch.activity.slice(0, 5).map((item) => item.trim().slice(0, 100)).filter(Boolean);
   if (Object.keys(payload).length === 0) return;
   await updateDoc(doc(messagesCollection(projectId, threadId), messageId), omitUndefined(payload));
 }

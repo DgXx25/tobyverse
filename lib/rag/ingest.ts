@@ -31,6 +31,7 @@ type IndexState = {
   status?: string;
   nextPage?: number;
   chunks?: number;
+  total?: number;
   textChars?: number;
   ocrPages?: number;
   version?: number;
@@ -179,7 +180,7 @@ export async function indexTextStep(input: {
   const data = snapshot.data() ?? {};
   const state = asState(data.index) as IndexState & { nextChunk?: number };
   if (state.status === "ready" && state.version === INDEX_VERSION) {
-    return { done: true, chunks: state.chunks ?? 0, total: state.chunks ?? 0, textChars: state.textChars ?? 0 };
+    return { done: true, chunks: state.chunks ?? 0, total: state.total ?? state.chunks ?? 0, textChars: state.textChars ?? 0 };
   }
 
   const { buffer } = await downloadGcsObject(input.textPath);
@@ -199,6 +200,7 @@ export async function indexTextStep(input: {
           status: finished ? "ready" : "indexing",
           nextChunk: cursor,
           chunks: cursor,
+          total: all.length,
           textChars: text.length,
           version: INDEX_VERSION,
         },
@@ -209,7 +211,7 @@ export async function indexTextStep(input: {
 
   if (all.length === 0) {
     await input.ref.set(
-      { index: { status: "ready", chunks: 0, textChars: text.length, version: INDEX_VERSION } },
+      { index: { status: "ready", chunks: 0, total: 0, textChars: text.length, version: INDEX_VERSION } },
       { merge: true },
     );
   }

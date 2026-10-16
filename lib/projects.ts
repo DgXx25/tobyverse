@@ -26,6 +26,7 @@ import { asString, toIsoDate } from "@/lib/timestamps";
 import { PROJECT_GOALS, type ActiveArtifact, type CreateProjectInput, type Project, type ProjectGoal } from "@/types";
 import type { ChatMode } from "@/types/chat";
 import type { LessonRecipe } from "@/types/lesson";
+import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
 
 function asGoal(value: unknown): ProjectGoal {
   if (typeof value === "string" && (PROJECT_GOALS as readonly string[]).includes(value)) {
@@ -191,6 +192,7 @@ export async function updateProjectChatMode(
     preferredChatMode: mode,
     updatedAt: serverTimestamp(),
   });
+  clearUntouchedNotebook(projectId);
 }
 
 export async function updateProjectTitle(
@@ -205,6 +207,7 @@ export async function updateProjectTitle(
     title: next,
     updatedAt: serverTimestamp(),
   });
+  clearUntouchedNotebook(projectId);
 }
 
 /** Symbol and folder are plain fields the notebook home edits. Empty string clears them. */
@@ -219,6 +222,7 @@ export async function updateProjectMeta(
   if (patch.iconColor !== undefined) payload.iconColor = patch.iconColor.trim().slice(0, 7);
   if (patch.folder !== undefined) payload.folder = patch.folder.trim().slice(0, 40);
   await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), payload);
+  clearUntouchedNotebook(projectId);
 }
 
 export async function updateProjectMemory(
@@ -232,6 +236,7 @@ export async function updateProjectMemory(
     projectMemory,
     updatedAt: serverTimestamp(),
   });
+  clearUntouchedNotebook(projectId);
   return projectMemory;
 }
 
@@ -247,6 +252,7 @@ export async function appendProjectMemory(
     projectMemory,
     updatedAt: serverTimestamp(),
   });
+  clearUntouchedNotebook(projectId);
   return projectMemory;
 }
 
@@ -262,6 +268,7 @@ export async function updateProjectGoal(
     recipe: recipeForGoal(next),
     updatedAt: serverTimestamp(),
   });
+  clearUntouchedNotebook(projectId);
 }
 
 export async function updateProjectActiveArtifact(
@@ -277,6 +284,7 @@ export async function updateProjectActiveArtifact(
       updatedAt: serverTimestamp(),
     }),
   );
+  clearUntouchedNotebook(projectId);
 }
 
 export function subscribeProjectsForUser(
@@ -307,6 +315,7 @@ export async function deleteProject(projectId: string, userId: string): Promise<
     ...exercises.map((item) => deleteExercise(projectId, item.id)),
   ]);
   await deleteDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId));
+  clearUntouchedNotebook(projectId);
 }
 
 export async function markProjectHidden(projectId: string, userId: string): Promise<void> {

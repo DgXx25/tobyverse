@@ -58,6 +58,8 @@ import { workFinishedPrompt, type SetResult } from "@/lib/exercises/session";
 import { gateGuestChatTool, guestCapReached, GuestCapError, isGuestUser, recordGuestAssistantTurn, syncGuestAssistantCount } from "@/lib/guest";
 import { recipeForGoal } from "@/lib/core/recipes";
 import { updateProjectActiveArtifact, updateProjectGoal } from "@/lib/projects";
+import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
+import { markProjectActivityComplete } from "@/lib/workspace/project-activity";
 import { RichContent } from "@/components/rich-content";
 import { ChatExerciseProvider } from "@/components/workspace/chat-exercise-context";
 import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
@@ -105,9 +107,39 @@ type StreamState = {
   promptAsk?: ChatMessage["promptAsk"];
   blocks?: ChatMessage["blocks"];
   sources?: ChatMessage["sources"];
+  activity?: string[];
   memorized?: boolean;
   quiet?: boolean;
 };
+
+function processForTool(tool: ChatToolCall, ka: boolean): { activity: string; status?: string } | null {
+  const detail = (tool.args.topic || tool.args.query || tool.args.instruction || "").replace(/\s+/g, " ").trim().slice(0, 64);
+  const suffix = detail ? ` “${detail}”` : "";
+  switch (tool.name) {
+    case "search_images":
+      return { activity: ka ? `ფოტოები მოვძებნე${detail ? `: „${detail}“` : ""}` : `Searched photos${detail ? ` for “${detail}”` : ""}` };
+    case "create_sheet":
+      return { activity: ka ? `ნოუთს ვქმნი${suffix}` : `Creating note${suffix}` };
+    case "edit_sheet":
+      return { activity: ka ? `ნოუთს ვაახლებ${suffix}` : `Updating note${suffix}` };
+    case "create_practice":
+      return { activity: ka ? `სავარჯიშოს ვქმნი${suffix}` : `Creating practice${suffix}` };
+    case "create_path":
+      return { activity: ka ? `სასწავლო გზას ვგეგმავ${suffix}` : `Planning a learning path${suffix}` };
+    case "illustrate":
+      return { activity: ka ? `ილუსტრაციას ვამზადებ${suffix}` : `Creating an illustration${suffix}` };
+    default:
+      return null;
+  }
+}
+
+function processForSource(title: string, ka: boolean): { activity: string; status: string } {
+  const source = title.replace(/\s+/g, " ").trim().slice(0, 64) || (ka ? "მასალა" : "source");
+  return {
+    activity: ka ? `წყარო მოვიძიე: „${source}“` : `Searched source “${source}”`,
+    status: ka ? `წყარო: „${source}“` : `Using source “${source}”`,
+  };
+}
 
 function FollowChips({
   ka: _ka,
@@ -718,6 +750,7 @@ export function ProjectChat({
       setChips((current) => current.some((chip) => chip.id === start.id && chip.status === "uploading")
         ? patchComposerChip(current, start.id, { status: "error", error: "Upload failed." })
         : current);
+      markProjectActivityComplete(project.id);
     }
   }
 
@@ -800,8 +833,9 @@ export function ProjectChat({
     examAsk?: boolean;
     replyTo?: string;
     onFirstToken?: () => void;
+    onActivity?: (activity: string, status?: string) => void;
     signal?: AbortSignal;
-  }): Promise<{ text: string; tool: ChatToolCall; memory: Promise<boolean>; sources: NonNullable<ChatMessage["sources"]>; aborted?: boolean }> {
+  }): Promise<{ text: string; tool: ChatToolCall; memory: Promise<boolean>; sources: NonNullable<ChatMessage["sources"]>; imageSearchResults?: ChatImageHit[]; aborted?: boolean }> {
     const facts = artifactFacts(messages);
     const latest = latestArtifact(messages);
     const active = resolveActive();
@@ -885,6 +919,7 @@ export function ProjectChat({
 
     let tool: ChatToolCall = { name: "answer", args: {} };
     let sources: NonNullable<ChatMessage["sources"]> = [];
+    let imageSearchResults: ChatImageHit[] | undefined;
     const chunks = createChunkBuffer((text) => {
       if (!toolStreamsText(tool.name)) return;
       startTransition(() => {
@@ -894,7 +929,7 @@ export function ProjectChat({
             : current,
         );
       });
-    });
+    }, { deltaMode: "append" });
     try {
       const result = await readChatSse(response, {
         onDelta: (delta) => {
@@ -904,10 +939,21 @@ export function ProjectChat({
         onSources: (list) => {
           sources = list;
           setStream((current) => (current ? { ...current, sources: list } : current));
+          for (const source of list.slice(0, 3)) {
+            const process = processForSource(source.title, promptIsKa(input.prompt));
+            input.onActivity?.(process.activity, process.status);
+          }
+        },
+        onStatus: (status) => input.onActivity?.("", status),
+        onImages: (list) => {
+          imageSearchResults = list;
+          setStream((current) => current ? { ...current, images: list } : current);
         },
         onTool: (next) => {
           input.onFirstToken?.();
           tool = next;
+          const process = processForTool(next, promptIsKa(input.prompt));
+          if (process) input.onActivity?.(process.activity, process.status);
           if (!toolStreamsText(next.name)) {
             const intent = intentFromTool(next.name);
             setStream((current) =>
@@ -925,7 +971,7 @@ export function ProjectChat({
       if (toolStreamsText(tool.name) && !text && tool.name !== "search_images" && !chunks.raw.trim()) {
         throw new Error("The model returned an empty reply.");
       }
-      return { text, tool, memory, sources };
+      return { text, tool, memory, sources, imageSearchResults };
     } catch (err) {
       const partial = chunks.finish();
       if (
@@ -933,7 +979,7 @@ export function ProjectChat({
         (err instanceof DOMException && err.name === "AbortError") ||
         (err instanceof Error && err.name === "AbortError")
       ) {
-        return { text: partial, tool, memory, sources, aborted: true };
+        return { text: partial, tool, memory, sources, imageSearchResults, aborted: true };
       }
       throw err;
     }
@@ -1037,10 +1083,20 @@ export function ProjectChat({
       return;
     }
 
+    clearUntouchedNotebook(project.id);
+
     let pool = await materialsForTurn(attachments, options?.materials);
     let previewIds = guest ? [] : (options?.waitForPreview ?? []).filter(Boolean);
     const analysing = Boolean(ingest) || previewIds.length > 0;
     const assistantId = allocateChatMessageId(project.id, chatThreadId);
+    const activity: string[] = [];
+    const recordActivity = (entry: string, status?: string) => {
+      const clean = entry.replace(/\s+/g, " ").trim().slice(0, 100);
+      if (clean && !activity.includes(clean) && activity.length < 5) activity.push(clean);
+      setStream((current) => current?.id === assistantId
+        ? { ...current, activity: [...activity], ...(status ? { status } : {}) }
+        : current);
+    };
 
     sendingRef.current = true;
     const controller = new AbortController();
@@ -1100,6 +1156,7 @@ export function ProjectChat({
         relatedExerciseType: null,
         intent,
         artifact: active?.artifact ?? null,
+        activity: activity.length ? [...activity] : undefined,
         options: active?.options,
         images: active?.images,
         blocks: active?.blocks,
@@ -1120,6 +1177,7 @@ export function ProjectChat({
         content,
         responseStatus,
         artifact: active?.artifact,
+        activity,
         options: active?.options,
         images: active?.images,
         blocks: active?.blocks,
@@ -1180,7 +1238,10 @@ export function ProjectChat({
         pool = await materialsForTurn([...attachments, ...attachmentsFromMaterials(previewIds, pool)], pool);
       }
 
-      setStream((current) => (current ? { ...current, status: thinkingStatus(promptIsKa(modelPrompt)) } : current));
+      const ka = promptIsKa(modelPrompt);
+      setStream((current) => (current
+        ? { ...current, status: pool.length ? (ka ? "მასალებში ვეძებ…" : "Searching sources…") : thinkingStatus(ka) }
+        : current));
       applyInferredGoal(modelPrompt);
 
       const startedAt = performance.now();
@@ -1216,6 +1277,7 @@ export function ProjectChat({
         examAsk: options?.examAsk,
         replyTo: options?.replyTo,
         onFirstToken: markFirstToken,
+        onActivity: recordActivity,
         signal: controller.signal,
       });
       if (streamed.aborted || controller.signal.aborted) {
@@ -1260,6 +1322,7 @@ export function ProjectChat({
         messages,
         pendingKind,
         attachments,
+        imageSearchResults: streamed.imageSearchResults,
         signal: controller.signal,
         hintAsk: options?.hintAsk,
         examAsk: options?.examAsk,
@@ -1314,6 +1377,7 @@ export function ProjectChat({
               content,
               intent: dispatched.intent,
               artifact: artifact,
+              activity: activity.length ? [...activity] : undefined,
               images: dispatched.images,
               options: dispatched.options,
               promptAsk,
@@ -1336,6 +1400,7 @@ export function ProjectChat({
         intent: dispatched.intent,
         content,
         artifact,
+        activity,
         options: dispatched.options,
         pendingKind: dispatched.pendingKind,
         images: dispatched.images,
@@ -1441,6 +1506,7 @@ export function ProjectChat({
       setSending(false);
       setStoppable(false);
       keepComposerFocus();
+      markProjectActivityComplete(project.id);
     }
     if (followTopic) {
       void sendPrompt(leadPathPrompt(followTopic, followTeach, pathRef.current?.kind), { skipUser: true, leadPath: true });
@@ -1742,7 +1808,12 @@ export function ProjectChat({
                   settled
                 />
               ) : workedMs[message.id] != null ? (
-                <StatusWait label={formatWorked(workedMs[message.id], ka)} settled savedStep={message.artifact?.step ?? artifactStepsRef.current.get(message.id)} />
+                <StatusWait
+                  label={formatWorked(workedMs[message.id], ka)}
+                  settled
+                  savedActivity={message.activity}
+                  savedStep={message.artifact?.step ?? artifactStepsRef.current.get(message.id)}
+                />
               ) : null}
             </div>
           ) : null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -12,10 +12,25 @@ import { BrandMark } from "@/components/brand-mark";
 import { CHAT_SEARCH_OPEN_EVENT } from "@/components/chat-search";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
-import { ProjectSymbol } from "@/components/workspace/pack-icon";
+import { ProjectSymbol, iconSearchLabel } from "@/components/workspace/pack-icon";
+import { ICON_NAMES } from "@/lib/workspace/icon-names";
+import { updateProjectMeta, updateProjectTitle } from "@/lib/projects";
+import { useTheme } from "@/components/workspace/theme-provider";
+import { accentColor, type AccentId } from "@/lib/workspace/theme";
 import { projectIconFor } from "@/lib/workspace/project-icons";
+import { addOpenNotebook } from "@/lib/workspace/open-tabs";
+import { positionContextMenu } from "@/lib/workspace/context-menu-position";
+import { discardUntouchedNotebook } from "@/lib/workspace/discard-draft-notebook";
 import { notebookTitle } from "@/lib/workspace/title";
 import { useNotebooks } from "@/lib/workspace/use-notebooks";
+import { activeNotebookId } from "@/lib/workspace/active-notebook-tab";
+import {
+  clearProjectActivityNotificationFor,
+  getProjectActivityNotifications,
+  subscribeProjectActivityNotifications,
+} from "@/lib/workspace/project-activity";
+
+const SYMBOL_COLORS = ["blue", "red", "orange", "yellow", "green", "teal", "purple", "pink"] as const satisfies readonly AccentId[];
 
 const OPEN_KEY = "tv.openNotebooks";
 
@@ -23,7 +38,9 @@ function readOpen(): string[] {
   if (typeof window === "undefined") return [];
   try {
     const parsed = JSON.parse(window.sessionStorage.getItem(OPEN_KEY) || "[]") as unknown;
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string").reduce<string[]>((ids, id) => addOpenNotebook(ids, id), [])
+      : [];
   } catch {
     return [];
   }
@@ -32,30 +49,38 @@ function readOpen(): string[] {
 function writeOpen(ids: string[]) {
   try {
     window.sessionStorage.setItem(OPEN_KEY, JSON.stringify(ids));
+    window.dispatchEvent(new CustomEvent("tv:open-notebook-tabs"));
   } catch {
     /* private mode */
   }
 }
 
-/** Which notebook the URL points at: /p/:id, or /c/:id for the notebook's main chat. */
-function activeNotebookId(pathname: string): string | null {
-  if (pathname.startsWith("/p/") || pathname.startsWith("/c/")) return pathname.split("/")[2] ?? null;
-  return null;
-}
-
 export function Topbar() {
   const { user } = useAuth();
+  const { theme } = useTheme();
   const router = useRouter();
   const pathname = usePathname();
   const { openSettings, openAccountSheet, setSelectedProjectId, setPendingPanel, projectShare } = useShell();
   const { notebooks } = useNotebooks(user?.uid);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [tabMenu, setTabMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ id: string; left: number; top: number } | null>(null);
   const [openIds, setOpenIds] = useState<string[]>([]);
+  const [activityNotifications, setActivityNotifications] = useState<string[]>([]);
+  const [editorId, setEditorId] = useState<string | null>(null);
+  const [editorMode, setEditorMode] = useState<"rename" | "icon">("rename");
+  const [titleDraft, setTitleDraft] = useState("");
+  const [iconDraft, setIconDraft] = useState("");
+  const [iconQuery, setIconQuery] = useState("");
+  const [iconColor, setIconColor] = useState<AccentId>("blue");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLAnchorElement>(null);
+  const identityRef = useRef<HTMLDivElement>(null);
+  const previousActiveId = useRef<string | null>(null);
 
   const activeId = activeNotebookId(pathname);
+  const activeProject = notebooks.find((item) => item.id === activeId);
   const libraryActive = pathname === "/library" || pathname.startsWith("/library/");
   const name = user?.displayName || user?.email || "Account";
 
@@ -64,14 +89,35 @@ export function Topbar() {
   }, [activeId, setSelectedProjectId]);
 
   useEffect(() => {
+    const previousId = previousActiveId.current;
+    previousActiveId.current = activeId;
+    if (!previousId || previousId === activeId || !user?.uid) return;
+    void discardUntouchedNotebook(previousId, user.uid).then((deleted) => {
+      if (!deleted) return;
+      setOpenIds((current) => {
+        const next = current.filter((id) => id !== previousId);
+        writeOpen(next);
+        return next;
+      });
+    });
+  }, [activeId, user?.uid]);
+
+  useEffect(() => {
     setOpenIds(readOpen());
+    setActivityNotifications(getProjectActivityNotifications());
+    return subscribeProjectActivityNotifications(() => setActivityNotifications(getProjectActivityNotifications()));
   }, []);
+
+  useEffect(() => {
+    if (!activeId) return;
+    clearProjectActivityNotificationFor(activeId);
+  }, [activeId]);
 
   useEffect(() => {
     if (!activeId) return;
     setOpenIds((current) => {
       if (current.includes(activeId)) return current;
-      const next = [...current, activeId];
+      const next = addOpenNotebook(current, activeId);
       writeOpen(next);
       return next;
     });
@@ -102,6 +148,22 @@ export function Topbar() {
   }, [tabMenu]);
 
   useEffect(() => {
+    if (!editorId) return;
+    function closeEditor(event: PointerEvent) {
+      if (!identityRef.current?.contains(event.target as Node)) setEditorId(null);
+    }
+    function closeKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setEditorId(null);
+    }
+    document.addEventListener("pointerdown", closeEditor);
+    document.addEventListener("keydown", closeKey);
+    return () => {
+      document.removeEventListener("pointerdown", closeEditor);
+      document.removeEventListener("keydown", closeKey);
+    };
+  }, [editorId]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     function closeOutside(event: PointerEvent) {
       if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
@@ -121,10 +183,52 @@ export function Topbar() {
     const next = openIds.filter((item) => item !== id);
     setOpenIds(next);
     writeOpen(next);
-    if (id !== activeId) return;
+    if (id !== activeId) {
+      if (user?.uid) void discardUntouchedNotebook(id, user.uid);
+      return;
+    }
     const fallback = next[next.length - 1];
     router.push(fallback ? `/p/${fallback}` : "/new");
   }
+
+  function openEditor(id: string, mode: "rename" | "icon") {
+    const project = notebooks.find((item) => item.id === id);
+    if (!project) return;
+    setEditorId(id);
+    setEditorMode(mode);
+    setTitleDraft(notebookTitle(project.title));
+    setIconDraft(projectIconFor(project));
+    setIconQuery("");
+    setEditError(null);
+    const savedColor = SYMBOL_COLORS.find((color) => accentColor(theme, color) === project.iconColor);
+    setIconColor(savedColor ?? "blue");
+  }
+
+  async function saveProjectIdentity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const project = notebooks.find((item) => item.id === editorId);
+    const nextTitle = titleDraft.replace(/\s+/g, " ").trim();
+    if (!project || !user?.uid || !nextTitle) return;
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await Promise.all([
+        updateProjectTitle(project.id, user.uid, nextTitle),
+        updateProjectMeta(project.id, user.uid, { icon: iconDraft, iconColor: accentColor(theme, iconColor) }),
+      ]);
+      setEditorId(null);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Could not update project.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  const editedProject = notebooks.find((item) => item.id === editorId);
+  const matchingIcons = (() => {
+    const query = iconQuery.trim().toLowerCase();
+    return (query ? ICON_NAMES.filter((value) => iconSearchLabel(value).includes(query) || value.toLowerCase().includes(query)) : ICON_NAMES).slice(0, 64);
+  })();
 
   async function handleSignOut() {
     await signOut(getFirebaseAuth());
@@ -153,10 +257,11 @@ export function Topbar() {
           return (
             <span
               key={project.id}
-              className="group relative flex max-w-[200px] shrink-0"
+              className="group relative flex w-[208px] max-w-[216px] shrink-0"
               onContextMenu={(event) => {
                 event.preventDefault();
-                setTabMenu({ id: project.id, x: event.clientX, y: event.clientY });
+                const position = positionContextMenu(event.clientX, event.clientY, 180, 124, window.innerWidth, window.innerHeight);
+                setTabMenu({ id: project.id, ...position });
               }}
             >
               <Link
@@ -165,11 +270,11 @@ export function Topbar() {
                 title={notebookTitle(project.title)}
                 aria-current={isActive ? "page" : undefined}
                 onClick={isActive ? (event) => event.preventDefault() : undefined}
-                className={`sidebar-item-rest flex h-9 min-w-0 items-center gap-1.5 rounded-xl pl-2.5 pr-7 text-[13px] ${
+                className={`sidebar-item-rest flex h-9 w-full min-w-0 items-center gap-1.5 rounded-xl pl-2.5 pr-7 text-[13px] ${
                   isActive ? "sidebar-item-active cursor-default text-foreground" : "text-muted hover:text-foreground"
                 }`}
               >
-                <ProjectSymbol name={projectIconFor(project)} size={18} color={project.iconColor} className="shrink-0" />
+                <ProjectSymbol name={projectIconFor(project)} size={20} color={project.iconColor} className="shrink-0" />
                 <span className="min-w-0 truncate">{notebookTitle(project.title)}</span>
               </Link>
               <button
@@ -178,6 +283,9 @@ export function Topbar() {
                 onClick={() => closeTab(project.id)}
                 className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted hover:bg-foreground/10 hover:text-foreground"
               >
+                {activityNotifications.includes(project.id) && !isActive ? (
+                  <span aria-label="Finished activity" className="absolute right-[22px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-red-500" />
+                ) : null}
                 <UiIcon name="close" size={16} />
               </button>
             </span>
@@ -195,6 +303,51 @@ export function Topbar() {
       <div className="min-w-0 flex-1 md:hidden" />
 
       <div className="flex shrink-0 items-center gap-0.5">
+        {activeProject ? (
+          <div ref={identityRef} className="relative mr-1 max-w-[250px]">
+            <button
+              type="button"
+              aria-label={`Edit project ${notebookTitle(activeProject.title)}`}
+              aria-expanded={editorId === activeId}
+              onClick={() => editorId === activeId ? setEditorId(null) : openEditor(activeProject.id, "rename")}
+              className="sidebar-item-rest flex h-9 max-w-full items-center gap-2 rounded-xl px-2 text-[14px] font-medium text-foreground hover:bg-foreground/5"
+            >
+              <ProjectSymbol name={projectIconFor(activeProject)} size={18} color={activeProject.iconColor} className="shrink-0" />
+              <span className="truncate">{notebookTitle(activeProject.title)}</span>
+            </button>
+            {editorId && editedProject ? (
+              <div className="absolute right-0 top-full z-50 mt-1 w-[288px] rounded-xl border border-border bg-surface-2 p-2 text-foreground shadow-xl" onPointerDown={(event) => event.stopPropagation()}>
+                <form onSubmit={(event) => void saveProjectIdentity(event)}>
+                  <label className="mb-1 block px-1 text-[11px] text-muted">Project name</label>
+                  <input autoFocus={editorMode === "rename"} value={titleDraft} maxLength={80} onChange={(event) => setTitleDraft(event.target.value)} aria-label="Project name" className="h-9 w-full rounded-lg border border-border bg-background px-2.5 text-[13px] outline-none" />
+                  <div className="my-2 flex items-center gap-2 px-1">
+                    <ProjectSymbol name={iconDraft} size={20} color={accentColor(theme, iconColor)} />
+                    <span className="text-[12px] text-muted">Symbol</span>
+                    <input autoFocus={editorMode === "icon"} value={iconQuery} onChange={(event) => setIconQuery(event.target.value)} placeholder="Search symbols" aria-label="Search symbols" className="ml-auto h-7 w-[135px] rounded-md border border-border bg-background px-2 text-[12px] outline-none" />
+                  </div>
+                  <div className="mb-2 flex items-center gap-2 px-1">
+                    {SYMBOL_COLORS.map((colorId) => {
+                      const color = accentColor(theme, colorId);
+                      return <button key={colorId} type="button" aria-label={`${colorId} symbol color`} aria-pressed={iconColor === colorId} onClick={() => setIconColor(colorId)} className="h-4 w-4 rounded-full" style={{ background: color, outline: iconColor === colorId ? "2px solid var(--text)" : "none", outlineOffset: 2 }} />;
+                    })}
+                  </div>
+                  <div className="grid max-h-[168px] grid-cols-8 gap-1 overflow-y-auto">
+                    {matchingIcons.map((symbol) => (
+                      <button key={symbol} type="button" aria-label={iconSearchLabel(symbol)} title={iconSearchLabel(symbol)} aria-pressed={iconDraft === symbol} onClick={() => setIconDraft(symbol)} className={`flex h-7 w-7 items-center justify-center rounded-md hover:bg-foreground/10 ${iconDraft === symbol ? "bg-foreground/10" : ""}`}>
+                        <ProjectSymbol name={symbol} size={17} color={accentColor(theme, iconColor)} />
+                      </button>
+                    ))}
+                  </div>
+                  {editError ? <p role="alert" className="px-1 pt-1 text-[12px] text-red-500">{editError}</p> : null}
+                  <div className="mt-2 flex justify-end gap-1.5">
+                    <button type="button" onClick={() => setEditorId(null)} className="h-8 rounded-lg px-2.5 text-[12px] text-muted hover:bg-foreground/10">Cancel</button>
+                    <button type="submit" disabled={savingEdit || !titleDraft.trim()} className="h-8 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background disabled:opacity-50">{savingEdit ? "Saving…" : "Save"}</button>
+                  </div>
+                </form>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <span className="max-md:hidden">
           <IconButton label="Search" onClick={() => window.dispatchEvent(new Event(CHAT_SEARCH_OPEN_EVENT))}>
             <UiIcon name="search" size={17} />
@@ -266,13 +419,35 @@ export function Topbar() {
         </div>
       </div>
       {tabMenu && typeof document !== "undefined"
-        ? createPortal(
+          ? createPortal(
             <div
               role="menu"
               className="fixed z-[80] w-[180px] overflow-hidden rounded-xl border border-border bg-surface-2 p-1 text-[13px] text-foreground shadow-xl"
-              style={{ top: tabMenu.y, left: Math.min(tabMenu.x, window.innerWidth - 196) }}
+              style={{ top: tabMenu.top, left: tabMenu.left }}
               onPointerDown={(event) => event.stopPropagation()}
             >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center rounded-lg px-2.5 py-2 text-left hover:bg-foreground/10"
+                onClick={() => {
+                  openEditor(tabMenu.id, "rename");
+                  setTabMenu(null);
+                }}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center rounded-lg px-2.5 py-2 text-left hover:bg-foreground/10"
+                onClick={() => {
+                  openEditor(tabMenu.id, "icon");
+                  setTabMenu(null);
+                }}
+              >
+                Change symbol
+              </button>
               <button
                 type="button"
                 role="menuitem"
