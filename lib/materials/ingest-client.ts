@@ -396,7 +396,8 @@ async function indexMaterialText(projectId: string, materialId: string): Promise
 
 /** Text + preview on the material doc, then the vector index. Only text is kept, never page or slide images. */
 export async function commitMaterialText(prepared: PreparedMaterial): Promise<string> {
-  const { projectId, userId, materialId, storagePath, textPath, data } = prepared;
+  const { projectId, userId, materialId, storagePath, data } = prepared;
+  let { textPath } = prepared;
   const type = data.type ?? prepared.type;
   const title = prepared.title.trim() || data.title?.trim() || "File";
 
@@ -421,7 +422,8 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
 
     if (type !== "pdf" && !data.textStored) {
       if (!data.text) throw new Error("Extraction failed.");
-      await uploadExtractedText(textPath, data.text);
+      textPath = await uploadExtractedText(textPath, data.text);
+      prepared.textPath = textPath;
     }
 
     if (type === "pdf") {

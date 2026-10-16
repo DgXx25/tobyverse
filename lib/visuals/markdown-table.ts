@@ -527,14 +527,6 @@ function isProseCell(text: string): boolean {
   return (plain.match(/\s/g) || []).length >= 3;
 }
 
-function cellPlainLength(cell: string): number {
-  return stackTableCell(cell)
-    .join(" ")
-    .replace(/\$[^$]+\$/g, "x")
-    .replace(/\s+/g, " ")
-    .trim().length;
-}
-
 /** Turn `$y$ name` or `$y$<br>name` into stacked lines. Latex with `|` stays one line. */
 export function stackTableCell(cell: string): string[] {
   const text = scrubLeakedMarkup(cell);
@@ -661,12 +653,6 @@ function layoutFormCard(headers: string[], rows: string[][]): ChatTableView {
   };
 }
 
-function columnIsShort(headers: string[], rows: string[][], col: number): boolean {
-  const cells = [headers[col] ?? "", ...rows.map((row) => row[col] ?? "")];
-  const avg = cells.reduce((sum, cell) => sum + cellPlainLength(cell), 0) / Math.max(cells.length, 1);
-  return avg < 32;
-}
-
 function cellClass(opts: { prose: boolean; compact: boolean; corners: string[] }): string {
   return [opts.prose ? "chat-table-prose" : undefined, opts.compact ? "chat-table-compact-cell" : undefined, ...opts.corners]
     .filter(Boolean)
@@ -681,9 +667,7 @@ function cellViewClass(text: string, opts: { prose: boolean; compact: boolean; c
 export function layoutChatTable(headers: string[], rows: string[][]): ChatTableView {
   if (isFormCardTable(headers, rows)) return layoutFormCard(headers, rows);
   const cols = Math.max(headers.length, ...rows.map((row) => row.length), 0);
-  const short = Array.from({ length: cols }, (_, col) => columnIsShort(headers, rows, col));
-  const mixed = short.some(Boolean) && short.some((value) => !value);
-  const compact = mixed ? short : short.map(() => false);
+  const compact = Array.from({ length: cols }, () => false);
 
   const headerCells: ChatTableCellView[] = Array.from({ length: cols }, (_, col) => {
     const text = unwrapParenLine(stackTableCell(headers[col] ?? "").join(" "));

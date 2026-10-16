@@ -34,7 +34,7 @@ export function generateStatusText(
   _ka: boolean,
 ): string {
   if (kind === "notes") return "Writing notes";
-  if (kind === "practice") return "Generating practice";
+  if (kind === "practice") return "Generating quiz";
   if (kind === "path") return "Mapping the path";
   return "Extracting";
 }

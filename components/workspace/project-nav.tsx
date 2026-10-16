@@ -15,7 +15,7 @@ export function ProjectNav({
   onTab: (id: ProjectTabId) => void;
 }) {
   return (
-    <aside className="flex h-full w-[220px] shrink-0 flex-col border-r border-border bg-background">
+    <aside className="project-nav flex h-full w-[220px] shrink-0 flex-col border-r border-border bg-surface-2">
       <div className="border-b border-border px-3 py-3">
         <Link href="/" className="text-[11px] font-medium tracking-tight text-foreground">
           TobyVerse
@@ -35,9 +35,8 @@ export function ProjectNav({
               key={item.id}
               type="button"
               onClick={() => onTab(item.id)}
-              className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${
-                active ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"
-              }`}
+              data-active={active ? "true" : "false"}
+              className={`project-nav-item flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[13px] ${active ? "text-foreground" : "text-muted"}`}
             >
               {item.label}
             </button>

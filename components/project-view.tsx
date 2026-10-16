@@ -48,6 +48,7 @@ const MIN_CHAT = 420;
 const SOURCES_MIN = 260;
 const SOURCES_MAX = 440;
 const SOURCES_DEFAULT = 320;
+const PANEL_OUTER_GAP = 8;
 const SOURCES_KEY = "tv.sources.open";
 const SOURCES_WIDTH_KEY = "tv.sources.width";
 const STUDIO_KEY = "tv.studio.open";
@@ -88,7 +89,7 @@ function focusFromPending(pending: {
 }): ArtifactFocus {
   if (pending.kind === "material") return { kind: "material", id: pending.id };
   if (pending.kind === "settings") return { kind: "settings", id: pending.id };
-  if (pending.kind === "practice") return { kind: "practice", id: pending.id, title: pending.title || "Practice" };
+  if (pending.kind === "practice") return { kind: "practice", id: pending.id, title: pending.title || "Quiz" };
   if (pending.kind === "path") return { kind: "path", id: pending.id, title: pending.title || "Path" };
   if (pending.kind === "plan") return { kind: "plan", id: pending.id, title: pending.title || "Study plan" };
   return { kind: "sheet", id: pending.id, title: pending.title || "Notes" };
@@ -671,16 +672,20 @@ export function ProjectView({
       />
       {phone ? null : (
       <div
-        className={`artifact-panel-slot edge-stroke absolute inset-y-0 left-0 z-30 hidden max-w-full bg-surface md:rounded-tr-2xl shrink-0 overflow-hidden md:block ${
+        className={`artifact-panel-slot edge-stroke absolute left-0 top-0 bottom-0 z-30 hidden max-w-full bg-surface md:left-2 md:top-2 md:bottom-2 md:rounded-2xl shrink-0 overflow-hidden md:block ${
           sourcesOpen ? "pointer-events-auto" : "pointer-events-none"
         }`}
-        style={{ width: sourcesOpen ? sourcesWidth : 0 }}
+        style={{ width: sourcesOpen ? Math.max(0, sourcesWidth - PANEL_OUTER_GAP) : 0 }}
+        data-panel-open={sourcesOpen}
         aria-hidden={!sourcesOpen}
         inert={sourcesOpen ? undefined : true}
       >
         <div
           className={`absolute inset-y-0 left-0 h-full overflow-hidden transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${sourcesOpen ? "opacity-100" : "opacity-0"}`}
-          style={{ width: sourcesWidth, minWidth: sourcesWidth }}
+          style={{
+            width: Math.max(0, sourcesWidth - PANEL_OUTER_GAP),
+            minWidth: Math.max(0, sourcesWidth - PANEL_OUTER_GAP),
+          }}
         >
           <SourcesPane
             className="h-full"
@@ -698,7 +703,7 @@ export function ProjectView({
       </div>
       )}
       {phone && mobilePane === "sources" ? (
-        <div className="absolute inset-0 z-[35] min-w-0 overflow-hidden bg-background">
+        <div className="absolute inset-2 z-[35] min-w-0 overflow-hidden rounded-2xl border border-border bg-surface-2">
           <SourcesPane
             className="h-full w-full"
             projectId={project.id}
@@ -712,10 +717,10 @@ export function ProjectView({
           />
         </div>
       ) : null}
-      <div className="pointer-events-none absolute left-3 top-1 z-40 hidden md:flex">
+      <div className="pointer-events-none absolute left-3 top-2 z-40 hidden md:flex">
         <QuietIconCluster className="pointer-events-auto" size={18} actions={[sourcesToggleAction]} />
       </div>
-      <div className="pointer-events-none absolute right-3 top-1 z-40 hidden md:flex">
+      <div className="pointer-events-none absolute right-3 top-2 z-40 hidden md:flex">
         <QuietIconCluster className="pointer-events-auto" size={18} actions={[panelToggleAction]} />
       </div>
       <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${mobilePane === "chat" ? "" : "max-md:hidden"}`}>
@@ -766,7 +771,7 @@ export function ProjectView({
         style={{ width: panelOpen ? artifactWidth : 0 }}
       />
       <div
-        className={`artifact-panel-slot edge-stroke absolute inset-y-0 right-0 z-30 max-w-full bg-surface md:rounded-tl-2xl shrink-0 overflow-hidden ${
+        className={`artifact-panel-slot edge-stroke absolute inset-y-0 right-0 z-30 max-w-full bg-surface md:right-2 md:top-2 md:bottom-2 md:rounded-2xl shrink-0 overflow-hidden ${
           mobilePane === "studio" ? "mobile-page max-md:pointer-events-auto" : "max-md:hidden"
         } ${
           panelExpanded
@@ -776,17 +781,24 @@ export function ProjectView({
           resizing ? "artifact-panel-resizing" : ""
         } ${studioShown ? "pointer-events-auto" : "pointer-events-none"}`}
         style={{
-          width: studioShown ? (phone || panelExpanded ? "100%" : artifactWidth) : 0,
+          width: studioShown
+            ? phone
+              ? "100%"
+              : panelExpanded
+                ? `calc(100% - ${PANEL_OUTER_GAP}px)`
+                : Math.max(0, artifactWidth - PANEL_OUTER_GAP)
+            : 0,
           ["--composer-height" as string]: `${composerHeight}px`,
         }}
+        data-panel-open={studioShown}
         aria-hidden={!studioShown}
         inert={studioShown ? undefined : true}
       >
         <div
           className={`absolute inset-y-0 right-0 h-full overflow-hidden transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${studioShown ? "opacity-100" : "opacity-0"}`}
           style={{
-            width: phone || panelExpanded ? "100%" : artifactWidth,
-            minWidth: phone || panelExpanded ? undefined : artifactWidth,
+            width: phone || panelExpanded ? "100%" : Math.max(0, artifactWidth - PANEL_OUTER_GAP),
+            minWidth: phone || panelExpanded ? undefined : Math.max(0, artifactWidth - PANEL_OUTER_GAP),
           }}
         >
           <ArtifactPanel

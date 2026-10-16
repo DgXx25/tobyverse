@@ -29,7 +29,7 @@ export const COMPOSER_INTENT_LABELS: Record<ComposerIntent, string> = {
   ask: "Ask",
   plan: "Plan",
   study: "Study",
-  practice: "Practice",
+  practice: "Quiz",
   edit: "Edit",
   append: "Append",
   regenerate_one: "Replace item",

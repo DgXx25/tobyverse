@@ -12,7 +12,7 @@ export function UsageMeters({ usage }: { usage: UserUsage }) {
       <p className="text-[13px] text-muted">{week ? `Week of ${week}` : "This week"}</p>
       <div className="mt-6 space-y-6">
         <Meter label="Chat turns" used={usage.chatTurns} cap={FREE_CAPS.chatTurns} />
-        <Meter label="Practice" used={usage.practiceGenerated} cap={FREE_CAPS.practiceGenerated} />
+        <Meter label="Quiz" used={usage.practiceGenerated} cap={FREE_CAPS.practiceGenerated} />
         <Meter label="Notes" used={usage.notesGenerated} cap={FREE_CAPS.notesGenerated} />
         <Meter
           label="Storage"

@@ -1080,6 +1080,54 @@ export function ProjectChat({
     const history = historyWithoutCurrentPrompt(historyTurnsFromMessages(messages), modelPrompt);
     let followTopic: string | undefined;
     let followTeach: string | undefined;
+    const recordResponseStatus = async (
+      responseStatus: NonNullable<ChatMessage["responseStatus"]>,
+      content: string,
+    ) => {
+      const active = streamRef.current;
+      const intent = active?.intent ?? "ask";
+      const memorized = memorizedRef.current.has(assistantId) || undefined;
+      const message: ChatMessage = {
+        id: assistantId,
+        projectId: project.id,
+        threadId: chatThreadId,
+        lessonId: null,
+        exerciseId: null,
+        role: "assistant",
+        mode: chatModeRef.current,
+        content,
+        attachments: [],
+        relatedExerciseType: null,
+        intent,
+        artifact: active?.artifact ?? null,
+        options: active?.options,
+        images: active?.images,
+        blocks: active?.blocks,
+        sources: active?.sources,
+        memorized,
+        responseStatus,
+        createdAt: null,
+      };
+      setMessages((current) => current.some((item) => item.id === assistantId)
+        ? current.map((item) => item.id === assistantId ? { ...item, ...message } : item)
+        : [...current, message]);
+      await addChatMessage({
+        id: assistantId,
+        projectId: project.id,
+        role: "assistant",
+        mode: chatModeRef.current,
+        intent,
+        content,
+        responseStatus,
+        artifact: active?.artifact,
+        options: active?.options,
+        images: active?.images,
+        blocks: active?.blocks,
+        sources: active?.sources,
+        memorized,
+        threadId: chatThreadId,
+      });
+    };
 
     try {
       let userMessageId: string | null = null;
@@ -1361,26 +1409,9 @@ export function ProjectChat({
         const partial = stripArtifactMarkup(
           (err as { partial?: string }).partial ?? streamRef.current?.content ?? "",
         ).trim();
-        if (partial && !options?.studio) {
-          await addChatMessage({
-            id: assistantId,
-            projectId: project.id,
-            role: "assistant",
-            mode: chatModeRef.current,
-            intent: streamRef.current?.intent ?? "ask",
-            content: partial,
-            artifact: streamRef.current?.artifact ?? undefined,
-            options: streamRef.current?.options,
-            images: streamRef.current?.images,
-            memorized: memorizedRef.current.has(assistantId) || undefined,
-            threadId: chatThreadId,
-          }).catch(() => undefined);
-          setStoppedIds((current) => {
-            if (current.has(assistantId)) return current;
-            const next = new Set(current);
-            next.add(assistantId);
-            return next;
-          });
+        if (!options?.studio) {
+          await recordResponseStatus("stopped", partial).catch(() => undefined);
+          setStoppedIds((current) => new Set(current).add(assistantId));
         }
         setSuggestedFollowups(null);
         setError(null);
@@ -1395,6 +1426,10 @@ export function ProjectChat({
         setCanRetry(false);
       } else {
         setError(err instanceof Error ? err.message : "Could not send message.");
+        if (!options?.studio) {
+          const partial = stripArtifactMarkup(streamRef.current?.content ?? "").trim();
+          await recordResponseStatus("failed", partial).catch(() => undefined);
+        }
         onNotesLive?.(null);
         onPathLive?.(null);
       }
@@ -1659,8 +1694,6 @@ export function ProjectChat({
     const ka = promptIsKa(prev?.role === "user" ? prev.content : "") || threadKa;
     const orientKa = ka || promptIsKa(taught);
     const showOrient = Boolean(nowTitle && taught && !artifact && message.id === teachId);
-    const stopped = stoppedIds.has(message.id);
-
     const showRetry = Boolean(images && images.length === 0 && !sending);
     const showClarify =
       options != null &&
@@ -1677,6 +1710,7 @@ export function ProjectChat({
     const dislikeActive = turnReaction[message.id] === "dislike";
     const dislikeHighlighted = dislikeActive || dislikeOpen === message.id;
     const latestAssistant = [...messages].reverse().find((item) => item.role === "assistant");
+    const responseStatus = message.responseStatus ?? (stoppedIds.has(message.id) ? "stopped" : undefined);
     const waiting =
       Boolean(followup) &&
       !sending &&
@@ -1693,15 +1727,20 @@ export function ProjectChat({
       <ChatExerciseProvider priorPapers={priorPapers} interactive={exerciseOpen}>
       <div className="flex w-full flex-col">
         <div className="flex flex-col gap-4">
-          {memorized || live?.status || waiting || stopped || workedMs[message.id] != null ? (
+          {memorized || live?.status || waiting || responseStatus || workedMs[message.id] != null ? (
             <div className="flex flex-col gap-2">
               {memorized ? <MemorizedMark onOpen={() => openSettings("memory")} /> : null}
               {live?.status ? (
                 <StatusWait label={live.status} />
               ) : waiting ? (
                 <StatusWait label={waitLabel} since={followup?.since} timer />
-              ) : stopped ? (
-                <StatusWait label="Stopped" settled />
+              ) : responseStatus ? (
+                <StatusWait
+                  label={responseStatus === "stopped"
+                    ? (ka ? "პასუხი შეწყდა" : "Stopped responding")
+                    : (ka ? "პასუხი ვერ დასრულდა" : "Response failed")}
+                  settled
+                />
               ) : workedMs[message.id] != null ? (
                 <StatusWait label={formatWorked(workedMs[message.id], ka)} settled savedStep={message.artifact?.step ?? artifactStepsRef.current.get(message.id)} />
               ) : null}
@@ -1943,7 +1982,7 @@ export function ProjectChat({
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
         ref={scrollerRef}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+        className="mr-[5px] min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
         <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
           <div className="chat-thread flex flex-col pt-8 max-md:pt-6" style={{ paddingBottom: composerH }}>
@@ -1964,18 +2003,29 @@ export function ProjectChat({
                   <div className="flex w-fit max-w-[min(100%,36rem)] flex-col items-end gap-2">
                     <MessageAttachments items={message.attachments} onOpenMaterial={onOpenMaterial} />
                     {message.content.trim() ? (
-                      <button
-                        type="button"
+                      <div
+                        role={message.content.length > 280 ? "button" : undefined}
+                        tabIndex={message.content.length > 280 ? 0 : undefined}
                         aria-expanded={expandedUserMessages[message.id] === true}
-                        onClick={() => setExpandedUserMessages((current) => ({ ...current, [message.id]: !current[message.id] }))}
-                        className={`prompt-bubble chat-body rounded-2xl bg-surface-2 px-4 py-2.5 text-left text-foreground ${
+                        onClick={(event) => {
+                          if (message.content.length <= 280) return;
+                          if (event.target instanceof Element && event.target.closest("a")) return;
+                          if (window.getSelection()?.toString()) return;
+                          setExpandedUserMessages((current) => ({ ...current, [message.id]: !current[message.id] }));
+                        }}
+                        onKeyDown={(event) => {
+                          if (message.content.length <= 280 || (event.key !== "Enter" && event.key !== " ")) return;
+                          event.preventDefault();
+                          setExpandedUserMessages((current) => ({ ...current, [message.id]: !current[message.id] }));
+                        }}
+                        className={`prompt-bubble chat-body cursor-text select-text rounded-2xl bg-surface-2 px-4 py-2.5 text-left text-foreground ${
                           message.content.length > 280 && !expandedUserMessages[message.id] ? "chat-prompt-collapsed" : ""
                         }`}
                       >
                         <p className="whitespace-pre-wrap">
                           <LinkifiedText text={message.content} />
                         </p>
-                      </button>
+                      </div>
                     ) : null}
                   </div>
                 ) : (

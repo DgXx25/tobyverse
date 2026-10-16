@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useLayoutEffect, useRef, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { StreamAnimRoot } from "@/components/workspace/stream-text";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,7 +15,6 @@ import { VisualBlockView } from "@/components/visuals/visual-block";
 import { MixedText, TableCellRich, withInlineRich } from "@/components/visuals/mixed-text";
 import { htmlToMarkdown } from "@/lib/visuals/html-rich";
 import { ChatBlock } from "@/components/workspace/chat-block";
-import { HighlightedCode } from "@/components/workspace/highlighted-code";
 import { renderFormula } from "@/lib/visuals/catalog";
 import { protectInlineMath, restoreInlineMath, scrubLeakedMarkup, splitCodeFences, splitDisplayMath } from "@/lib/visuals/math";
 import { CitationMark } from "@/components/workspace/citations";
@@ -22,6 +22,11 @@ import { linkCitations, sourceNumberFromHref } from "@/lib/rag/sources";
 import { isInlineMarkHref, remarkInlineMarks } from "@/lib/visuals/markdown-marks";
 import { layoutChatTable, prepareChatMarkdown, splitMarkdownTables } from "@/lib/visuals/markdown-table";
 import type { VisualBlock } from "@/types/visual";
+
+const HighlightedCode = dynamic(() => import("@/components/workspace/highlighted-code").then((mod) => mod.HighlightedCode), {
+  loading: () => <code>…</code>,
+  ssr: false,
+});
 
 type Segment =
   | { kind: "md"; text: string }

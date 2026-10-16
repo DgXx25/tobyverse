@@ -251,6 +251,52 @@ export async function uploadGcsObject(objectPath: string, buffer: Buffer, conten
   }
 }
 
+/** Session URI stays on the server; callers only receive an opaque upload id. */
+export async function startGcsResumableUpload(objectPath: string, bytes: number, contentType: string): Promise<string> {
+  const bucket = bucketName();
+  if (!bucket) throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set.");
+  const token = await googleAccessToken();
+  const response = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=resumable&ifGenerationMatch=0`, {
+    method: "POST",
+    headers: storageHeaders(token, {
+      "Content-Type": "application/json",
+      "X-Upload-Content-Type": contentType,
+      "X-Upload-Content-Length": String(bytes),
+    }),
+    body: JSON.stringify({ name: objectPath, contentType }),
+  });
+  const location = response.headers.get("location");
+  if (!response.ok || !location) throw new Error(`Could not start upload (${response.status}).`);
+  return location;
+}
+
+export async function writeGcsUploadChunk(sessionUrl: string, total: number, chunk?: { bytes: Uint8Array; offset: number }): Promise<{ offset: number; done: boolean }> {
+  const response = await fetch(sessionUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Content-Range": chunk
+        ? `bytes ${chunk.offset}-${chunk.offset + chunk.bytes.byteLength - 1}/${total}`
+        : `bytes */${total}`,
+    },
+    body: chunk ? new Uint8Array(chunk.bytes) : new Uint8Array(0),
+    redirect: "manual",
+  });
+  if (response.status === 200 || response.status === 201) return { offset: total, done: true };
+  if (response.status === 308) {
+    const range = response.headers.get("range")?.match(/^bytes=0-(\d+)$/);
+    return { offset: range ? Number(range[1]) + 1 : 0, done: false };
+  }
+  throw new Error(`Storage chunk failed (${response.status}). Retry the file.`);
+}
+
+export async function cancelGcsUpload(sessionUrl: string): Promise<void> {
+  const response = await fetch(sessionUrl, { method: "DELETE" });
+  if (![200, 204, 404, 410, 499].includes(response.status)) {
+    throw new Error(`Could not cancel upload (${response.status}).`);
+  }
+}
+
 export async function deleteGcsObject(objectPath: string): Promise<void> {
   const bucket = bucketName();
   if (!bucket) throw new Error("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set.");

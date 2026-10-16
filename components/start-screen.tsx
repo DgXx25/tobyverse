@@ -37,7 +37,7 @@ const MODES: {
   intent: ComposerIntent;
   icon: UiIconName;
 }[] = [
-  { id: "practice", label: "Practice", placeholder: "What should I practice?", intent: "practice", icon: "practice" },
+  { id: "practice", label: "Quiz", placeholder: "What should the quiz cover?", intent: "practice", icon: "check" },
   { id: "sheet", label: "Study notes", placeholder: "What should I take notes on?", intent: "study", icon: "notes" },
   { id: "materials", label: "Learn from a file", placeholder: "What should we learn from this?", intent: "ask", icon: "file" },
   { id: "explain", label: "Explain a topic", placeholder: "What should I explain?", intent: "ask", icon: "spark" },

@@ -1,5 +1,14 @@
 import type { ChatMessage } from "@/types/chat";
 
+/** A path's hidden Continue/lead prompt must never authorize a chat check. */
+export function requestedChatExercise(prompt: string, explicit = false): boolean {
+  if (explicit) return true;
+  const text = prompt.trim();
+  if (/^(Tutor-lead|Move-on|The student just looked at)/i.test(text)) return false;
+  return /^(?:please\s+)?(?:ask me (?:a|one|some)|give me (?:a|one) (?:question|exercise)|test me (?:here|in (?:the )?chat)|quiz me (?:here|in (?:the )?chat))/i.test(text) ||
+    /(?:ჩატში|აქ).*(?:შემამოწმე|გამომცადე|მკითხე|დამავარჯიშე)|(?:შემამოწმე|გამომცადე|მკითხე|დამავარჯიშე).*(?:ჩატში|აქ)|^(?:მკითხე|დამისვი)\s+(?:ერთი\s+)?(?:კითხვა|შეკითხვა)/.test(text);
+}
+
 function normalizeCheck(text: string): string {
   return text
     .replace(/^#{1,6}\s+/gm, "")

@@ -7,7 +7,7 @@ import { findNode, flattenNodes, progressCounts } from "@/lib/paths/model";
 import type { SetResult } from "@/lib/exercises/session";
 
 function kindIcon(kind: ChatArtifact["kind"]) {
-  if (kind === "practice") return <UiIcon name="practice" size={18} />;
+  if (kind === "practice") return <UiIcon name="check" size={18} />;
   if (kind === "plan" || kind === "path") return <UiIcon name="plan" size={18} />;
   return <UiIcon name="notes" size={18} />;
 }
@@ -87,15 +87,9 @@ export function ArtifactCard({
   bare?: boolean;
 }) {
   const exam = artifact.kind === "practice" && artifact.mode === "exam";
-  const title =
-    artifact.title.trim() ||
-    (artifact.kind === "practice"
-      ? exam
-        ? "Exam"
-        : "Practice"
-      : artifact.kind === "path" || artifact.kind === "plan"
-        ? "Path"
-        : "Notes");
+  const title = artifact.kind === "practice"
+    ? exam ? "Exam" : "Quiz"
+    : artifact.title.trim() || (artifact.kind === "path" || artifact.kind === "plan" ? "Path" : "Notes");
   const step = artifact.kind === "path" ? resolvePathStep(artifact, path, showAdvance) : undefined;
   const subtitle = subtitleFor(artifact, step, result);
   const label = [title, step?.from, step?.to, subtitle].filter(Boolean).join(" ");

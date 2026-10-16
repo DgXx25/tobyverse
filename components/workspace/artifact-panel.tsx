@@ -259,6 +259,7 @@ export function ArtifactPanel({
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
         {session ? (
           <PracticeSession
+            key={`${session.setId}:${session.ids.join(",")}:${session.mode ?? "practice"}`}
             projectId={projectId}
             userId={userId}
             setId={session.setId}
@@ -666,7 +667,7 @@ function PracticeView({
 }) {
   if (items.length === 0) {
     return (
-      <EmptyState title="No practice sets yet" body="Ask to practice a topic in chat. Generated sets will land here." />
+    <EmptyState title="No quizzes yet" body="Create a quiz from Studio or ask in chat. It will appear here." />
     );
   }
 

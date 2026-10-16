@@ -64,7 +64,7 @@ function asActiveArtifact(value: unknown): ActiveArtifact | null {
   if (typeof row.kind !== "string" || !row.kind.trim() || typeof row.id !== "string" || !row.id) return null;
   const status =
     row.status === "open" || row.status === "in_progress" || row.status === "ready" ? row.status : "ready";
-  const fallbackTitle = row.kind === "practice_set" ? "Practice set" : row.kind === "study_sheet" ? "Notes" : row.kind;
+  const fallbackTitle = row.kind === "practice_set" ? "Quiz" : row.kind === "study_sheet" ? "Notes" : row.kind;
   return {
     kind: row.kind.trim(),
     id: row.id,

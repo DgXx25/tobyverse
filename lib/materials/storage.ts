@@ -2,6 +2,7 @@ import { requireSignedInUser } from "@/lib/auth";
 import { materialStoragePath } from "@/lib/firestore";
 import { extForMime } from "@/lib/materials/types";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
+import { RESUMABLE_UPLOAD_THRESHOLD, sendUploadChunks } from "@/lib/materials/resumable-upload";
 
 export class StorageUploadError extends Error {
   readonly status?: number;
@@ -52,6 +53,40 @@ function asBlob(data: Blob | Uint8Array, contentType: string): Blob {
 
 export type MaterialStorageUpload = { path: string; sizeBytes: number; contentType: string; reservedBytes: number };
 
+async function uploadInChunks(path: string, blob: Blob, contentType: string, token: string, reservePool: boolean, originalName?: string): Promise<MaterialStorageUpload> {
+  const headers = { Authorization: `Bearer ${token}` };
+  const init = await fetch("/api/materials/upload-session", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ path, sizeBytes: blob.size, contentType, reservePool, originalName }),
+  });
+  const started = await init.json() as { id?: string; error?: string };
+  if (!init.ok || !started.id) throw new StorageUploadError(started.error || "Could not start upload.", { status: init.status });
+  const url = `/api/materials/upload-session?id=${encodeURIComponent(started.id)}`;
+  let result: MaterialStorageUpload | undefined;
+  const progress = async (method: "PUT" | "GET", chunk?: Blob, offset?: number) => {
+    const response = await fetch(url, {
+      method,
+      headers: { ...headers, ...(chunk ? { "Content-Type": "application/octet-stream", "x-upload-offset": String(offset) } : {}) },
+      body: chunk,
+      cache: "no-store",
+    });
+    const body = await response.json() as MaterialStorageUpload & { offset: number; done: boolean; error?: string };
+    if (!response.ok) throw new StorageUploadError(body.error || `Upload failed (${response.status}).`, { status: response.status });
+    if (body.done) result = body;
+    return { offset: body.offset, done: body.done };
+  };
+  try {
+    await sendUploadChunks(blob, (chunk, offset) => progress("PUT", chunk, offset), () => progress("GET"));
+    if (!result) throw new Error("Upload did not finish. Retry the file.");
+    return result;
+  } catch (error) {
+    await fetch(url, { method: "DELETE", headers }).catch(() => undefined);
+    if (error instanceof StorageUploadError) throw error;
+    throw new StorageUploadError("Upload interrupted. Please retry the file.", { kind: "network" });
+  }
+}
+
 async function postStorageUpload(
   path: string,
   data: Blob | Uint8Array | string,
@@ -72,6 +107,9 @@ async function postStorageUpload(
   const token = await user.getIdToken();
   if (!token) {
     throw new Error("Storage upload failed: signed in, but getIdToken() returned no token.");
+  }
+  if (blob.size > RESUMABLE_UPLOAD_THRESHOLD) {
+    return uploadInChunks(path, blob, contentType, token, options.reservePool === true, options.originalName);
   }
   const form = new FormData();
   form.set("path", path);
@@ -131,7 +169,8 @@ export async function uploadMaterialBytes(
 }
 
 export async function uploadExtractedText(path: string, text: string) {
-  await postStorageUpload(path, text, "text/plain; charset=utf-8");
+  const uploaded = await postStorageUpload(path, text, "text/plain; charset=utf-8");
+  return uploaded.path;
 }
 
 export async function releaseStoragePool(bytes: number): Promise<void> {

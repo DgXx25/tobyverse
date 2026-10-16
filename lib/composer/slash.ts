@@ -26,7 +26,7 @@ export const SLASH_MODES: SlashItem[] = [
 ];
 
 export const SLASH_SKILLS: SlashItem[] = [
-  { kind: "skill", id: "practice", command: "practice", label: "Practice", hint: "Make a practice set", icon: "practice" },
+  { kind: "skill", id: "practice", command: "practice", label: "Quiz", hint: "Make a quiz", icon: "check" },
   { kind: "skill", id: "notes", command: "note", label: "Note", hint: "Write study notes", icon: "notes" },
   { kind: "skill", id: "path", command: "path", label: "Path", hint: "Map a course", icon: "plan" },
   { kind: "skill", id: "photos", command: "photos", label: "Photos", hint: "Find photos", icon: "search" },
@@ -36,7 +36,7 @@ export const COMPOSER_SKILL_META: Record<
   ComposerSkill,
   { label: string; placeholder: string; intent: ComposerIntent; icon: "practice" | "notes" | "plan" | "search" }
 > = {
-  practice: { label: "Practice", placeholder: "What should I practice?", intent: "practice", icon: "practice" },
+  practice: { label: "Quiz", placeholder: "What should the quiz cover?", intent: "practice", icon: "check" },
   notes: { label: "Note", placeholder: "What should I take notes on?", intent: "study", icon: "notes" },
   path: { label: "Path", placeholder: "Which course should I map?", intent: "plan", icon: "plan" },
   photos: { label: "Photos", placeholder: "What should I search photos of?", intent: "ask", icon: "search" },

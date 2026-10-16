@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Topbar } from "@/components/topbar";
-import { AccountSheet } from "@/components/account-sheet";
-import { ShellProvider } from "@/components/workspace/shell-context";
-import { SettingsModal } from "@/components/workspace/settings-modal";
+import { ShellProvider, useShell } from "@/components/workspace/shell-context";
 import { WhatsNewModal } from "@/components/whats-new-modal";
 import { ChatSearch } from "@/components/chat-search";
 import { ChatModeSync } from "@/components/account/chat-mode-sync";
+
+const SettingsModal = dynamic(() => import("@/components/workspace/settings-modal").then((mod) => mod.SettingsModal), { ssr: false });
+const AccountSheet = dynamic(() => import("@/components/account-sheet").then((mod) => mod.AccountSheet), { ssr: false });
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, configured } = useAuth();
@@ -50,6 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function AppShellFrame({ userId, children }: { userId: string; children: React.ReactNode }) {
+  const { settingsOpen, accountSheetOpen } = useShell();
   return (
     <div className="app-shell flex h-dvh flex-col overflow-hidden">
       <div className="app-wallpaper" aria-hidden />
@@ -59,8 +62,8 @@ function AppShellFrame({ userId, children }: { userId: string; children: React.R
       <main className="relative z-[1] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <div className="page-y-scroll flex h-0 min-h-0 min-w-0 flex-1 flex-col">{children}</div>
       </main>
-      <SettingsModal />
-      <AccountSheet />
+      {settingsOpen ? <SettingsModal /> : null}
+      {accountSheetOpen ? <AccountSheet /> : null}
       <WhatsNewModal />
       <ChatSearch userId={userId} />
       <ChatModeSync />

@@ -36,9 +36,9 @@ export const CHAT_MODE_INSTRUCTIONS: Record<ChatMode, string> = {
   auto:
     "Answer clearly. Match what they asked. Chips under the answer are questions the user would type next, not a recap. Do not interview them or add a check they did not ask for.",
   fast:
-    "Keep replies short and plain. Direct answer first. No chips. No extra structure.",
+    "Keep replies concise and plain, preserving essential context. Direct answer first. Choose a format that helps the request. No chips.",
   teacher:
-    "One hint before answers when they are learning. Do not lecture. Never add a quiz they did not ask for.",
+    "When they are learning, a hint before the answer may help. Match their request; do not force a lesson or simplification. Never add a quiz they did not ask for.",
 };
 
 export function chatSystemInstruction(mode: ChatMode, extra?: string): string {

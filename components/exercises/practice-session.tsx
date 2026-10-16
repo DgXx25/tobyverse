@@ -45,6 +45,8 @@ export function PracticeSession({
   const [checked, setChecked] = useState(false);
   const [ready, setReady] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [lastCorrect, setLastCorrect] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [reviewing, setReviewing] = useState(false);
@@ -58,14 +60,26 @@ export function PracticeSession({
   const advancingRef = useRef(false);
 
   useEffect(() => {
+    setItems([]);
+    setOrder([]);
+    setLoadError(null);
     return subscribeExercises(projectId, (next) => {
       const focused = ids.length ? next.filter((item) => ids.includes(item.id)) : next;
       const ordered = ids.length
         ? ids.flatMap((id) => focused.filter((item) => item.id === id))
         : focused;
-      setItems(ordered.length ? ordered : next);
+      if (ids.length > 0 && ordered.length !== ids.length) {
+        setItems([]);
+        setLoadError("Some questions in this quiz could not be loaded.");
+        return;
+      }
+      setItems(ordered);
+      setLoadError(null);
+    }, () => {
+      setItems([]);
+      setLoadError("Could not load this quiz. Check your connection and try again.");
     });
-  }, [projectId, ids]);
+  }, [projectId, ids, loadAttempt]);
 
   useEffect(() => {
     if (!items.length) return;
@@ -280,7 +294,7 @@ export function PracticeSession({
             type="button"
             onClick={requestExit}
             className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
-            aria-label={mode === "exam" ? "Stop exam" : "Stop practice"}
+            aria-label={mode === "exam" ? "Stop exam" : "Stop quiz"}
           >
             <UiIcon name="close" size={20} />
           </button>
@@ -309,7 +323,15 @@ export function PracticeSession({
             exit={{ opacity: 0, x: -shift * 0.75 }}
             transition={{ duration, ease: EASE }}
           >
-            {stage === "review-intro" ? (
+            {loadError ? (
+              <div className="mx-auto flex w-full max-w-md flex-col items-center justify-center gap-4 px-4 text-center">
+                <p role="alert" className="text-sm text-muted">{loadError}</p>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background">Try again</button>
+                  <button type="button" onClick={onExit} className="rounded-full bg-surface-2 px-4 py-2 text-sm text-foreground">Back to Studio</button>
+                </div>
+              </div>
+            ) : stage === "review-intro" ? (
               <PracticeReviewIntro compact={compact} />
             ) : stage === "done" && result ? (
               <PracticeDone
@@ -339,6 +361,7 @@ export function PracticeSession({
         </AnimatePresence>
 
         <footer
+          hidden={Boolean(loadError)}
           className={`absolute inset-x-0 bottom-0 z-10 flex items-center gap-3 bg-background ${
             compact ? "px-4 py-3" : "px-6 py-4"
           } ${footerOpen ? "border-t border-transparent" : "border-t border-border"}`}

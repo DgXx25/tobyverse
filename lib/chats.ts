@@ -191,6 +191,7 @@ function mapMessage(
     blocks: parseNoteBlocks(data.blocks),
     sources: asSources(data.sources),
     memorized: data.memorized === true ? true : undefined,
+    responseStatus: data.responseStatus === "stopped" || data.responseStatus === "failed" ? data.responseStatus : undefined,
     createdAt: toIsoDate(data.createdAt) ?? toIsoDate(data.createdAtClient),
   };
 }
@@ -587,6 +588,7 @@ export async function addChatMessage(input: {
   blocks?: VisualBlock[];
   sources?: ChatSourceRef[];
   memorized?: boolean;
+  responseStatus?: ChatMessage["responseStatus"];
 }): Promise<string> {
   const threadId = input.threadId ?? DEFAULT_CHAT_THREAD_ID;
   const createdAtClient = new Date().toISOString();
@@ -623,6 +625,7 @@ export async function addChatMessage(input: {
       ...(input.sources?.length ? { sources: input.sources } : {}),
       ...(input.sources?.length ? { sources: input.sources } : {}),
       ...(input.memorized ? { memorized: true } : {}),
+      ...(input.responseStatus ? { responseStatus: input.responseStatus } : {}),
     }),
   );
 

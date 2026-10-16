@@ -31,9 +31,9 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     `Project: ${context.projectTitle}.`,
     showLearningGoal(context) ? `Learning goal: ${goalLabel(context.goal)}.` : null,
     context.projectDescription ? `Project notes: ${context.projectDescription}` : null,
-    "Lead with the answer.",
+    "Respond naturally to their intent; a factual story or account of events can answer the question without a lesson or specification table.",
     "If you pass answer options, they are 1–2 questions the user would type next, in their voice, each ending with ?. Never a recap.",
-    "A quiz, if one would help, is suggest_practice — a chip that builds it in Studio. Never a question in the chat.",
+    "Do not initiate a knowledge check or drill. If useful, suggest_practice offers a chip that builds a quiz in Studio. Only an explicit request for an exercise in chat permits one question; wait for their answer, assess it from context, and never add another question unasked.",
     "If a tool exists for the action, call it; do not simulate its result in prose.",
     context.path
       ? null
@@ -152,7 +152,7 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     );
   } else if (context.examAsk) {
     sections.push(
-      "EXAM-ONLY TURN. They asked for a check. Do not teach. Do not recap. Do not call advance_path. Pass ONE completion in `question` only — a sentence with one blank, same shape as the last table example. Body empty. Optional 2-3 form options, not tense names. NEVER \"which tense/form describes…\". NEVER name the topic.",
+      "EXPLICIT CHAT EXERCISE. They asked to answer one question. Choose it using the conversation and materials, pass it in `question`, and wait. Do not reveal the solution before they try. Assess the reply from context, accept any valid wording, and do not start another question unasked. Do not call advance_path.",
     );
   } else if (context.path) {
     sections.push(

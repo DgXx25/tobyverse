@@ -59,7 +59,7 @@ export function StudioPane({
 
   function openTile(tile: StudioTile) {
     if (!hasSources) {
-      onCreate(tile, { prompt: STUDIO_ASK[tile.id] });
+      onCreate(tile, { prompt: STUDIO_ASK[tile.id], tool: tile.tool });
       return;
     }
     setConfig(tile);
@@ -104,7 +104,7 @@ export function StudioPane({
       return {
         key: `practice:${item.id}`,
         icon: (exam ? "check" : "practice") as UiIconName,
-        color: exam ? TILE_COLOR.quiz : TILE_COLOR.practice,
+        color: TILE_COLOR.quiz,
         title: `${exam ? "Exam" : "Quiz"} · ${count}`,
         meta: exam ? "Exam" : "Quiz",
         open: () => onOpenPractice(item.id),
@@ -121,12 +121,12 @@ export function StudioPane({
             type="button"
             disabled={busy}
             onClick={() => openTile(tile)}
-            className="flex h-11 items-center gap-2 rounded-full bg-surface-2 px-3 text-left transition-colors hover:bg-white/10 disabled:opacity-60"
+            className="panel-selectable flex h-11 items-center gap-2 rounded-full px-3 text-left disabled:opacity-60"
           >
             <span className="inline-flex shrink-0" style={{ color: TILE_COLOR[tile.id] }}>
               <UiIcon name={tile.icon} size={18} />
             </span>
-            <span className="min-w-0 truncate text-[14px] font-medium" style={{ color: TILE_COLOR[tile.id] }}>
+            <span className="min-w-0 truncate text-[14px] font-medium text-foreground">
               {tile.label}
             </span>
           </button>
@@ -146,7 +146,7 @@ export function StudioPane({
         <ul className="space-y-1">
           {outputs.map((item) => (
             <li key={item.key} className="list-none">
-              <button type="button" onClick={item.open} className="flex w-full items-center gap-3 rounded-2xl bg-surface-2 px-3 py-2.5 text-left hover:bg-white/10">
+              <button type="button" onClick={item.open} className="panel-selectable flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left">
                 <span className="inline-flex shrink-0" style={{ color: item.color }}>
                   <UiIcon name={item.icon} size={18} />
                 </span>
@@ -192,7 +192,7 @@ export function StudioPane({
           </div>
         </form>
       ) : (
-        <button type="button" onClick={() => setNoteOpen(true)} className="flex h-11 items-center gap-2 rounded-full bg-surface-2 px-3 text-[14px] font-medium text-foreground hover:bg-white/10">
+        <button type="button" onClick={() => setNoteOpen(true)} className="panel-selectable flex h-11 items-center gap-2 rounded-full px-3 text-[14px] font-medium text-foreground">
           <UiIcon name="plus" size={16} />
           Add note
         </button>

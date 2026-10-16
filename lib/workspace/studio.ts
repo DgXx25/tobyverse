@@ -8,14 +8,14 @@ export type StudioRequest = {
   id: number;
   label: string;
   prompt: string;
-  /** Omitted when the notebook has no sources, so the reply stays a normal answer. */
+  /** Pins the Studio action to its matching tool instead of relying on model routing. */
   tool?: AcceptedChatTool;
 };
 
 /** Hidden instruction for a Studio click. The chat thread does not show it. */
 export const STUDIO_ASK: Record<StudioTool, string> = {
   practice: "Generate a practice set",
-  quiz: "Generate a quiz",
+  quiz: "Generate a set of exercises",
   flashcards: "Generate flashcards",
   table: "Generate a data table",
   notes: "Generate a report",
@@ -52,20 +52,12 @@ const LANGUAGE = "Write in the language of my sources.";
  */
 export const STUDIO_TILES: StudioTile[] = [
   {
-    id: "practice",
-    label: "Practice",
-    hint: "Exercises with feedback",
-    icon: "practice",
-    tool: "create_practice",
-    prompt: `Make a practice set from my selected sources. ${LANGUAGE}`,
-  },
-  {
     id: "quiz",
     label: "Quiz",
-    hint: "One check per question",
+    hint: "Exercises with feedback",
     icon: "check",
     tool: "create_practice",
-    prompt: `Make a short exam-style quiz from my selected sources, one check per question. ${LANGUAGE}`,
+    prompt: `Make a practice set from my selected sources. ${LANGUAGE}`,
   },
   {
     id: "flashcards",

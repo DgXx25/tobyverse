@@ -81,7 +81,7 @@ export function activeToChatArtifact(active: ActiveArtifact): ChatArtifact {
     return {
       kind: "practice",
       id: active.id,
-      title: active.title || "Practice set",
+      title: active.title || "Quiz",
       count: active.count ?? active.ids?.length,
       ids: active.ids,
       mode: active.title === "Exam" || active.title === "გამოცდა" ? "exam" : "practice",

@@ -276,16 +276,15 @@ function PathGroupRow({
       type="button"
       onClick={onOpen}
       aria-current={current ? "step" : undefined}
-      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-surface-2 ${
-        current ? "bg-surface-2" : ""
-      }`}
+      data-active={current ? "true" : "false"}
+      className="panel-selectable flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left"
     >
       <span
         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${
           complete
             ? "border-foreground bg-foreground text-background"
             : current
-              ? "path-node-current border-accent bg-surface text-accent"
+              ? "path-node-current border-border bg-surface-2 text-muted"
               : "border-border bg-surface text-muted"
         }`}
       >
@@ -337,7 +336,7 @@ function PathNodeRow({
             done
               ? `border-foreground bg-foreground text-background${justDone ? " path-node-just-done" : ""}`
               : current
-                ? "path-node-current border-accent bg-surface text-accent"
+                ? "path-node-current border-border bg-surface-2 text-muted"
                 : "border-border bg-surface text-muted"
           }`}
         >

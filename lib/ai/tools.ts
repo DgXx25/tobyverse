@@ -64,13 +64,13 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "answer",
     description:
-      "Answer an ordinary question or complete a direct text task in the user's language. Use it when no more specific action tool is needed. Pass question only when the user explicitly asked for a check or to move on. After an explanation, pass 1–2 options that are the next questions the user would type. Do not add chips or a quiz to a simple request.",
+      "Answer an ordinary question or complete a direct text task in the user's language. Use it when no more specific action tool is needed. Pass question only when the user explicitly asks to answer an exercise in chat. Continue or moving on never authorizes a check. Otherwise, at most offer suggest_practice when useful. After an explanation, options may be 1–2 next questions the user would type. Do not add chips or a quiz to a simple request.",
     parameters: {
       type: "object",
       properties: {
         question: {
           type: "string",
-          description: "Only when they asked to practice or to move on. One short markdown heading they can answer. A table or display math may follow in the same string. Not a restatement of the explanation.",
+          description: "Only for an explicitly requested exercise in chat, never for Continue or a path explanation. One question; wait for the user's answer and assess it from context without revealing the solution first.",
         },
         options: {
           type: "array",

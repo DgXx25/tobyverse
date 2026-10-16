@@ -89,6 +89,8 @@ export type ChatMessage = {
   sources?: ChatSourceRef[];
   /** True when this turn saved a long-term memory fact. */
   memorized?: boolean;
+  /** UI-visible outcome when the assistant turn stopped before completing. */
+  responseStatus?: "stopped" | "failed";
   createdAt: IsoDateString | null;
 };
 

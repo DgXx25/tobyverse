@@ -252,7 +252,7 @@ export function SourcesPane({
   return (
     <section
       aria-label="Sources"
-      className={`relative flex min-h-0 w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-transparent ${className}`}
+      className={`sources-pane relative flex min-h-0 w-full min-w-0 max-w-full flex-col overflow-x-hidden ${className}`}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -293,7 +293,7 @@ export function SourcesPane({
             setAdding(null);
             setAdderOpen(true);
           }}
-          className="flex h-10 w-full items-center justify-center gap-2 rounded-full bg-surface-2 text-[14px] text-foreground transition-colors hover:bg-white/10"
+          className="sources-add-button flex h-10 w-full items-center justify-center gap-2 rounded-full bg-surface-2 text-[14px] text-foreground"
         >
           <UiIcon name="plus" size={16} />
           Add sources
@@ -304,7 +304,7 @@ export function SourcesPane({
 
       <div className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-4 pt-3">
         {items.length > 0 ? (
-          <div className="mb-1 flex h-8 items-center justify-end gap-2 px-2 text-[12px] text-muted">
+          <div className="mb-1 flex h-8 items-center justify-end gap-2 px-1 text-[12px] text-foreground">
             <span>Select all</span>
             <button type="button" role="checkbox" aria-checked={allOn} aria-label="Select all sources" onClick={toggleAll} className="flex h-8 w-7 items-center justify-center">
               <Check on={allOn} />
@@ -315,7 +315,7 @@ export function SourcesPane({
         <ul className="space-y-0.5">
           {visiblePending.map((entry) => (
             <li key={entry.id} className="list-none">
-              <div className="flex items-center gap-1 rounded-lg px-1 py-1">
+              <div className="source-item flex items-center gap-1 rounded-lg px-1 py-1">
                 <FileKindIcon kind={kindFromName(entry.name)} size={22} />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{entry.name}</span>
                 {entry.state === "error" ? (
@@ -354,7 +354,7 @@ export function SourcesPane({
                   setMenu({ id: item.id, top: event.clientY, right: Math.max(8, window.innerWidth - event.clientX) });
                 }}
               >
-                <div className={`flex min-w-0 items-center overflow-hidden rounded-lg px-1 hover:bg-background ${menuOpen ? "bg-background" : ""}`}>
+                <div className={`source-item flex min-w-0 items-center overflow-hidden rounded-lg px-1 ${menuOpen ? "source-item-active" : ""}`}>
                   <button
                     type="button"
                     onClick={() => onOpenMaterial(item.id)}
@@ -362,7 +362,7 @@ export function SourcesPane({
                     title={item.title}
                   >
                     <FileKindIcon kind={kindFromName(item.originalName || item.title, item.type)} size={22} />
-                    <span className={`min-w-0 flex-1 truncate text-[13px] ${on ? "text-foreground" : "text-muted"} ${!busy && (menuOpen ? "pr-8" : "group-hover:pr-8")}`}>{item.title}</span>
+                    <span className={`min-w-0 flex-1 truncate text-[13px] text-foreground ${!busy && (menuOpen ? "pr-8" : "group-hover:pr-8")}`}>{item.title}</span>
                   </button>
                   {busy ? (
                     <span className="flex h-9 w-7 shrink-0 items-center justify-center" aria-label="Reading">
@@ -616,7 +616,7 @@ function Check({ on }: { on: boolean }) {
     <span
       aria-hidden
       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
-        on ? "border-foreground bg-foreground text-background" : "border-border bg-transparent"
+        on ? "border-foreground bg-foreground text-background" : "border-foreground bg-transparent"
       }`}
     >
       {on ? <UiIcon name="check" size={11} /> : null}

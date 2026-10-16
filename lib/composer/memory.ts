@@ -12,7 +12,7 @@ export function compactArtifactLine(artifact: ChatArtifact): string {
         : artifact.kind === "practice"
           ? artifact.mode === "exam"
             ? "Exam"
-            : "Practice"
+            : "Quiz"
           : artifact.kind === "plan"
             ? "Plan"
             : "Card";
@@ -91,7 +91,7 @@ export function stripArtifactMarkup(text: string): string {
 
 export function historyTurnsFromMessages(messages: ChatMessage[]): ChatTurn[] {
   return messages
-    .filter((item) => item.role === "user" || item.role === "assistant")
+    .filter((item) => (item.role === "user" || item.role === "assistant") && !item.responseStatus)
     .slice(-20)
     .map((item) => ({
       role: item.role as "user" | "assistant",

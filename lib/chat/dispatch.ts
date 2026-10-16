@@ -21,7 +21,7 @@ import { getStudySheet } from "@/lib/study-sheets/store";
 import { activeToChatArtifact } from "@/lib/artifacts/active";
 import { localImageHits } from "@/lib/images/local";
 import { stripArtifactMarkup } from "@/lib/composer/memory";
-import { stripTrailingCheck, splitTeachingExam } from "@/lib/chat/prompt-ask";
+import { stripTrailingCheck, splitTeachingExam, requestedChatExercise } from "@/lib/chat/prompt-ask";
 import { generatePathFromPrompt } from "@/lib/paths/generate-client";
 import {
   bindPracticeSet,
@@ -168,7 +168,7 @@ function practiceIds(ctx: ChatDispatchContext): string[] {
 }
 
 function promptAskFromTool(ctx: ChatDispatchContext): ChatDispatchResult["promptAsk"] {
-  if (ctx.hintAsk) return undefined;
+  if (ctx.hintAsk || !requestedChatExercise(ctx.prompt, ctx.examAsk)) return undefined;
   const question = ctx.tool.args.question?.trim();
   if (!question) return undefined;
   return { question, options: ctx.tool.args.options };
@@ -177,6 +177,7 @@ function promptAskFromTool(ctx: ChatDispatchContext): ChatDispatchResult["prompt
 async function runAnswer(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   if (ctx.hintAsk) return textResult(ctx);
   const raw = stripArtifactMarkup(ctx.text);
+  if (!requestedChatExercise(ctx.prompt, ctx.examAsk)) return textResult(ctx, { content: raw });
   const { taught, exam } = splitTeachingExam(raw, ctx.tool.args.question);
   const fromTool = promptAskFromTool(ctx);
   const blank = ctx.examAsk && !exam && !fromTool && looksLikeBlank(raw) ? raw.trim() : undefined;
@@ -234,7 +235,7 @@ async function runSuggestPath(ctx: ChatDispatchContext): Promise<ChatDispatchRes
 async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const mode = practiceModeOf(ctx.prompt, ctx.tool.args.mode);
   const ka = promptIsKa(ctx.prompt);
-  ctx.onStatus?.(mode === "exam" ? "Generating exam" : "Generating practice");
+  ctx.onStatus?.(mode === "exam" ? "Generating exam" : "Generating quiz");
   const set = await generatePracticeSet({
     project: ctx.project,
     userId: ctx.userId,
@@ -258,11 +259,11 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
           : "Exam is ready."
         : ka
           ? "ვარჯიში მზადაა."
-          : "Practice set is ready.",
+          : "Quiz is ready.",
     artifact: {
       kind: "practice",
       id: set.ids[0],
-      title: mode === "exam" ? (ka ? "გამოცდა" : "Exam") : ka ? "ვარჯიში" : "Practice set",
+      title: mode === "exam" ? (ka ? "გამოცდა" : "Exam") : ka ? "ქვიზი" : "Quiz",
       count: set.count,
       ids: set.ids,
       mode,
@@ -315,7 +316,7 @@ async function runEditPractice(ctx: ChatDispatchContext): Promise<ChatDispatchRe
     artifact: {
       kind: "practice",
       id: active.id,
-      title: active.title || "Practice set",
+      title: active.mode === "exam" ? "Exam" : "Quiz",
       count: ids.length,
       ids,
     },
@@ -327,7 +328,7 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
   if (!active || active.kind !== "practice_set") throw new Error("Open a set first.");
   const ids = practiceIds(ctx);
   const count = ctx.tool.args.count ?? extractAppendCount(ctx.prompt);
-  ctx.onStatus?.("Generating practice");
+  ctx.onStatus?.("Generating quiz");
   const extra = await appendPracticeItems({
     project: ctx.project,
     userId: ctx.userId,
@@ -344,7 +345,7 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
     artifact: {
       kind: "practice",
       id: active.id,
-      title: active.title || "Practice set",
+      title: active.mode === "exam" ? "Exam" : "Quiz",
       count: nextIds.length,
       ids: nextIds,
     },
@@ -582,7 +583,7 @@ export function dispatchStatus(intent: ComposerIntent, toolName?: ChatToolName, 
   if (toolName === "clarify") return "Planning…";
   if (intent === "study") return CREATING_NOTES_STATUS;
   if (intent === "rewrite_sheet") return "Updating notes…";
-  if (intent === "practice") return "Generating practice";
+  if (intent === "practice") return "Generating quiz";
   if (toolName === "advance_path") return "Moving on…";
   if (toolName === "restart_path") return "Starting at the beginning…";
   if (toolName === "start_path") return "Starting…";
