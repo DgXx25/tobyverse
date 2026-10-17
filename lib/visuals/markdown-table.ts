@@ -1,4 +1,5 @@
 import { protectInlineMath, restoreInlineMath, scrubLeakedMarkup } from "./math";
+import { recoverCollapsedTableLine } from "./collapsed-markdown";
 
 /** Make GFM tables parse even when the model skips pipes or the separator row. */
 
@@ -103,7 +104,8 @@ function trimCell(value: string): string {
 }
 
 function splitCells(line: string): string[] {
-  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  const protectedMath = protectInlineMath(line);
+  const trimmed = protectedMath.text.trim().replace(/^\|/, "").replace(/\|$/, "");
   const cells: string[] = [];
   let cur = "";
   for (let i = 0; i < trimmed.length; i += 1) {
@@ -113,13 +115,13 @@ function splitCells(line: string): string[] {
       continue;
     }
     if (trimmed[i] === "|") {
-      cells.push(trimCell(cur));
+      cells.push(restoreInlineMath(trimCell(cur), protectedMath.slots));
       cur = "";
       continue;
     }
     cur += trimmed[i];
   }
-  cells.push(trimCell(cur));
+  cells.push(restoreInlineMath(trimCell(cur), protectedMath.slots));
   return cells;
 }
 
@@ -154,7 +156,8 @@ function padRow(row: string[], cols: number): string[] {
 }
 
 function escapeCell(cell: string): string {
-  return cell.replace(/\|/g, "\\|");
+  const protectedMath = protectInlineMath(cell);
+  return restoreInlineMath(protectedMath.text.replace(/\|/g, "\\|"), protectedMath.slots);
 }
 
 function emitRow(cells: string[]): string {
@@ -440,10 +443,33 @@ function repairTable(headers: string[], rows: string[][]): { headers: string[]; 
 
 /** Keep in-cell fences out of the global ``` splitter so a table example stays a table cell. */
 export function prepareChatMarkdown(source: string): string {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  let fence: { marker: string; length: number } | undefined;
+  const lines = source.replace(/\r\n/g, "\n").split("\n").flatMap((line) => {
+    const mark = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (mark) {
+      if (!fence && !mark[2].includes(mark[1])) fence = { marker: mark[1][0], length: mark[1].length };
+      else if (fence && mark[1][0] === fence.marker && mark[1].length >= fence.length && !mark[2].trim()) fence = undefined;
+      return [line];
+    }
+    return fence ? [line] : recoverCollapsedTableLine(line).split("\n");
+  });
   const out: string[] = [];
   let i = 0;
+  fence = undefined;
   while (i < lines.length) {
+    const mark = lines[i].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (mark) {
+      if (!fence && !mark[2].includes(mark[1])) fence = { marker: mark[1][0], length: mark[1].length };
+      else if (fence && mark[1][0] === fence.marker && mark[1].length >= fence.length && !mark[2].trim()) fence = undefined;
+      out.push(lines[i]);
+      i += 1;
+      continue;
+    }
+    if (fence) {
+      out.push(lines[i]);
+      i += 1;
+      continue;
+    }
     if (!looksLikeRow(lines[i] ?? "")) {
       out.push(lines[i] ?? "");
       i += 1;
