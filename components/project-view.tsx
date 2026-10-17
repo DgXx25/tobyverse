@@ -193,14 +193,32 @@ export function ProjectView({
 
   useEffect(() => {
     if (!prefsReady) return;
-    function clampPanelWidth() {
-      const max = Math.max(MIN_ARTIFACT, getWorkspaceWidth() - MIN_CHAT);
-      setArtifactWidth((current) => Math.min(current, max));
+    function clampPanelWidths() {
+      const workspace = workspaceRef.current?.clientWidth || window.innerWidth;
+      let sources = sourcesOpen ? sourcesWidth : 0;
+      let artifact = panelOpen ? artifactWidth : 0;
+      const overflow = Math.max(0, sources + artifact + MIN_CHAT - workspace);
+      const sourcesSlack = sourcesOpen ? Math.max(0, sources - SOURCES_MIN) : 0;
+      const artifactMin = session
+        ? Math.round(window.innerWidth * 0.42)
+        : panelView === "sheets" || panelView === "path"
+          ? MIN_NOTES
+          : MIN_ARTIFACT;
+      const artifactSlack = panelOpen ? Math.max(0, artifact - artifactMin) : 0;
+      const totalSlack = sourcesSlack + artifactSlack;
+      if (overflow > 0 && totalSlack > 0) {
+        const sourceReduction = Math.min(sourcesSlack, overflow * (sourcesSlack / totalSlack));
+        const artifactReduction = Math.min(artifactSlack, overflow - sourceReduction);
+        sources -= sourceReduction;
+        artifact -= artifactReduction;
+      }
+      if (sourcesOpen) setSourcesWidth((current) => Math.min(current, sources));
+      if (panelOpen) setArtifactWidth((current) => Math.min(current, artifact));
     }
-    clampPanelWidth();
-    window.addEventListener("resize", clampPanelWidth);
-    return () => window.removeEventListener("resize", clampPanelWidth);
-  }, [prefsReady, getWorkspaceWidth]);
+    clampPanelWidths();
+    window.addEventListener("resize", clampPanelWidths);
+    return () => window.removeEventListener("resize", clampPanelWidths);
+  }, [prefsReady, sourcesOpen, sourcesWidth, panelOpen, artifactWidth, panelView, session]);
 
   useLayoutEffect(() => {
     const seeded = peekOpeningProject(projectId);
@@ -675,8 +693,13 @@ export function ProjectView({
   }
 
   return (
-    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-transparent ${resizing ? "pane-resizing" : ""}`}>
-      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent md:overflow-x-auto md:overflow-y-hidden ${resizing ? "pane-resizing" : ""}`}>
+      <div
+        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+        style={phone ? undefined : {
+          minWidth: (sourcesOpen ? sourcesWidth : 0) + (panelOpen ? artifactWidth : 0) + MIN_CHAT,
+        }}
+      >
       <div
         aria-hidden="true"
         className="artifact-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
@@ -735,7 +758,7 @@ export function ProjectView({
       <div className="pointer-events-none absolute right-3 top-2 z-40 hidden md:flex">
         <QuietIconCluster className="pointer-events-auto" size={18} actions={[panelToggleAction]} />
       </div>
-      <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${mobilePane === "chat" ? "" : "max-md:hidden"}`}>
+      <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${mobilePane === "chat" ? "" : "max-md:hidden"}`} style={phone ? undefined : { minWidth: MIN_CHAT }}>
         {shareNotice ? (
           <div
             role={shareNotice === "error" ? "alert" : "status"}

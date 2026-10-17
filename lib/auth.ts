@@ -22,6 +22,7 @@ export { POST_LOGIN_PATH };
 
 const PENDING_REDIRECT_KEY = "tv.auth-redirect";
 const GOOGLE_OIDC_KEY = "tv.google-oidc";
+const GOOGLE_OIDC_STATE_KEY = "tv.google-oidc-state";
 const GOOGLE_ID_TOKEN_KEY = "tv.google-id-token";
 const GOOGLE_OAUTH_ERROR_KEY = "tv.google-oauth-error";
 const REDIRECT_RESULT_MS = 15000;
@@ -153,7 +154,7 @@ export function consumeRedirectResult(): Promise<{
 function googleParamsFromLocation(): URLSearchParams {
   const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
   const fromHash = new URLSearchParams(hash);
-  if (fromHash.get("id_token") || fromHash.get("error")) return fromHash;
+  if (fromHash.get("id_token") || fromHash.get("error") || fromHash.get("state")) return fromHash;
   return new URLSearchParams(window.location.search);
 }
 
@@ -187,7 +188,7 @@ async function applyGoogleIdToken(idToken: string): Promise<UserCredential> {
 
 let googleIdTokenPromise: Promise<{ credential: UserCredential | null; error: string | null }> | undefined;
 
-/** Finish Google sign-in when Google returned an id_token on this page (Simple Browser). */
+/** Finish Google sign-in when the app callback receives an ID token. */
 export function consumeGoogleIdTokenFromUrl(): Promise<{
   credential: UserCredential | null;
   error: string | null;
@@ -206,7 +207,9 @@ async function finishGoogleIdTokenFromUrl(): Promise<{
   const params = googleParamsFromLocation();
   let idToken = params.get("id_token");
   let oauthError = params.get("error");
+  const returnedState = params.get("state");
   let pending = false;
+  let expectedState: string | null = null;
   try {
     pending = sessionStorage.getItem(GOOGLE_OIDC_KEY) === "1";
     if (!idToken) idToken = sessionStorage.getItem(GOOGLE_ID_TOKEN_KEY);
@@ -217,7 +220,26 @@ async function finishGoogleIdTokenFromUrl(): Promise<{
   } catch {
     /* ignore */
   }
+  try {
+    expectedState = localStorage.getItem(GOOGLE_OIDC_STATE_KEY);
+    localStorage.removeItem(GOOGLE_OIDC_STATE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (!expectedState) {
+    try {
+      expectedState = sessionStorage.getItem(GOOGLE_OIDC_STATE_KEY);
+      sessionStorage.removeItem(GOOGLE_OIDC_STATE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
   if (!idToken && !oauthError && !pending) return { credential: null, error: null };
+
+  if (!expectedState || !returnedState || returnedState !== expectedState) {
+    stripAuthParamsFromUrl();
+    return { credential: null, error: "Sign-in expired. Click Google again." };
+  }
 
   if (oauthError) {
     stripAuthParamsFromUrl();
@@ -267,9 +289,20 @@ function randomNonce(): string {
 async function startGoogleIdTokenSignIn(): Promise<null> {
   const clientId = await googleWebClientId();
   const nonce = randomNonce();
-  const redirectUri = `${window.location.origin}/__/auth/handler`;
+  const state = randomNonce();
+  const redirectUri = `${window.location.origin}/login/google-callback`;
   try {
     sessionStorage.setItem(GOOGLE_OIDC_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.setItem(GOOGLE_OIDC_STATE_KEY, state);
+  } catch {
+    /* ignore */
+  }
+  try {
+    sessionStorage.setItem(GOOGLE_OIDC_STATE_KEY, state);
   } catch {
     /* ignore */
   }
@@ -279,6 +312,7 @@ async function startGoogleIdTokenSignIn(): Promise<null> {
     response_type: "id_token",
     scope: "openid email profile",
     nonce,
+    state,
     prompt: "select_account",
   });
   window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
