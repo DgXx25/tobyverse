@@ -8,6 +8,8 @@ import { resolvePaperPayload } from "@/lib/blocks/paper-thread";
 import type { DialogueBlock } from "@/lib/blocks/kinds/dialogue";
 import type { GridBlock } from "@/lib/blocks/kinds/grid";
 import type { ParsedChatBlock } from "@/lib/blocks/types";
+import type { SceneBlock } from "@/lib/blocks/kinds/scene";
+import { SceneView } from "@/components/blocks/scenes/scene-view";
 
 export function TobyBlockView({
   block,
@@ -17,6 +19,7 @@ export function TobyBlockView({
   streaming?: boolean;
 }) {
   const { priorPapers, interactive } = useChatExercise();
+  if (block.type === "scene") return <SceneView block={block.data as SceneBlock} />;
   if (block.type === "dialogue") {
     const data = block.data as DialogueBlock;
     if (!data || !Array.isArray(data.lines)) return null;

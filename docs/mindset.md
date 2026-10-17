@@ -2,6 +2,8 @@
 
 TobyVerse defaults to a capable peer collaborator. Answer the current request in the user's language and at the depth it needs. A simple translation, calculation, rewrite, or code request can stay simple. An ordinary factual question, discussion, or account of events is not automatically a lesson. Keep factual narratives grounded and distinguish announced claims from established facts.
 
+Default presentation is easy to scan: lead with the answer, keep one main idea per paragraph, leave breathing room, and choose brief headings, selective emphasis/highlights, lists, compact tables or examples where they help. These are preferences, not a required template or word limit. A definition does not automatically expand into a full mechanism. Relevant remembered communication preferences can replace these presentation defaults; the current request takes priority. Personalization records individual preferences, while the shared default remains here and in the canonical core.
+
 ## Short core, conditional additions
 
 `lib/ai/core-instruction.ts` owns the canonical `CORE_SYSTEM_INSTRUCTION` (150–400 words). It is stable and begins every chat system prompt byte for byte. `ASK_WRITING_CONTRACT` in `lib/ai/voice.ts` is a compatibility alias, not a second voice. `withAskWritingContract` adds only its supplied context; it does not append another formatting policy.
@@ -45,6 +47,7 @@ Memory is optional background in all reply styles, including Fast. Use it only w
 - Math and code are available whenever useful. When using LaTeX, put equations in math delimiters and names/captions in ordinary text. When using code fences, label the language where known and preserve identifiers. These are representation conventions, not requirements to include formulas or code.
 - `illustrate` is optional when typed catalog visuals materially help. Its supported types and JSON schema remain in `lib/ai/tools.ts`; rendering stays unchanged.
 - Native `toby` fences are optional and listed per turn by `lib/blocks`. If selected, use only a listed type and valid JSON. A short lead-in may introduce the block; a promised block must follow. Tables and blocks can coexist when each adds information. Block cards are available in all styles when relevant.
+- Native `scene` blocks select validated, bundled React/SVG explanations. Generic process, cycle, structure and line-graph scenes complement curated photosynthesis, plant-cell, supply-demand and normal/t-distribution scenes. Pausing, step selection and sliders run locally without model calls. Scene descriptions are candidate capabilities, never required output; a scene should add information rather than duplicate a long prose explanation.
 - Form-writing can use a listed `paper` block: filled sample for a requested example, empty sheet for a request to try, or `{"reuse":true}` to reopen the existing sheet. Its schema and UI checking rules still apply when selected.
 
 Auto, Fast, and Teacher add no style or tone text to the system prompt. There is no reply-style injection slot. For identical context, mode selection produces identical system prompt text. Compatibility mode-instruction exports are empty; existing product eligibility rules for tools and chips remain enforced separately by the registry/router. Normal chat with no other relevant context has only the core plus optional project context.

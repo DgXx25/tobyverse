@@ -55,7 +55,7 @@ export const SUBJECT_SKILLS: readonly SubjectSkill[] = [
       "ბიოლოგ", "უჯრედ", "გენეტიკ", "ევოლუცი", "ეკოსისტემ", "ფოტოსინთეზ", "ცილა", "ფერმენტ", "ორგანიზმ", "ბიოსფერო",
     ],
     write:
-      "Use the exact term and give a plain-language gloss once. Describe a process in the order it happens, and say where in the cell or organism it takes place. Keep structure and function together.",
+      "Introduce only the biological terms needed for the question, with a brief plain-language gloss when useful. If the requested depth calls for a mechanism, explain it in causal order and connect the relevant structure with its function. A definition need not cover locations, stages, and the full mechanism.",
   },
   {
     id: "medicine",

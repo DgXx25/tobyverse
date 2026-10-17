@@ -932,7 +932,7 @@ html.ios-standalone.marketing::before {
 }
 
 .chat-body p {
-  margin: 0 0 16px;
+  margin: 0 0 22px;
 }
 
 .chat-body p:last-child {
@@ -1011,8 +1011,8 @@ html.ios-standalone.marketing::before {
   width: 100%;
   margin: 20px 0;
   overflow: hidden;
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
@@ -1057,14 +1057,19 @@ html.ios-standalone.marketing::before {
 
 .chat-table th,
 .chat-table td {
-  padding: 14px 18px;
-  vertical-align: middle;
-  text-align: center;
+  padding: 12px 14px;
+  vertical-align: top;
+  text-align: left;
   background: transparent;
-  border: 1px solid var(--panel-border);
+  border: 0;
   overflow-wrap: anywhere;
   min-width: 0;
   box-shadow: none;
+}
+
+.chat-table thead tr,
+.chat-table tbody tr:not(:last-child) {
+  border-bottom: 1px solid var(--panel-border);
 }
 
 .chat-table .chat-table-prose {

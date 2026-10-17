@@ -1,6 +1,7 @@
 import { parsePartialObject } from "@/lib/ai/json-stream";
 import { CHAT_BLOCK_KINDS } from "@/lib/blocks/kinds";
 import type { ChatBlockDef, ParsedChatBlock } from "@/lib/blocks/types";
+import { SCENE_IDS } from "@/lib/blocks/kinds/scene";
 
 const BY_ID = new Map(CHAT_BLOCK_KINDS.map((item) => [item.id, item]));
 
@@ -59,6 +60,7 @@ function inferFenceType(raw: unknown): string {
   if ("cells" in row) return "grid";
   if ("form" in row || row.reuse === true) return "paper";
   if ("lines" in row || "speakers" in row) return "dialogue";
+  if (typeof row.id === "string" && SCENE_IDS.some((id) => id === row.id)) return "scene";
   return "";
 }
 

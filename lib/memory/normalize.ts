@@ -63,6 +63,9 @@ const LEARNING_OR_MEMORY_SIGNAL =
 const DURABLE_FACT =
   /მე მქვია|my name is|ვმუშაობ|i work as|i(?:['’]m| am) an?\b|ფინალ.{0,48}(\d|რიცხვ)|exam.{0,24}(\d|on |date)|always (answer|write|reply) in|წერე? ქართულ|preferred language|B[12]\b|C[12]\b|A[12]\b|დონე|struggles with|მიჭირს|lecturer|ლექტორ|მანქიუ|mankiw|textbook|წიგნი|exam on|გამოცდა/i;
 
+const PREFERENCE_MARKER = /\bi (?:prefer|like)\b|my prefer(?:red|ence)|მირჩევნია|მომწონს/i;
+const COMMUNICATION_STYLE = /answers?|responses?|replies|paragraphs?|concise|detailed|emojis?|tone|format|bold|highlights?|მიპასუხ|პასუხებ|აბზაც|მოკლე|ვრცელი|ემოჯ|გამუქ|სტილ/i;
+
 function looksLikeQuestionOnly(prompt: string): boolean {
   const text = prompt.trim();
   if (/[?؟]\s*$/.test(text)) return true;
@@ -74,6 +77,7 @@ export function shouldExtractMemory(prompt: string): boolean {
   const text = prompt.replace(/\s+/g, " ").trim();
   if (!text) return false;
   if (LEARNING_OR_MEMORY_SIGNAL.test(text)) return true;
+  if (PREFERENCE_MARKER.test(text) && COMMUNICATION_STYLE.test(text)) return true;
   if (looksLikeQuestionOnly(text)) return false;
   return DURABLE_FACT.test(text);
 }

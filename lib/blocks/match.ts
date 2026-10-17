@@ -10,6 +10,7 @@ const MAX_CARDS = 2;
 export function isSimpleChatTask(prompt: string): boolean {
   const text = prompt.trim();
   if (!text) return false;
+  if (/^(?:თარგმნ\p{L}*|გადათარგმნ\p{L}*|დათვალ\p{L}*)(?:\s|:|$)/u.test(text)) return true;
   if (/^\s*(translate|rewrite|calculate|თარგმნ|გადათარგმნ|დათვალ|დათვალე)\b/i.test(text)) return true;
   if (/\bwrite (me |this |an? |the |a )/i.test(text)) return true;
   if (/(დამიწერე|დაწერე)\s+(მეილ|იმეილ|წერილ|email)/i.test(text)) return true;
@@ -75,8 +76,10 @@ export function matchChatBlocks(context: ChatGenerationContext): ChatBlockDef[] 
 
   const seen = new Set<string>();
   const hits: ChatBlockDef[] = [];
+  let allowScene = true;
 
   function take(id: string): boolean {
+    if (id === "scene" && !allowScene) return false;
     if (seen.has(id)) return false;
     const def = byId.get(id);
     if (!def) return false;
@@ -85,20 +88,27 @@ export function matchChatBlocks(context: ChatGenerationContext): ChatBlockDef[] 
     return hits.length >= MAX_CARDS;
   }
 
-  for (const word of wordsIn(text)) {
-    for (const id of unigrams.get(word) ?? []) {
-      if (take(id)) return hits;
-    }
-    for (let n = word.length - 1; n >= 4; n -= 1) {
-      for (const id of unigrams.get(word.slice(0, n)) ?? []) {
-        if (take(id)) return hits;
+  function scan(source: string) {
+    for (const word of wordsIn(source)) {
+      for (const id of unigrams.get(word) ?? []) {
+        if (take(id)) return;
+      }
+      for (let n = word.length - 1; n >= 4; n -= 1) {
+        for (const id of unigrams.get(word.slice(0, n)) ?? []) {
+          if (take(id)) return;
+        }
+      }
+      for (const hit of phrases.get(word) ?? []) {
+        if (!source.includes(hit.phrase)) continue;
+        if (take(hit.id)) return;
       }
     }
-    for (const hit of phrases.get(word) ?? []) {
-      if (!text.includes(hit.phrase)) continue;
-      if (take(hit.id)) return hits;
-    }
   }
+  // Current, specific requests outrank a notebook's older topic.
+  scan(prompt.toLowerCase());
+  if (hits.length) return hits;
+  allowScene = !prompt || /^(?:continue|go on|explain (?:it|this|that)|show (?:it|this|that)|what about (?:it|this|that)|შემდეგ|გააგრძელე|ეს |ამის |იგივე|ამიხსენი ეს|მაჩვენე)/i.test(prompt);
+  scan(text);
   return hits;
 }
 

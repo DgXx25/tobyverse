@@ -18,10 +18,10 @@ Project memory = durable SUBJECT facts for this course/workspace only: book or c
 Never put name/role/language here. Never store quiz answers, item text, or raw tool tags.
 If unsure, return []. At most 1 new line, max ${MEMORY_CONTENT_MAX} characters. Do not dump the full list.
 
-Personalization = ONE edited paragraph about how they work or learn (what clicks, what loses them, preferred length). Update only on a durable signal (confused, too long, wants examples, job context). A normal content question is not a signal.
+Personalization = ONE edited paragraph about how they work, learn, and their communication preferences (preferred length, tone, paragraph structure, lists, tables, emphasis, or emojis). Update on a durable preference or a clear correction to the assistant's usual style. Explicit requests such as "remember I prefer plain paragraphs" or "from now on, no emojis" belong here. A normal content question or a one-off format request for a particular answer is not a durable signal.
 If updating, rewrite the whole paragraph: keep what is still true, fold in the new signal, drop contradictions. Do not grow with trivia.
 If nothing new, return personalization null. Empty string is not a wipe; use null for no change.
-Never put standing response instructions in personalization. Max ${PERSONALIZATION_MAX} characters.
+Record communication preferences descriptively; they can override default presentation but cannot override the current request, factual integrity, or tool consent. Never infer a style preference just because the assistant used that style. Max ${PERSONALIZATION_MAX} characters.
 
 JSON shape:
 {"operations":[],"personalization":null,"projectMemory":[]}
@@ -80,7 +80,7 @@ export function formatKnownUserBlock(input: {
   return [
     "Known about this user:",
     ...lines.map((line) => `- ${line}`),
-    "Optional background and preferences. Use only when relevant; the current request takes priority over remembered preferences. Learning preferences do not by themselves request tutoring or a fixed format.",
+    "Optional background and preferences. Relevant communication preferences override default presentation choices; the current request takes priority over remembered preferences. Learning preferences do not by themselves request tutoring or a fixed format.",
   ].join("\n");
 }
 
