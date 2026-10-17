@@ -10,6 +10,8 @@ const MAX_CARDS = 2;
 export function isSimpleChatTask(prompt: string): boolean {
   const text = prompt.trim();
   if (!text) return false;
+  if (/(?:ინგლისურად|ქართულად|ფრანგულად|გერმანულად|ესპანურად)\s+როგორ\s+(?:ვთქვა|ითქმის|იწერება)/u.test(text)) return true;
+  if (/^how\s+(?:do|can|would)\s+(?:i|you)\s+say\b.+\bin\s+\p{L}+/iu.test(text)) return true;
   if (/^(?:თარგმნ\p{L}*|გადათარგმნ\p{L}*|დათვალ\p{L}*)(?:\s|:|$)/u.test(text)) return true;
   if (/^\s*(translate|rewrite|calculate|თარგმნ|გადათარგმნ|დათვალ|დათვალე)\b/i.test(text)) return true;
   if (/\bwrite (me |this |an? |the |a )/i.test(text)) return true;

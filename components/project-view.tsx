@@ -13,7 +13,7 @@ import {
   updateProjectActiveArtifact,
   updateProjectChatMode,
 } from "@/lib/projects";
-import { setChatSharing, subscribeChatThreads } from "@/lib/chats";
+import { listEarlierChatMessages, setChatSharing, subscribeChatThreads } from "@/lib/chats";
 import { subscribeMaterials } from "@/lib/materials";
 import {
   loadWorkspacePrefs,
@@ -100,7 +100,6 @@ export function ProjectView({
   threadId,
   initialProject,
   initialMessages,
-  initialOlderCursor,
 }: {
   projectId: string;
   threadId?: string;
@@ -114,7 +113,6 @@ export function ProjectView({
   const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setProjectShare } = useShell();
   const [project, setProject] = useState<Project | null>(null);
   const [bootstrapMessages, setBootstrapMessages] = useState<ChatMessage[]>(initialMessages ?? []);
-  const [olderCursor, setOlderCursor] = useState<string | null>(initialOlderCursor ?? null);
   const [threadTitle, setThreadTitle] = useState<string | undefined>();
   const [materials, setMaterials] = useState<Material[]>([]);
   const [mode, setMode] = useState<ChatMode>(() => loadSavedChatMode());
@@ -285,17 +283,8 @@ export function ProjectView({
     };
   }, [initialProject, projectId, user, threadId]);
 
-  const loadOlderMessages = useCallback(async () => {
-    if (!user || !olderCursor) return [] as ChatMessage[];
-    const token = await user.getIdToken();
-    const response = await fetch(`/api/projects/bootstrap?projectId=${encodeURIComponent(projectId)}&threadId=${encodeURIComponent(threadId || DEFAULT_CHAT_THREAD_ID)}&beforeId=${encodeURIComponent(olderCursor)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const payload = (await response.json()) as { messages?: ChatMessage[]; olderCursor?: string | null };
-    if (!response.ok) throw new Error("Could not load older messages.");
-    setOlderCursor(payload.olderCursor ?? null);
-    return payload.messages ?? [];
-  }, [olderCursor, projectId, threadId, user]);
+  const loadOlderMessages = useCallback((beforeId: string) =>
+    listEarlierChatMessages(projectId, threadId || DEFAULT_CHAT_THREAD_ID, beforeId), [projectId, threadId]);
 
   useEffect(() => {
     return subscribeMaterials(projectId, setMaterials, (err) => setError(err.message));
@@ -773,8 +762,9 @@ export function ProjectView({
         <ProjectChat
           key={`${project.id}:${threadId || DEFAULT_CHAT_THREAD_ID}`}
           project={project}
+          isActive={isActiveProjectView}
           initialMessages={bootstrapMessages}
-          onLoadOlder={olderCursor ? loadOlderMessages : undefined}
+          onLoadOlder={loadOlderMessages}
           userId={user.uid}
           threadId={threadId}
           threadTitle={threadTitle}

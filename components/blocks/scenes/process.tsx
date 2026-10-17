@@ -1,6 +1,7 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId } from "react";
+import { useChatBlockState } from "@/components/workspace/chat-block-state";
 import { SceneFrame, SceneTabs, MotionToggle } from "./frame";
 import type { SceneBlock } from "@/lib/blocks/kinds/scene";
 
@@ -19,8 +20,8 @@ function shortLabel(label: string, width = 17): string[] {
 
 export function ProcessScene({ block }: { block: DiagramBlock }) {
   const ka = block.locale === "ka";
-  const [selected, setSelected] = useState(0);
-  const [playing, setPlaying] = useState(true);
+  const [selected, setSelected] = useChatBlockState("selected", 0);
+  const [playing, setPlaying] = useChatBlockState("playing", true);
   const marker = useId().replace(/:/g, "");
   const items = block.id === "structure" ? block.parts : block.steps;
   const active = Math.min(selected, items.length - 1);

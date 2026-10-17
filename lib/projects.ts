@@ -76,7 +76,7 @@ function asActiveArtifact(value: unknown): ActiveArtifact | null {
   };
 }
 
-function mapProject(id: string, data: Record<string, unknown>): Project {
+export function mapProject(id: string, data: Record<string, unknown>): Project {
   const goal = asGoal(data.goal);
 
   return {

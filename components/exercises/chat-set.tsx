@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { ArtifactCard } from "@/components/workspace/artifact-card";
 import type { SetResult } from "@/lib/exercises/session";
 import type { ChatArtifact } from "@/types/chat";
@@ -20,11 +19,7 @@ export function ChatSetCard({
   onFinished?: (result: SetResult) => void;
   onActiveChange?: (active: boolean) => void;
 }) {
-  const [result, setResult] = useState<SetResult | null>(null);
-
-  useEffect(() => {
-    if (passed && passed.setId === artifact.id) setResult(passed);
-  }, [passed, artifact.id]);
+  const result = passed?.setId === artifact.id ? passed : null;
 
   return (
     <ArtifactCard artifact={artifact} onOpen={onStart} onStart={onStart} result={result} ka={ka} />

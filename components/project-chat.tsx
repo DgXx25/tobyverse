@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, startTransition, Fragment } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
@@ -9,6 +9,7 @@ import { HeadlineVerb } from "@/components/workspace/headline-verb";
 import { GuestGoogleCta } from "@/components/guest-google-cta";
 import { createChunkBuffer } from "@/lib/ai/chunk-stream";
 import { readChatSse } from "@/lib/ai/sse";
+import { waitForChatStep } from "@/lib/ai/chat-deadline";
 import { upsertToolStatus, type ToolStatusUpdate } from "@/lib/ai/tool-execution";
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { dispatchChatTool, dispatchStatus, imageFailLine, imageFoundLine, analysingStatus, thinkingStatus } from "@/lib/chat/dispatch";
@@ -47,10 +48,11 @@ import {
 } from "@/lib/composer/slash";
 import { inferProjectGoal } from "@/lib/composer/goal";
 import { isSimpleChatTask } from "@/lib/blocks/match";
+import { indexChatHistory, mergeChatMessages } from "@/lib/workspace/chat-history";
 import { papersInTurns } from "@/lib/blocks/paper-thread";
 import { artifactFacts, historyTurnsFromMessages, historyWithoutCurrentPrompt, latestArtifact } from "@/lib/composer/memory";
 import { listMemories } from "@/lib/memory/store";
-import { getLearningProfile } from "@/lib/memory/profile";
+import { cachedLearningProfile, getLearningProfile } from "@/lib/memory/profile";
 import { syncUserMemories } from "@/lib/memory/client";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { autoNameChat } from "@/lib/workspace/auto-title";
@@ -66,6 +68,7 @@ import { markProjectActivityComplete } from "@/lib/workspace/project-activity";
 import { RichContent } from "@/components/rich-content";
 import { ChatExerciseProvider } from "@/components/workspace/chat-exercise-context";
 import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
+import { VirtualChatThread, type VirtualChatThreadHandle } from "@/components/workspace/virtual-chat-thread";
 import { IllustrationBlocks } from "@/components/workspace/illustration-blocks";
 import { ClarifyChips } from "@/components/workspace/clarify-chips";
 import { MessageAttachments } from "@/components/workspace/message-attachments";
@@ -257,12 +260,7 @@ function mergeOpeningMessages(
 ): ChatMessage[] {
   const merged = mergeArtifactSteps(prev, next, extras);
   if (merged.length === 0 && prev.length > 0) return prev;
-  const extrasLocal = prev.filter((item) => {
-    if (merged.some((message) => message.id === item.id)) return false;
-    if (item.role !== "user") return false;
-    return !merged.some((message) => message.role === "user" && message.content === item.content);
-  });
-  return extrasLocal.length ? [...extrasLocal, ...merged] : merged;
+  return mergeChatMessages(prev, merged);
 }
 
 function pendingUserMessage(projectId: string, threadId: string, pending: PendingStart): ChatMessage {
@@ -320,37 +318,6 @@ function openingChatState(
 
 const bootstrappedStarts = new Set<string>();
 
-function isLatestPathCard(
-  messageId: string,
-  messages: ChatMessage[],
-  live: StreamState | null,
-  kind?: string,
-): boolean {
-  if (kind !== "path") return false;
-  if (live?.artifact?.kind === "path") return live.id === messageId;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i].artifact?.kind === "path") return messages[i].id === messageId;
-  }
-  return false;
-}
-
-function papersBefore(messages: ChatMessage[], index: number) {
-  return papersInTurns(messages.slice(0, index));
-}
-
-function exerciseStillOpen(
-  messages: ChatMessage[],
-  index: number,
-  streamId: string | undefined,
-  sending: boolean,
-) {
-  if (messages.slice(index + 1).some((item) => item.role === "user")) return false;
-  const id = messages[index]?.id;
-  if (streamId && streamId !== id) return false;
-  if (sending && streamId !== id) return false;
-  return true;
-}
-
 export function ProjectChat({
   project,
   userId,
@@ -365,6 +332,7 @@ export function ProjectChat({
   finishedSet,
   onFinishedSetHandled,
   composerLocked = false,
+  isActive = true,
   threadId = DEFAULT_CHAT_THREAD_ID,
   threadTitle,
   chatMode = "auto",
@@ -389,6 +357,7 @@ export function ProjectChat({
   finishedSet?: SetResult | null;
   onFinishedSetHandled?: () => void;
   composerLocked?: boolean;
+  isActive?: boolean;
   threadId?: string;
   threadTitle?: string;
   chatMode?: ChatMode;
@@ -396,7 +365,7 @@ export function ProjectChat({
   onComposerHeightChange?: (height: number) => void;
   chatLayoutWidth?: number;
   initialMessages?: ChatMessage[];
-  onLoadOlder?: () => Promise<ChatMessage[]>;
+  onLoadOlder?: (beforeId: string) => Promise<ChatMessage[]>;
   /** A Studio tile asked for something. Sent as the user's own turn once the chat is idle. */
   studioRequest?: StudioRequest | null;
   onStudioRequestHandled?: (id: number) => void;
@@ -420,9 +389,11 @@ export function ProjectChat({
   const [openingUi] = useState(() => openingChatState(project.id, chatThreadId));
   const [messages, setMessages] = useState<ChatMessage[]>(openingUi.messages);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const olderExhaustedRef = useRef(false);
+  const olderCursorRef = useRef<string | null>(null);
   const [memorizedIds, setMemorizedIds] = useState<Set<string>>(() => new Set());
   const memorizedRef = useRef<Set<string>>(new Set());
-  const [draft, setDraft] = useState("");
   const [skill, setSkill] = useState<ComposerSkill | null>(null);
   const [loading, setLoading] = useState(openingUi.loading);
   const [sending, setSending] = useState(openingUi.sending);
@@ -452,6 +423,7 @@ export function ProjectChat({
   const [path, setPath] = useState<StudyPath | null>(null);
   const [workedMs, setWorkedMs] = useState<Record<string, number>>({});
   const [turnReaction, setTurnReaction] = useState<Record<string, "like" | "dislike">>({});
+  const [completedSets, setCompletedSets] = useState<Record<string, SetResult>>({});
   const [dislikeOpen, setDislikeOpen] = useState<string | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -460,6 +432,7 @@ export function ProjectChat({
   const pathRef = useRef<StudyPath | null>(null);
   const artifactStepsRef = useRef<Map<string, NonNullable<ChatArtifact["step"]>>>(new Map());
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const historyViewRef = useRef<VirtualChatThreadHandle>(null);
   const composerBoxRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<ChatComposerHandle>(null);
   const initialScrollRef = useRef(false);
@@ -490,8 +463,11 @@ export function ProjectChat({
         (isMainThread ? peekOpeningPending(project.id) ?? peekPendingStart(project.id) : null),
     );
     if (!keepOpening) {
-      setLoading(true);
-      setMessages([]);
+      olderExhaustedRef.current = false;
+      olderCursorRef.current = null;
+      initialScrollRef.current = false;
+      setLoading(!initialMessages.length);
+      setMessages(initialMessages);
     }
     void (async () => {
       try {
@@ -503,7 +479,7 @@ export function ProjectChat({
       ensureChatThread({
         projectId: project.id,
         userId,
-        mode: project.preferredChatMode,
+        mode: chatModeRef.current,
         threadId: chatThreadId,
       }).catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not open chat.");
@@ -536,7 +512,7 @@ export function ProjectChat({
       cancelled = true;
       unsubscribe();
     };
-  }, [project.id, project.preferredChatMode, userId, guest, chatThreadId, isMainThread]);
+  }, [project.id, userId, guest, chatThreadId, isMainThread]);
 
   useEffect(() => {
     if (guest) {
@@ -610,6 +586,7 @@ export function ProjectChat({
     if (!node) return;
     const sync = () => {
       const height = node.offsetHeight;
+      if (!height) return;
       setComposerH(height);
       onComposerHeightChange?.(height);
     };
@@ -631,32 +608,34 @@ export function ProjectChat({
 
   const stickToBottom = useCallback(() => {
     const node = scrollerRef.current;
-    if (!node) return;
+    if (!node || !node.clientHeight) return;
     lockPageScroll();
-    node.scrollTop = node.scrollHeight;
+    historyViewRef.current?.scrollToEnd();
   }, [lockPageScroll]);
 
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     const onScroll = () => {
+      if (!scroller.clientHeight) return;
       pinBottomRef.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 72;
-      if (scroller.scrollTop < 80 && onLoadOlder && !loadingOlder) {
+      if (scroller.scrollTop < 160 && initialScrollRef.current && onLoadOlder && !loadingOlderRef.current && !olderExhaustedRef.current && messages[0]?.id) {
+        loadingOlderRef.current = true;
         setLoadingOlder(true);
-        const height = scroller.scrollHeight;
-        void onLoadOlder().then((older) => {
+        void onLoadOlder(olderCursorRef.current ?? messages[0].id).then((older) => {
+          if (older.length < 40) olderExhaustedRef.current = true;
           if (!older.length) return;
-          setMessages((current) => mergeOpeningMessages(current, [...older, ...current], artifactStepsRef.current));
-          requestAnimationFrame(() => {
-            const node = scrollerRef.current;
-            if (node) node.scrollTop += node.scrollHeight - height;
-          });
-        }).catch(() => undefined).finally(() => setLoadingOlder(false));
+          olderCursorRef.current = older[0].id;
+          setMessages((current) => mergeOpeningMessages(current, [...older.filter((message) => message.role !== "system"), ...current], artifactStepsRef.current));
+        }).catch(() => setError("Could not load older messages. Scroll up to try again.")).finally(() => {
+          loadingOlderRef.current = false;
+          setLoadingOlder(false);
+        });
       }
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => scroller.removeEventListener("scroll", onScroll);
-  }, [loadingOlder, onLoadOlder]);
+  }, [onLoadOlder, messages]);
 
   useLayoutEffect(() => {
     if (loading) return;
@@ -670,9 +649,9 @@ export function ProjectChat({
   }, [loading, messages, stream, sending, composerH, stickToBottom]);
 
   useLayoutEffect(() => {
-    if (chatLayoutWidth == null || !pinBottomRef.current) return;
+    if (!isActive || !pinBottomRef.current) return;
     stickToBottom();
-  }, [chatLayoutWidth, stickToBottom]);
+  }, [chatLayoutWidth, isActive, stickToBottom]);
 
   useEffect(() => {
     if (loading || namedRef.current) return;
@@ -717,17 +696,22 @@ export function ProjectChat({
       takePendingStart(startKey);
       if (isMainThread) takePendingStart(project.id);
     }
-    void (async () => {
+    const runStart = async () => {
+      setError(null);
+      setCanRetry(false);
       try {
-        await waitForOpeningProject(project.id);
+        await waitForChatStep("Opening notebook", () => waitForOpeningProject(project.id));
         await bootstrap(pending ?? { prompt: "", materialIds: [], awaitingIngest: true }, ingest);
       } catch (err: unknown) {
         setError(err instanceof Error && err.message.trim() ? err.message : "Could not start.");
         setSending(false);
         setStream(null);
         sendingRef.current = false;
+        setCanRetry(true);
       }
-    })();
+    };
+    retryRef.current = () => { void runStart(); };
+    void runStart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, isMainThread, chatThreadId]);
 
@@ -814,7 +798,9 @@ export function ProjectChat({
   }
 
   async function bootstrap(pending: PendingStart, ingest?: Promise<StartIngestResult> | null) {
-    const latest = await listMaterials(project.id);
+    const latest = pending.materialIds.length
+      ? await waitForChatStep("Loading sources", () => listMaterials(project.id))
+      : materials;
     const pool = latest.length > 0 ? latest : materials;
     const attachments = [...attachmentsFromMaterials(pending.materialIds, pool), ...(pending.attachments ?? [])];
     if (pending.prompt.trim() || ingest) {
@@ -831,7 +817,7 @@ export function ProjectChat({
       return;
     }
     if (attachments.length === 0) return;
-    await addChatMessage({
+    await waitForChatStep("Saving attachments", () => addChatMessage({
       projectId: project.id,
       userId,
       role: "user",
@@ -840,7 +826,7 @@ export function ProjectChat({
       content: "",
       attachments,
       threadId: chatThreadId,
-    });
+    }));
   }
 
   async function streamChat(input: {
@@ -868,8 +854,17 @@ export function ProjectChat({
     const [memories, personalization] = guest
       ? [[], ""]
       : await Promise.all([
-          listMemories(userId).catch(() => []),
-          getLearningProfile(userId).catch(() => ""),
+          waitForChatStep("Loading memory", () => listMemories(userId), { signal: input.signal, timeoutMs: 2_000 }).catch(async (error) => {
+            input.signal?.throwIfAborted();
+            console.warn("[chat-send] using cached memory", error.name);
+            return waitForChatStep("Loading cached memory", () => listMemories(userId, true), { signal: input.signal, timeoutMs: 250 })
+              .catch(() => { input.signal?.throwIfAborted(); return []; });
+          }),
+          waitForChatStep("Loading preferences", () => getLearningProfile(userId), { signal: input.signal, timeoutMs: 2_000 }).catch((error) => {
+            input.signal?.throwIfAborted();
+            console.warn("[chat-send] using cached preferences", error.name);
+            return cachedLearningProfile(userId);
+          }),
         ]);
     const turnId = streamRef.current?.id;
     const memory = guest || input.skipMemory
@@ -898,9 +893,10 @@ export function ProjectChat({
     const pathForModel = briefing
       ? { ...briefing, started: input.leadPath ? true : briefing.started, inPathThread }
       : briefing;
-    const response = await fetch("/api/chat", {
+    const headers = await waitForChatStep("Verifying your session", () => authHeaders(), { signal: input.signal });
+    const response = await waitForChatStep("Connecting to the response server", () => fetch("/api/chat", {
       method: "POST",
-      headers: await authHeaders(),
+      headers,
       signal: input.signal,
       body: JSON.stringify({
         prompt: input.prompt,
@@ -939,7 +935,7 @@ export function ProjectChat({
           threadPaper: papersInTurns(messages).length > 0,
         },
       }),
-    });
+    }), { signal: input.signal, timeoutMs: 45_000 });
 
     let tool: ChatToolCall = { name: "answer", args: {} };
     let sources: NonNullable<ChatMessage["sources"]> = [];
@@ -991,7 +987,7 @@ export function ProjectChat({
             );
           }
         },
-      });
+      }, { signal: input.signal });
       await chunks.drain();
       const full = chunks.finish();
       tool = result.tool ?? tool;
@@ -1021,7 +1017,7 @@ export function ProjectChat({
     const attachedIds = attachments.flatMap((item) => (item.materialId ? [item.materialId] : []));
     let source = override ?? materials;
     const missingAttached = attachedIds.some((id) => !source.some((item) => item.id === id));
-    if (missingAttached || source.length === 0) {
+    if (missingAttached) {
       source = await listMaterials(project.id);
     }
     return source;
@@ -1125,16 +1121,6 @@ export function ProjectChat({
       }
     };
     let pool: Material[];
-    try {
-      pool = await materialsForTurn(attachments, options?.materials);
-    } catch (error) {
-      restoreClaimed();
-      throw error;
-    }
-    if (entryEpoch !== uploadEpoch.current) {
-      restoreClaimed();
-      return;
-    }
     let previewIds = guest ? [] : (options?.waitForPreview ?? []).filter(Boolean);
     const analysing = Boolean(ingest) || previewIds.length > 0;
     const assistantId = allocateChatMessageId(project.id, chatThreadId);
@@ -1149,12 +1135,13 @@ export function ProjectChat({
 
     sendingRef.current = true;
     const controller = new AbortController();
+    const savedUserMessageId = options?.userMessageId ?? allocateChatMessageId(project.id, chatThreadId);
     abortRef.current = controller;
     setSending(true);
     setStoppable(true);
     setError(null);
     retryRef.current = () => {
-      void sendPrompt(prompt, options);
+      void sendPrompt(prompt, { ...options, userMessageId: savedUserMessageId });
     };
     setCanRetry(true);
     setSuggest(null);
@@ -1217,7 +1204,7 @@ export function ProjectChat({
       setMessages((current) => current.some((item) => item.id === assistantId)
         ? current.map((item) => item.id === assistantId ? { ...item, ...message } : item)
         : [...current, message]);
-      await addChatMessage({
+      await waitForChatStep("Saving response status", () => addChatMessage({
         id: assistantId,
         projectId: project.id,
         role: "assistant",
@@ -1233,15 +1220,26 @@ export function ProjectChat({
         sources: active?.sources,
         memorized,
         threadId: chatThreadId,
-      });
+      }), { timeoutMs: 3_000 });
     };
 
     try {
+      try {
+        pool = await waitForChatStep("Loading sources", () => materialsForTurn(attachments, options?.materials), { signal: controller.signal });
+        if (entryEpoch !== uploadEpoch.current) throw new DOMException("Aborted", "AbortError");
+      } catch (error) {
+        restoreClaimed();
+        throw error;
+      }
       let userMessageId: string | null = null;
       if (!options?.skipUser) {
+        let userWriteStarted = false;
         try {
-          userMessageId = await addChatMessage({
-            id: options?.userMessageId,
+          setStream((current) => current ? { ...current, status: "Sending…" } : current);
+          userMessageId = await waitForChatStep("Saving message", () => {
+            userWriteStarted = true;
+            const pending = addChatMessage({
+            id: savedUserMessageId,
             projectId: project.id,
             userId,
             role: "user",
@@ -1250,9 +1248,14 @@ export function ProjectChat({
             content: prompt,
             attachments,
             threadId: chatThreadId,
-          });
+            });
+            // A timed-out Firestore write may still commit after reconnecting.
+            // Only a definitive rejection returns its images to unsent cleanup.
+            void pending.catch(() => restoreClaimed());
+            return pending;
+          }, { signal: controller.signal });
         } catch (error) {
-          restoreClaimed();
+          if (!userWriteStarted) restoreClaimed();
           throw error;
         }
         setChips((current) => {
@@ -1264,12 +1267,12 @@ export function ProjectChat({
       }
 
       if (ingest) {
-        const ingestedResult = await ingest;
+        const ingestedResult = await waitForChatStep("Preparing attachments", () => ingest, { signal: controller.signal, timeoutMs: 120_000 });
         const ids = ingestedResult.materialIds;
         if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
-        const latest = await listMaterials(project.id);
+        const latest = await waitForChatStep("Loading sources", () => listMaterials(project.id), { signal: controller.signal });
         const ingested = [...attachmentsFromMaterials(ids, latest), ...ingestedResult.attachments];
-        pool = await materialsForTurn([...attachments, ...ingested], latest);
+        pool = await waitForChatStep("Loading sources", () => materialsForTurn([...attachments, ...ingested], latest), { signal: controller.signal });
         previewIds = [...new Set([...previewIds, ...ids])];
         const visible = [
           ...attachments,
@@ -1279,7 +1282,7 @@ export function ProjectChat({
         ) === index);
         attachments = visible;
         if (userMessageId && visible.length > 0) {
-          await patchChatMessage(project.id, userMessageId, { attachments: visible }, chatThreadId);
+          await waitForChatStep("Saving attachments", () => patchChatMessage(project.id, userMessageId!, { attachments: visible }, chatThreadId), { signal: controller.signal });
         }
       }
 
@@ -1290,9 +1293,9 @@ export function ProjectChat({
 
       const previewMissing = previewIds.some((id) => !pool.find((item) => item.id === id)?.extractedTextPreview.trim());
       if (previewMissing) {
-        pool = await waitForMaterialPreviews(project.id, previewIds);
+        pool = await waitForChatStep("Preparing source previews", () => waitForMaterialPreviews(project.id, previewIds), { signal: controller.signal, timeoutMs: 35_000 });
         if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
-        pool = await materialsForTurn([...attachments, ...attachmentsFromMaterials(previewIds, pool)], pool);
+        pool = await waitForChatStep("Loading sources", () => materialsForTurn([...attachments, ...attachmentsFromMaterials(previewIds, pool)], pool), { signal: controller.signal });
       }
 
       const ka = promptIsKa(modelPrompt);
@@ -1309,7 +1312,7 @@ export function ProjectChat({
       const visionAttachments = figureAttachmentsForTurn(modelPrompt, attachments, messages);
       const attachFigures = !mappingPath && shouldAttachChatFigures(modelPrompt, pool, visionAttachments);
       const picked = attachFigures
-        ? await pickChatFigures(modelPrompt, pool, visionAttachments)
+        ? await waitForChatStep("Loading attached images", () => pickChatFigures(modelPrompt, pool, visionAttachments), { signal: controller.signal, timeoutMs: 20_000 })
         : { figures: [], fileGets: 0 };
       const figures = picked.figures;
       const fileGets = picked.fileGets;
@@ -1401,7 +1404,7 @@ export function ProjectChat({
       let artifact = dispatched.artifact ?? null;
       if (artifact && (artifact.kind === "sheet" || artifact.kind === "plan")) {
         try {
-          const sheet = await getStudySheet(project.id, artifact.id);
+          const sheet = await waitForChatStep("Loading note details", () => getStudySheet(project.id, artifact!.id), { signal: controller.signal, timeoutMs: 2_000 });
           if (sheet) {
             artifact = {
               ...artifact,
@@ -1455,7 +1458,7 @@ export function ProjectChat({
       if (artifact?.step) artifactStepsRef.current.set(assistantId, artifact.step);
       const id = options?.studio
         ? assistantId
-        : await addChatMessage({
+        : await waitForChatStep("Saving response", () => addChatMessage({
         id: assistantId,
         projectId: project.id,
         role: "assistant",
@@ -1472,7 +1475,7 @@ export function ProjectChat({
         sources: toolStreamsText(tool.name) ? usedSources(content, streamed.sources) : undefined,
         memorized: memorizedRef.current.has(assistantId) || undefined,
         threadId: chatThreadId,
-      });
+      }), { signal: controller.signal });
       if (!options?.studio) {
         void streamed.memory.then((saved) => {
           if (!saved) return;
@@ -1494,7 +1497,8 @@ export function ProjectChat({
         ) {
           onOpenArtifact(artifact);
         }
-        await rememberActive(artifact, "ready");
+        await waitForChatStep("Updating notebook", () => rememberActive(artifact!, "ready"), { signal: controller.signal, timeoutMs: 2_000 })
+          .catch(() => controller.signal.throwIfAborted());
       }
       if (!options?.studio && dispatched.suggest && !guest && chatModeRef.current !== "fast" && !isSimpleChatTask(modelPrompt)) {
         setSuggest({ messageId: id, kind: dispatched.suggest });
@@ -1564,6 +1568,7 @@ export function ProjectChat({
       settleWorked(assistantId);
       setStream(null);
     } finally {
+      controller.abort();
       if (abortRef.current === controller) abortRef.current = null;
       sendingRef.current = false;
       setSending(false);
@@ -1608,7 +1613,7 @@ export function ProjectChat({
   }
 
   async function send() {
-    const raw = draft.trim();
+    const raw = composerRef.current?.getDraft().trim() ?? "";
     if (chips.some((chip) => chip.status === "uploading")) return;
     const attachments = snapshotChatAttachments(chips, materials);
     const slash = consumeSlashCommand(raw);
@@ -1617,10 +1622,10 @@ export function ProjectChat({
     const prompt = slash.skill || slash.mode ? slash.prompt.trim() : raw;
     if (!prompt && attachments.length === 0) {
       if (slash.skill) setSkill(slash.skill);
-      else if (slash.mode) setDraft("");
+      else if (slash.mode) composerRef.current?.setDraft("");
       return;
     }
-    setDraft("");
+    composerRef.current?.setDraft("");
     setSkill(null);
     keepComposerFocus();
     await sendPrompt(prompt || raw, {
@@ -1738,20 +1743,25 @@ export function ProjectChat({
     if (finishedKeyRef.current === key) return;
     finishedKeyRef.current = key;
     const result = finishedSet;
+    setCompletedSets((current) => ({ ...current, [result.setId]: result }));
     onFinishedSetHandled?.();
     void reportSetFinished(result);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finishedSet]);
 
-  const latestAsk = latestOpenAsk(messages, stream ?? undefined);
-  const teachId = latestPathTeachId(messages, stream);
+  const history = useMemo(() => indexChatHistory(messages), [messages]);
+  const latestAsk = useMemo(() => latestOpenAsk(messages, stream ?? undefined), [messages, stream]);
+  const teachId = useMemo(() => latestPathTeachId(messages, stream), [messages, stream]);
   const teachingHere = Boolean(
     path && pathIsStarted(path) && (!path.threadId || path.threadId === chatThreadId),
   );
   const nowTitle = teachingHere ? findNode(path!, path!.currentNodeId)?.node.title.trim() || "" : "";
   const threadKa = promptIsKa(
-    [...messages].reverse().find((item) => item.role === "user")?.content ?? nowTitle,
+    messages[history.lastUserIndex]?.content ?? nowTitle,
   );
+  const openImageUpload = useCallback((image: ChatImageHit) => {
+    if (image.materialId) onOpenMaterial?.(image.materialId);
+  }, [onOpenMaterial]);
 
   useLayoutEffect(() => {
     if (loading || sending || stream) return;
@@ -1788,9 +1798,9 @@ export function ProjectChat({
     const promptAsk = live?.promptAsk ?? message.promptAsk;
     const blocks = live?.blocks ?? message.blocks;
     const turnSources = live?.sources ?? message.sources;
-    const streaming = Boolean(live && !artifact && !messages.some((item) => item.id === live.id));
-    const exerciseOpen = exerciseStillOpen(messages, index, stream?.id, sending);
-    const priorPapers = papersBefore(messages, index);
+    const streaming = Boolean(live && !artifact && !history.byId.has(live.id));
+    const exerciseOpen = history.lastUserIndex <= index && (!stream?.id || stream.id === message.id) && (!sending || stream?.id === message.id);
+    const priorPapers = history.priorPapers.get(message.id) ?? history.papers;
     const split = splitTeachingExam(content, promptAsk?.question);
     const taught = split.taught;
     const showToolActivity = Boolean(live && !taught && (live.status || live.toolActivity?.length));
@@ -1799,7 +1809,6 @@ export function ProjectChat({
       .map((item) => item?.trim() ?? "")
       .filter(Boolean)
       .join("\n\n");
-    const view: ChatMessage = { ...message, content: taught, artifact, images, options, promptAsk, blocks };
     const ka = promptIsKa(prev?.role === "user" ? prev.content : "") || threadKa;
     const orientKa = ka || promptIsKa(taught);
     const showOrient = Boolean(nowTitle && taught && !artifact && message.id === teachId);
@@ -1808,7 +1817,7 @@ export function ProjectChat({
       options != null &&
       !promptAsk &&
       !sending &&
-      !messages.slice(index + 1).some((item) => item.role === "user" || item.role === "assistant");
+      history.lastConversationIndex <= index;
     const showSuggest =
       suggest?.messageId === message.id &&
       !guest &&
@@ -1818,13 +1827,12 @@ export function ProjectChat({
     const likeActive = turnReaction[message.id] === "like";
     const dislikeActive = turnReaction[message.id] === "dislike";
     const dislikeHighlighted = dislikeActive || dislikeOpen === message.id;
-    const latestAssistant = [...messages].reverse().find((item) => item.role === "assistant");
     const responseStatus = message.responseStatus ?? (stoppedIds.has(message.id) ? "stopped" : undefined);
     const waiting =
       Boolean(followup) &&
       !sending &&
       !live &&
-      latestAssistant?.id === message.id &&
+      history.lastAssistantId === message.id &&
       ((followup?.kind === "sheet" && artifact?.kind === "sheet") ||
         (followup?.kind === "practice" && artifact?.kind === "practice"));
     const waitLabel =
@@ -1874,14 +1882,14 @@ export function ProjectChat({
                   projectId={project.id}
                   userId={userId}
                   ka={orientKa}
-                  result={finishedSet?.setId === artifact.id ? finishedSet : undefined}
+                  result={finishedSet?.setId === artifact.id ? finishedSet : completedSets[artifact.id]}
                   onStart={() => (onStartPractice ?? onOpenArtifact)(artifact)}
                 />
               ) : (
                 <ArtifactCard
                   artifact={artifact}
                   path={path}
-                  showAdvance={isLatestPathCard(message.id, messages, live, artifact.kind)}
+                  showAdvance={artifact.kind === "path" && (stream?.artifact?.kind === "path" ? stream.id : history.lastPathId) === message.id}
                   onOpen={() => onOpenArtifact(artifact)}
                 />
               )}
@@ -1900,9 +1908,7 @@ export function ProjectChat({
                   streaming={streaming}
                   images={images}
                   ka={ka}
-                  onOpenImageUpload={(image) => {
-                    if (image.materialId) onOpenMaterial?.(image.materialId);
-                  }}
+                  onOpenImageUpload={openImageUpload}
                 />
               </CitationProvider>
               <IllustrationBlocks blocks={blocks} />
@@ -1971,7 +1977,7 @@ export function ProjectChat({
               )}
             </div>
           ) : null}
-          {!live && !sending && latestAssistant?.id === message.id && !guest ? (
+          {!live && !sending && history.lastAssistantId === message.id && !guest ? (
             <FollowChips
               ka={ka}
               followup={Boolean(followup)}
@@ -2002,7 +2008,7 @@ export function ProjectChat({
               }}
             />
           ) : null}
-          {!live && !sending && latestAssistant?.id === message.id && suggestedFollowups?.messageId === message.id ? (
+          {!live && !sending && history.lastAssistantId === message.id && suggestedFollowups?.messageId === message.id ? (
             <SuggestedFollowups
               prompts={suggestedFollowups.prompts}
               onPick={(prompt) => {
@@ -2092,7 +2098,26 @@ export function ProjectChat({
     );
   }
 
-  const streamPending = stream && !stream.quiet && !messages.some((item) => item.id === stream.id);
+  const pendingStreamId = stream && !stream.quiet && !history.byId.has(stream.id) ? stream.id : null;
+  const visibleMessages = useMemo(() => {
+    const visible = messages.filter((message) => !isStudioConfigPrompt(message.content));
+    if (!pendingStreamId) return visible;
+    return [...visible, {
+      id: pendingStreamId,
+      projectId: project.id,
+      threadId: chatThreadId,
+      lessonId: null,
+      exerciseId: null,
+      role: "assistant" as const,
+      mode: chatModeRef.current,
+      content: "",
+      attachments: [],
+      relatedExerciseType: null,
+      intent: null,
+      artifact: null,
+      createdAt: null,
+    }];
+  }, [messages, pendingStreamId, project.id, chatThreadId]);
   const emptyThread = !loading && messages.length === 0 && !stream && !sending;
 
   function requestHint() {
@@ -2108,16 +2133,21 @@ export function ProjectChat({
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
         <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
-          <div className="chat-thread flex flex-col pt-8 max-md:pt-6" style={{ paddingBottom: composerH }}>
+            {loadingOlder ? <span role="status" className="pointer-events-none absolute top-2 z-10 rounded-full bg-background px-3 py-1 text-xs text-muted">Loading older messages…</span> : null}
             {loading && messages.length === 0 && !stream && !sending && (
-              <p className="text-sm text-muted">Loading chat…</p>
+              <p className="pt-8 text-sm text-muted">Loading chat…</p>
             )}
-            {messages.map((message, index) => {
-              if (isStudioConfigPrompt(message.content)) return null;
+            <VirtualChatThread
+              messages={visibleMessages}
+              scrollRef={scrollerRef}
+              handleRef={historyViewRef}
+              bottomInset={composerH}
+              active={isActive}
+              renderMessage={(message) => {
+              const index = history.indexById.get(message.id) ?? messages.length;
               const prev = messages[index - 1];
               const live = stream && message.id === stream.id ? stream : null;
               return (
-              <Fragment key={message.id}>
               <article
                 data-turn={message.id}
                 className={`chat-msg ${message.role === "user" ? "chat-msg-user flex justify-end" : "chat-msg-assistant"}`}
@@ -2155,43 +2185,8 @@ export function ProjectChat({
                   assistantInner(message, prev, index, live)
                 )}
               </article>
-              </Fragment>
               );
-            })}
-            {streamPending ? (
-              <Fragment key={stream.id}>
-              <article
-                data-turn={stream.id}
-                className="chat-msg chat-msg-assistant"
-              >
-                {assistantInner(
-                  {
-                    id: stream.id,
-                    projectId: project.id,
-                    threadId: chatThreadId,
-                    lessonId: null,
-                    exerciseId: null,
-                    role: "assistant",
-                    mode: chatModeRef.current,
-                    content: stream.content,
-                    attachments: [],
-                    relatedExerciseType: null,
-                    intent: null,
-                    artifact: stream.artifact ?? null,
-                    options: stream.options,
-                    images: stream.images,
-                    createdAt: null,
-                    promptAsk: stream.promptAsk,
-                    blocks: stream.blocks,
-                  },
-                  messages[messages.length - 1],
-                  messages.length,
-                  stream,
-                )}
-              </article>
-              </Fragment>
-            ) : null}
-          </div>
+            }} />
         </div>
       </div>
 
@@ -2214,8 +2209,6 @@ export function ProjectChat({
           <div>
             <ChatComposer
               ref={composerRef}
-              draft={draft}
-              onDraft={setDraft}
               sending={sending}
               locked={composerLocked}
               error={needGoogle ? null : error}

@@ -243,9 +243,10 @@ const RESTART_PATH_HINT =
   /პირველიდან|თავიდან\s*(დაიწყ|დავიწყ)|დაიწყე?\s*თავიდან|start from (the )?(beginning|first|start)|from the (beginning|start)|reset (the )?(path|progress)|დაბრუნდი\s*თავ|თავში\s*დავყენო/i;
 const START_PATH_HINT =
   /დავიწყოთ|დავიწყო|მზად ვარ|let'?s start|start (the )?(path|course)|i'?m ready|\bcontinue\b|გავაგრძელოთ|go ahead/i;
-/** Safety-net only. The model owns image intent in any language. */
-const IMAGE_HINT =
-  /მომიძებნე|გრაფიკ|ფოტო|სურათ|\bphotos?\b|\bimages?\b|\bpictures?\b|\bcharts?\b|\bgraphs?\b|\bdiagrams?\b/i;
+/** Conservative fallback: a subject containing a media stem is not an image request. */
+const IMAGE_MEDIA = /(?:^|[^\p{L}\p{N}])(?:ფოტო(?:ებ\p{L}*|ს|ზე|ში)?|ფოტოსურათ\p{L}*|სურათ\p{L}*|photos?|images?|pictures?)(?=$|[^\p{L}\p{N}])/iu;
+const IMAGE_DIAGRAM = /(?:^|[^\p{L}\p{N}])(?:გრაფიკ\p{L}*|დიაგრამ\p{L}*|charts?|graphs?|diagrams?)(?=$|[^\p{L}\p{N}])/iu;
+const IMAGE_REQUEST = /მაჩვენ|მომიძებნ|იპოვ|\b(?:show|find|search|display)\b|look\s+for/i;
 const EDIT_HINT = /გაამარტივე|შეამოკლე|simplify|shorten|rewrite|easier/i;
 const APPEND_HINT = /დაამატე|add more|more questions|more items/i;
 
@@ -316,7 +317,10 @@ export function wantsStartPath(prompt: string): boolean {
 }
 
 export function wantsImages(prompt: string): boolean {
-  return IMAGE_HINT.test(prompt);
+  if (isInternalTutorPrompt(prompt) || isSimpleChatTask(prompt)) return false;
+  const requested = IMAGE_REQUEST.test(prompt);
+  if (!requested && /რა არის|რას ნიშნავს|როგორ მუშაობს|\bwhat (?:is|are|does)\b|\bhow does\b/i.test(prompt)) return false;
+  return IMAGE_MEDIA.test(prompt) || (requested && IMAGE_DIAGRAM.test(prompt));
 }
 
 export function promptIsKa(text: string): boolean {
@@ -415,7 +419,7 @@ export function pendingCreateFromMessages(
         SHEET_HINT.test(item.content) ||
         PATH_HINT.test(item.content) ||
         EXAM_PREP_HINT.test(item.content) ||
-        IMAGE_HINT.test(item.content)),
+        wantsImages(item.content)),
   );
   const pendingKind: PendingKind | null =
     storedKind ??
@@ -427,7 +431,7 @@ export function pendingCreateFromMessages(
           ? "practice"
           : PATH_HINT.test(lastHint.content) || EXAM_PREP_HINT.test(lastHint.content)
             ? "path"
-            : IMAGE_HINT.test(lastHint.content)
+            : wantsImages(lastHint.content)
               ? "images"
               : null);
   const pendingTopic = lastHint
@@ -637,7 +641,7 @@ export function fallbackChatTool(input: {
       };
     }
   }
-  if (looksLikeQuestion(prompt) && !wantsPractice(prompt) && !wantsSheet(prompt) && !IMAGE_HINT.test(prompt) && !PATH_HINT.test(prompt) && !ADVANCE_HINT.test(prompt) && !RESTART_PATH_HINT.test(prompt) && !START_PATH_HINT.test(prompt)) {
+  if (looksLikeQuestion(prompt) && !wantsPractice(prompt) && !wantsSheet(prompt) && !wantsImages(prompt) && !PATH_HINT.test(prompt) && !ADVANCE_HINT.test(prompt) && !RESTART_PATH_HINT.test(prompt) && !START_PATH_HINT.test(prompt)) {
     return { name: "answer", args: {} };
   }
   const askedPractice = wantsPractice(prompt);

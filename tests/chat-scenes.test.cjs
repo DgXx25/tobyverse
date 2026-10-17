@@ -75,6 +75,20 @@ test('distribution and market calculations match reference values and remain fin
   assert.ok(Math.abs((15 + 0.8 * eq.quantity) - eq.price) < 1e-10);
 });
 
+test('distribution scenes represent the requested value and probability region', () => {
+  const { parseTobyFence } = require('../lib/blocks/registry.ts');
+  const { SceneView } = require('../components/blocks/scenes/scene-view.tsx');
+  for (const [region, label] of [['point', 'Z = 2'], ['left', '97.72%'], ['right', '2.28%'], ['central', '95.45%']]) {
+    const parsed = parseTobyFence('toby-scene', JSON.stringify({ id: 'normal-distribution', locale: 'en', cutoff: 2, region }));
+    assert.equal(parsed.data.cutoff, 2);
+    const html = renderToStaticMarkup(React.createElement(SceneView, { block: parsed.data }));
+    assert.ok(html.includes(label), label);
+    assert.ok(!html.includes('95.00%'));
+  }
+  assert.equal(parseTobyFence('toby-scene', '{"id":"normal-distribution","cutoff":200}'), null);
+  assert.equal(parseTobyFence('toby-scene', '{"id":"t-distribution","df":0}'), null);
+});
+
 test('durable communication preferences are extracted and can override default presentation', () => {
   const { shouldExtractMemory } = require('../lib/memory/normalize.ts');
   const { formatKnownUserBlock, MEMORY_EXTRACT_SYSTEM } = require('../lib/memory/prompt.ts');

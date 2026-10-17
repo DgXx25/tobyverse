@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import { useChatBlockState } from "@/components/workspace/chat-block-state";
 import { StreamWords } from "@/components/workspace/stream-text";
 import { paperFormTitle } from "@/lib/exercises/forms";
 import type { PaperPayload } from "@/types/exercise";
@@ -88,10 +89,10 @@ export function PaperPlay({
   const sampleBody = example ? (data.sample?.body ?? "") : "";
   const sampleSign = example ? (data.sample?.sign ?? "") : "";
   const sampleDate = example ? (data.sample?.date ?? "") : "";
-  const [to, setTo] = useState(data.given?.to ?? "");
-  const [body, setBody] = useState("");
-  const [sign, setSign] = useState("");
-  const [date, setDate] = useState("");
+  const [to, setTo] = useChatBlockState("paper-to", data.given?.to ?? "");
+  const [body, setBody] = useChatBlockState("paper-body", "");
+  const [sign, setSign] = useChatBlockState("paper-sign", "");
+  const [date, setDate] = useChatBlockState("paper-date", "");
   const liveTo = example ? sampleTo : to;
   const liveBody = example ? sampleBody : body;
   const liveSign = example ? sampleSign : sign;
@@ -101,7 +102,7 @@ export function PaperPlay({
   useEffect(() => {
     if (example || !streaming) return;
     if (data.given?.to) setTo(data.given.to);
-  }, [example, streaming, data.given?.to]);
+  }, [example, streaming, data.given?.to, setTo]);
 
   function emit(next: Partial<PaperAnswer>) {
     const answer: PaperAnswer = {

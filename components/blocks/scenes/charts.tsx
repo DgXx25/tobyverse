@@ -1,6 +1,7 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId } from "react";
+import { useChatBlockState } from "@/components/workspace/chat-block-state";
 import { centralArea, marketEquilibrium, normalPdf, studentTPdf } from "@/lib/blocks/scenes/math";
 import { SceneFrame, SceneSlider } from "./frame";
 
@@ -8,8 +9,8 @@ const px = (x: number) => 80 + x * 4.8;
 const py = (y: number) => 290 - y * 2.4;
 
 export function MarketScene({ ka, title }: { ka: boolean; title?: string }) {
-  const [demandShift, setDemand] = useState(0);
-  const [supplyShift, setSupply] = useState(0);
+  const [demandShift, setDemand] = useChatBlockState("demand", 0);
+  const [supplyShift, setSupply] = useChatBlockState("supply", 0);
   const id = useId().replace(/:/g, "");
   const eq = marketEquilibrium(demandShift, supplyShift);
   const x = px(eq.quantity), y = py(eq.price);
@@ -36,28 +37,38 @@ function curve(pdf: (x: number) => number, from = -4, to = 4) {
   }).join(" ");
 }
 
-export function DistributionScene({ ka, title, student = false }: { ka: boolean; title?: string; student?: boolean }) {
-  const [cutoff, setCutoff] = useState(1.96);
-  const [df, setDf] = useState(5);
+export function DistributionScene({ ka, title, student = false, cutoff: initialCutoff = 1.96, region = "central", df: initialDf = 5 }: { ka: boolean; title?: string; student?: boolean; cutoff?: number; region?: "central" | "left" | "right" | "point"; df?: number }) {
+  const [cutoffOverride, setCutoff] = useChatBlockState<number | null>("cutoff", null);
+  const [dfOverride, setDf] = useChatBlockState<number | null>("df", null);
+  const cutoff = region === "central" ? Math.abs(cutoffOverride ?? initialCutoff) : cutoffOverride ?? initialCutoff;
+  const df = dfOverride ?? initialDf;
   const pdf = (x: number) => student ? studentTPdf(x, df) : normalPdf(x);
-  const area = centralArea(cutoff, student ? df : undefined);
-  const fill = `${curve(pdf, -cutoff, cutoff)}L${dx(cutoff)} 278H${dx(-cutoff)}Z`;
-  return <SceneFrame title={title || (student ? (ka ? "სტიუდენტის t განაწილება" : "Student's t distribution") : (ka ? "სტანდარტული ნორმალური განაწილება" : "Standard normal distribution"))} caption={<><span>{ka ? "მონიშნული შუა არე: " : "Shaded central area: "}<strong>{(area * 100).toFixed(2)}%</strong>{` (−${cutoff} ≤ ${student ? "t" : "Z"} ≤ ${cutoff}).`}</span><span>{student ? (ka ? "წყვეტილი მრუდი სტანდარტული ნორმალურია. თავისუფლების ხარისხის ზრდით t მრუდი მას უახლოვდება." : "The dashed curve is standard normal. The t curve approaches it as degrees of freedom increase.") : (ka ? "ჰორიზონტალური ღერძი აჩვენებს საშუალოდან დაშორებას სტანდარტული გადახრებით." : "The horizontal axis measures distance from the mean in standard deviations.")}</span></>}>
-    <div className="scene-canvas"><svg viewBox="0 0 640 330" role="img" aria-label={ka ? "სიმეტრიული განაწილების მრუდი მონიშნული შუა არით" : "Symmetric distribution curve with shaded central area"}>
+  const central = centralArea(cutoff, student ? df : undefined);
+  const left = (1 + Math.sign(cutoff) * central) / 2;
+  const area = region === "left" ? left : region === "right" ? 1 - left : central;
+  const from = region === "left" ? -4 : region === "right" ? cutoff : -cutoff;
+  const to = region === "right" ? 4 : cutoff;
+  const fill = `${curve(pdf, from, to)}L${dx(to)} 278H${dx(from)}Z`;
+  const symbol = student ? "t" : "Z";
+  const relation = region === "central" ? `−${cutoff} ≤ ${symbol} ≤ ${cutoff}` : `${symbol} ${region === "left" ? "≤" : "≥"} ${cutoff}`;
+  const point = region === "point";
+  return <SceneFrame title={title || (student ? (ka ? "სტიუდენტის t განაწილება" : "Student's t distribution") : (ka ? "სტანდარტული ნორმალური განაწილება" : "Standard normal distribution"))} caption={<><span>{point ? <strong>{`${symbol} = ${cutoff}`}</strong> : <>{ka ? "მონიშნული არე: " : "Shaded area: "}<strong>{(area * 100).toFixed(2)}%</strong>{` (${relation}).`}</>}</span><span>{student ? (ka ? "წყვეტილი მრუდი სტანდარტული ნორმალურია. თავისუფლების ხარისხის ზრდით t მრუდი მას უახლოვდება." : "The dashed curve is standard normal. The t curve approaches it as degrees of freedom increase.") : (ka ? "ჰორიზონტალური ღერძი აჩვენებს საშუალოდან დაშორებას სტანდარტული გადახრებით." : "The horizontal axis measures distance from the mean in standard deviations.")}</span></>}>
+    <div className="scene-canvas"><svg viewBox="0 0 640 330" role="img" aria-label={point ? `${symbol} = ${cutoff}` : `${ka ? "მონიშნული არე" : "Shaded area"}: ${relation}`}>
       <g className="scene-grid-lines">{[0.1, 0.2, 0.3, 0.4].map((n) => <path key={n} d={`M80 ${dy(n)}H560`} />)}</g>
-      <path className="scene-area" d={fill} />
+      {!point ? <path className="scene-area" d={fill} /> : null}
       {student ? <path className="scene-reference" d={curve(normalPdf)} /> : null}
       <path className="scene-curve" d={curve(pdf)} /><path className="scene-axis" d="M80 278H565" />
-      <path className="scene-guide" d={`M${dx(-cutoff)} 278V${dy(pdf(-cutoff))}M${dx(cutoff)} 278V${dy(pdf(cutoff))}`} />
+      <path className="scene-guide" d={`${region === "central" ? `M${dx(-cutoff)} 278V${dy(pdf(-cutoff))}` : ""}M${dx(cutoff)} 278V${dy(pdf(cutoff))}`} />
+      {point ? <circle cx={dx(cutoff)} cy={dy(pdf(cutoff))} r="5" fill="var(--scene-accent)" /> : null}
       <g className="scene-svg-label" fill="currentColor">{[-3, -2, -1, 0, 1, 2, 3].map((n) => <text key={n} x={dx(n)} y="305" textAnchor="middle">{n}</text>)}<text x="581" y="282">{student ? "t" : "Z"}</text></g>
     </svg></div>
-    <div className="scene-controls"><SceneSlider label={ka ? "ცენტრიდან დაშორება" : "Distance from center"} value={cutoff} min={0.1} max={3.5} step={0.01} onChange={setCutoff} />{student ? <SceneSlider label={ka ? "თავისუფლების ხარისხი" : "Degrees of freedom"} value={df} min={1} max={60} onChange={setDf} /> : null}</div>
+    <div className="scene-controls"><SceneSlider label={point ? (ka ? "მონიშნული მნიშვნელობა" : "Marked value") : (ka ? "ზღვარი" : "Cutoff")} value={cutoff} min={region === "central" ? 0 : -3.5} max={3.5} step={0.01} onChange={setCutoff} />{student ? <SceneSlider label={ka ? "თავისუფლების ხარისხი" : "Degrees of freedom"} value={df} min={1} max={60} onChange={setDf} /> : null}</div>
   </SceneFrame>;
 }
 
 export function LineGraphScene({ ka, title, slope, intercept }: { ka: boolean; title?: string; slope: number; intercept: number }) {
-  const [slopeOverride, setSlope] = useState<number | null>(null);
-  const [interceptOverride, setIntercept] = useState<number | null>(null);
+  const [slopeOverride, setSlope] = useChatBlockState<number | null>("slope", null);
+  const [interceptOverride, setIntercept] = useChatBlockState<number | null>("intercept", null);
   const m = slopeOverride ?? slope;
   const b = interceptOverride ?? intercept;
   const id = useId().replace(/:/g, "");

@@ -65,6 +65,7 @@ export function Topbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tabMenu, setTabMenu] = useState<{ id: string; left: number; top: number } | null>(null);
   const [openIds, setOpenIds] = useState<string[]>([]);
+  const [openIdsLoaded, setOpenIdsLoaded] = useState(false);
   const [activityNotifications, setActivityNotifications] = useState<string[]>([]);
   const [editorId, setEditorId] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<"rename" | "icon">("rename");
@@ -95,18 +96,21 @@ export function Topbar() {
     void discardUntouchedNotebook(previousId, user.uid).then((deleted) => {
       if (!deleted) return;
       setOpenIds((current) => {
-        const next = current.filter((id) => id !== previousId);
-        writeOpen(next);
-        return next;
+        return current.filter((id) => id !== previousId);
       });
     });
   }, [activeId, user?.uid]);
 
   useEffect(() => {
     setOpenIds(readOpen());
+    setOpenIdsLoaded(true);
     setActivityNotifications(getProjectActivityNotifications());
     return subscribeProjectActivityNotifications(() => setActivityNotifications(getProjectActivityNotifications()));
   }, []);
+
+  useEffect(() => {
+    if (openIdsLoaded) writeOpen(openIds);
+  }, [openIds, openIdsLoaded]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -117,9 +121,7 @@ export function Topbar() {
     if (!activeId) return;
     setOpenIds((current) => {
       if (current.includes(activeId)) return current;
-      const next = addOpenNotebook(current, activeId);
-      writeOpen(next);
-      return next;
+      return addOpenNotebook(current, activeId);
     });
   }, [activeId]);
 
@@ -182,7 +184,6 @@ export function Topbar() {
   function closeTab(id: string) {
     const next = openIds.filter((item) => item !== id);
     setOpenIds(next);
-    writeOpen(next);
     if (id !== activeId) {
       if (user?.uid) void discardUntouchedNotebook(id, user.uid);
       return;

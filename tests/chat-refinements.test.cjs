@@ -14,6 +14,19 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
 }).outputText, filename);
 
+test('topic words do not turn ordinary questions into external image searches', () => {
+  const { wantsImages } = require('../lib/composer/intent.ts');
+  const { fallbackToolAfterProvider } = require('../lib/chat/tool-routing.ts');
+  for (const prompt of ['რა არის ფოტოსინთეზი?', 'როგორ მუშაობს ფოტორესპირაცია?', 'რა არის ფოტოგრაფია?', 'რას ნიშნავს ეს გრაფიკი?', 'What does a normal distribution graph mean?', 'მომიძებნე x-ის მნიშვნელობა']) {
+    assert.equal(wantsImages(prompt), false, prompt);
+    assert.equal(fallbackToolAfterProvider({ prompt, mode: 'auto' }).name, 'answer', prompt);
+  }
+  for (const prompt of ['მაჩვენე კატის ფოტოები', 'ფოტოებს მაჩვენებ?', 'კატის ფოტოსურათები', 'ფოტოსინთეზის სურათები', 'მომიძებნე გულის დიაგრამა', 'Find photos of a plant', 'Show me a diagram of the heart']) {
+    assert.equal(wantsImages(prompt), true, prompt);
+    assert.equal(fallbackToolAfterProvider({ prompt, mode: 'auto' }).name, 'search_images', prompt);
+  }
+});
+
 test('short labels and long descriptions retain equal table columns', () => {
   const { layoutChatTable } = require('../lib/visuals/markdown-table.ts');
   const view = layoutChatTable(['Name', 'Explanation'], [['A', 'A much longer explanation that must wrap without shrinking the other column.']]);

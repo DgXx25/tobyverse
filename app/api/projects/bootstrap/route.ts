@@ -22,10 +22,22 @@ export async function GET(request: Request) {
       return Response.json({ error: "Invalid session." }, { status: 401 });
     }
     const url = new URL(request.url);
-    const projectId = url.searchParams.get("projectId") || "";
-    const threadId = url.searchParams.get("threadId") || DEFAULT_CHAT_THREAD_ID;
-    if (!projectId) return Response.json({ error: "projectId is required." }, { status: 400 });
+    const chatId = url.searchParams.get("chatId") || "";
+    let projectId = url.searchParams.get("projectId") || chatId;
+    let threadId = url.searchParams.get("threadId") || DEFAULT_CHAT_THREAD_ID;
+    const validId = (id: string) => Boolean(id && id.length <= 150 && !id.includes("/") && id !== "." && id !== "..");
+    if (!validId(projectId) || !validId(threadId)) return Response.json({ error: "Invalid chat." }, { status: 400 });
     const db = getAdminFirestore();
+    if (chatId && !url.searchParams.has("projectId")) {
+      const index = await db.collection("chats").doc(chatId).get();
+      const row = index.data();
+      if (row) {
+        if (row.userId !== decoded.uid) return Response.json({ error: "Chat not found." }, { status: 404 });
+        projectId = row.projectId;
+        threadId = row.nestedId || (chatId === projectId ? DEFAULT_CHAT_THREAD_ID : chatId);
+        if (!validId(projectId) || !validId(threadId)) return Response.json({ error: "Invalid chat." }, { status: 400 });
+      }
+    }
     const ref = db.collection("projects").doc(projectId);
     const snap = await ref.get();
     if (!snap.exists) return Response.json({ error: "Project not found." }, { status: 404 });
@@ -53,7 +65,7 @@ export async function GET(request: Request) {
     const olderCursor = messagesSnap.docs.length === 40
       ? messagesSnap.docs[0].id
       : null;
-    return Response.json({ project, messages, olderCursor });
+    return Response.json({ projectId, threadId, project, messages, olderCursor });
   } catch (error) {
     console.error("Project bootstrap failed", error);
     return Response.json({ error: "Could not load project." }, { status: 500 });

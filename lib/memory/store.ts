@@ -3,6 +3,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  getDocsFromCache,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -44,9 +45,9 @@ function sortMemories(items: UserMemory[]): UserMemory[] {
   });
 }
 
-export async function listMemories(userId: string): Promise<UserMemory[]> {
+export async function listMemories(userId: string, cached = false): Promise<UserMemory[]> {
   if (!userId) return [];
-  const snapshot = await getDocs(memoriesRef(userId));
+  const snapshot = await (cached ? getDocsFromCache(memoriesRef(userId)) : getDocs(memoriesRef(userId)));
   const items = snapshot.docs.flatMap((item) => {
     const mapped = mapMemory(item.id, item.data());
     return mapped ? [mapped] : [];

@@ -26,10 +26,10 @@ html.light {
   --overlay: rgba(24, 24, 27, 0.45);
   --app-wallpaper: none;
   --app-wallpaper-opacity: 0;
-  --toby-c0: #5b7ea8;
-  --toby-c1: #b56b68;
-  --toby-c2: #b89a4e;
-  --toby-c3: #5e8f78;
+  --toby-c0: var(--palette-blue, var(--accent));
+  --toby-c1: var(--palette-red, var(--accent));
+  --toby-c2: var(--palette-yellow, var(--accent));
+  --toby-c3: var(--palette-green, var(--accent));
   --file-pdf: #FF383C;
   --file-doc: #0088FF;
   --file-sheet: #34C759;
@@ -46,7 +46,7 @@ html.dark {
   --border: #262524;
   --input-bg: #201f1d;
   --input-border: #2d2c2a;
-  --panel-bg: #201f1d;
+  --panel-bg: #181716;
   --panel-border: #262524;
   --panel-item-bg: #151413;
   --item-active-bg: #242220;
@@ -62,10 +62,10 @@ html.dark {
   --overlay: rgba(10, 8, 7, 0.64);
   --app-wallpaper: none;
   --app-wallpaper-opacity: 0;
-  --toby-c0: #7a96b5;
-  --toby-c1: #c48986;
-  --toby-c2: #c4b07a;
-  --toby-c3: #7aa090;
+  --toby-c0: var(--palette-blue, var(--accent));
+  --toby-c1: var(--palette-red, var(--accent));
+  --toby-c2: var(--palette-yellow, var(--accent));
+  --toby-c3: var(--palette-green, var(--accent));
   --file-pdf: #FF4245;
   --file-doc: #0091FF;
   --file-sheet: #30D158;
@@ -83,7 +83,7 @@ html.marketing.dark {
   --border: #262524;
   --input-bg: #201f1d;
   --input-border: #2d2c2a;
-  --panel-bg: #201f1d;
+  --panel-bg: #181716;
   --panel-border: #262524;
   --panel-item-bg: #151413;
   --item-active-bg: #242220;
@@ -231,7 +231,7 @@ html.dark.high-contrast {
   --border: #262524;
   --input-bg: #201f1d;
   --input-border: #2d2c2a;
-  --panel-bg: #201f1d;
+  --panel-bg: #181716;
   --panel-border: #262524;
   --panel-item-bg: #151413;
   --item-active-bg: #242220;
@@ -292,6 +292,12 @@ html.dark .edge-stroke {
 html.dark .prompt-bubble {
   background: var(--input-bg);
   border: 0;
+}
+
+html.light .prompt-bubble,
+html.marketing.light .prompt-bubble,
+html.marketing:not(.dark) .prompt-bubble {
+  border: 1px solid var(--input-border);
 }
 
 .composer-shell {

@@ -61,6 +61,8 @@ import Shield01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm
 import PanelLeftIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PanelLeftIcon.js";
 import PanelRightIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PanelRightIcon.js";
 import SlidersHorizontalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SlidersHorizontalIcon.js";
+import ShuffleIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ShuffleIcon.js";
+import FilterHorizontalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FilterHorizontalIcon.js";
 import SparklesIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SparklesIcon.js";
 import SquareLock01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SquareLock01Icon.js";
 import StarIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/StarIcon.js";
@@ -73,6 +75,7 @@ import ZapIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ZapI
 import ZoomInAreaIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ZoomInAreaIcon.js";
 import ZoomOutAreaIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ZoomOutAreaIcon.js";
 import type { IconSvgElement } from "@hugeicons/react";
+import ThermometerIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ThermometerIcon.js";
 
 const ICONS = {
   share: Share01Icon,
@@ -105,6 +108,8 @@ const ICONS = {
   user: UserIcon,
   settings: Settings01Icon,
   sliders: SlidersHorizontalIcon,
+  shuffle: ShuffleIcon,
+  filter: FilterHorizontalIcon,
   sun: Sun01Icon,
   moon: Moon01Icon,
   help: HelpCircleIcon,
@@ -157,6 +162,7 @@ const ICONS = {
   dislike: ThumbsDownIcon,
   like: ThumbsUpIcon,
   wind: FastWindIcon,
+  thermometer: ThermometerIcon,
   x: Cancel01Icon,
   zap: ZapIcon,
 } as const satisfies Record<string, IconSvgElement>;

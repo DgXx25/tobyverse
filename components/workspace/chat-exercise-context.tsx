@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { PaperPayload } from "@/types/exercise";
 
 type ChatExerciseValue = {
@@ -18,9 +18,8 @@ export function ChatExerciseProvider({
   interactive,
   children,
 }: ChatExerciseValue & { children: ReactNode }) {
-  return (
-    <ChatExerciseContext.Provider value={{ priorPapers, interactive }}>{children}</ChatExerciseContext.Provider>
-  );
+  const value = useMemo(() => ({ priorPapers, interactive }), [priorPapers, interactive]);
+  return <ChatExerciseContext.Provider value={value}>{children}</ChatExerciseContext.Provider>;
 }
 
 export function useChatExercise(): ChatExerciseValue {

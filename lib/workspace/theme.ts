@@ -130,6 +130,7 @@ export function persistThemeAccents(accents: ThemeAccents): void {
 export function applyThemeAccent(theme: ThemeId, accent: AccentId, highContrast: boolean): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  for (const option of ACCENT_OPTIONS) root.style.setProperty(`--palette-${option.id}`, option[theme]);
   const color = accentColor(theme, accent);
   root.style.setProperty("--accent", color);
   root.style.setProperty("--pick", color);

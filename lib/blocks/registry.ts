@@ -2,6 +2,7 @@ import { parsePartialObject } from "@/lib/ai/json-stream";
 import { CHAT_BLOCK_KINDS } from "@/lib/blocks/kinds";
 import type { ChatBlockDef, ParsedChatBlock } from "@/lib/blocks/types";
 import { SCENE_IDS } from "@/lib/blocks/kinds/scene";
+import { sectionItemSchema, sectionsSchema } from "@/lib/blocks/kinds/sections";
 
 const BY_ID = new Map(CHAT_BLOCK_KINDS.map((item) => [item.id, item]));
 
@@ -73,6 +74,14 @@ function asText(value: unknown): string | undefined {
 }
 
 function previewBlock(type: string, raw: Record<string, unknown>): ParsedChatBlock | null {
+  if (type === "sections") {
+    const items = Array.isArray(raw.items) ? raw.items.flatMap((item) => {
+      const parsed = sectionItemSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }) : [];
+    const parsed = sectionsSchema.safeParse({ items, title: asText(raw.title)?.trim() || undefined });
+    return parsed.success ? { type, data: parsed.data } : null;
+  }
   if (type === "paper") {
     if (raw.reuse === true) {
       return {
@@ -154,7 +163,8 @@ function previewBlock(type: string, raw: Record<string, unknown>): ParsedChatBlo
 export function parseTobyFence(lang: string, body: string): ParsedChatBlock | null {
   if (!/^toby/i.test(lang.trim())) return null;
   const extracted = fenceType(lang.trim(), body);
-  const raw = (tryJson(extracted.json) ?? parsePartialObject(extracted.json)) as Record<string, unknown> | null;
+  const complete = tryJson(extracted.json);
+  const raw = (complete ?? parsePartialObject(extracted.json)) as Record<string, unknown> | null;
   const type = extracted.type || inferFenceType(raw);
   if (!type) return null;
   const def = chatBlockById(type);
@@ -162,6 +172,7 @@ export function parseTobyFence(lang: string, body: string): ParsedChatBlock | nu
   if (raw) {
     const result = def.schema.safeParse({ ...raw, type });
     if (result.success) return { type, data: result.data };
+    if (type === "sections" && complete) return null;
     return previewBlock(type, raw);
   }
   return previewBlock(type, {});

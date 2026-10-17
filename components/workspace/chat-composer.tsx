@@ -45,13 +45,15 @@ export type ComposerChip = {
 export type ChatComposerHandle = {
   focus: () => void;
   openFile: () => void;
+  getDraft: () => string;
+  setDraft: (value: string) => void;
 };
 
 export const ChatComposer = forwardRef<
   ChatComposerHandle,
   {
-    draft: string;
-    onDraft: (value: string) => void;
+    draft?: string;
+    onDraft?: (value: string) => void;
     sending: boolean;
     error: string | null;
     status?: ComposerStatusState | null;
@@ -84,8 +86,8 @@ export const ChatComposer = forwardRef<
   }
 >(function ChatComposer(
   {
-    draft,
-    onDraft,
+    draft: controlledDraft,
+    onDraft: onControlledDraft,
     sending,
     error,
     status,
@@ -117,6 +119,14 @@ export const ChatComposer = forwardRef<
   },
   ref,
 ) {
+  // Chat can own its input locally so a keystroke never reconciles the history.
+  // Other callers can continue to control the draft through the existing props.
+  const [localDraft, setLocalDraft] = useState("");
+  const draft = controlledDraft ?? localDraft;
+  const onDraft = (value: string) => {
+    if (controlledDraft === undefined) setLocalDraft(value);
+    onControlledDraft?.(value);
+  };
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const lastDropRef = useRef<{ at: number; keys: Set<string> }>({ at: 0, keys: new Set() });
@@ -154,6 +164,8 @@ export const ChatComposer = forwardRef<
   }, [fadePlaceholder, hint]);
 
   useImperativeHandle(ref, () => ({
+    getDraft: () => areaRef.current?.value ?? draft,
+    setDraft: onDraft,
     focus() {
       areaRef.current?.focus({ preventScroll: true });
     },

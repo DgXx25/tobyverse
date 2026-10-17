@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useChatBlockState } from "@/components/workspace/chat-block-state";
 import { renderFormula, catalogIconId, visualFromId } from "@/lib/visuals/catalog";
 import { isLatexSource } from "@/lib/visuals/math";
 import { expandWalkSlides } from "@/lib/visuals/arrows";
@@ -518,7 +519,7 @@ function FlowBlock({ block }: { block: Extract<VisualBlock, { type: "flow" }> })
 
 function WalkBlock({ block }: { block: Extract<VisualBlock, { type: "walk" }> }) {
   const slides = useMemo(() => expandWalkSlides(block.slides), [block.slides]);
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useChatBlockState("slide", 0);
   const startX = useRef<number | null>(null);
   const slide = slides[Math.min(index, slides.length - 1)];
   if (!slide) return null;

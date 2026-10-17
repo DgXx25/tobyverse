@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useLayoutEffect, useRef, type ReactNode } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { StreamAnimRoot } from "@/components/workspace/stream-text";
+import { ChatBlockStateScope } from "@/components/workspace/chat-block-state";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "katex/dist/katex.min.css";
@@ -244,21 +245,23 @@ function segmentKey(segment: Segment, index: number): string {
   return `visual-${index}`;
 }
 
-export function RichContent({
+export const RichContent = memo(function RichContent({
   text,
   streaming = false,
   images = [],
   ka = false,
   onOpenImageUpload,
+  allowNativeBlocks = true,
 }: {
   text: string;
   streaming?: boolean;
   images?: ChatImageHit[];
   ka?: boolean;
   onOpenImageUpload?: (image: ChatImageHit) => void;
+  allowNativeBlocks?: boolean;
 }) {
-  const layout = layoutImageGalleries(prepareChatMarkdown(text), images);
-  const segments = splitRichContent(layout.segments);
+  const layout = useMemo(() => layoutImageGalleries(prepareChatMarkdown(text), images), [text, images]);
+  const segments = useMemo(() => splitRichContent(layout.segments), [layout]);
   const liveIndex = streaming ? segments.length - 1 : -1;
   const frozen = streaming ? Math.max(0, liveIndex) : segments.length;
   const seenFrozen = useRef(0);
@@ -310,7 +313,8 @@ export function RichContent({
           );
         }
         if (segment.kind === "toby") {
-          const node = <TobyBlockView block={segment.block} streaming={live && streaming} />;
+          if (!allowNativeBlocks) return <ChatBlock key={key} copyText={JSON.stringify(segment.block.data, null, 2)} label={`toby ${segment.block.type}`} kind="code"><code>{JSON.stringify(segment.block.data, null, 2)}</code></ChatBlock>;
+          const node = <ChatBlockStateScope scope={key}><TobyBlockView block={segment.block} streaming={live && streaming} /></ChatBlockStateScope>;
           return (
             <div key={key} className={wrap}>
               {live && streaming ? (
@@ -331,7 +335,7 @@ export function RichContent({
         }
         return (
           <div key={key} className={`my-5 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
-            <VisualBlockView block={segment.block} />
+            <ChatBlockStateScope scope={key}><VisualBlockView block={segment.block} /></ChatBlockStateScope>
           </div>
         );
       })}
@@ -345,4 +349,4 @@ export function RichContent({
       )}
     </div>
   );
-}
+});

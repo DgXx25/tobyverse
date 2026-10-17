@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useChatBlockState } from "@/components/workspace/chat-block-state";
 import { authHeaders } from "@/lib/api/client";
 import { PaperPlay, paperIsExample, paperReady, type PaperAnswer } from "@/components/exercises/paper-play";
 import type { PaperPayload } from "@/types/exercise";
@@ -17,11 +17,11 @@ export function PaperView({
   skipped?: boolean;
 }) {
   const example = paperIsExample(block);
-  const [answer, setAnswer] = useState<PaperAnswer | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [locked, setLocked] = useState(example);
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [answer, setAnswer] = useChatBlockState<PaperAnswer | null>("answer", null);
+  const [busy, setBusy] = useChatBlockState("busy", false);
+  const [locked, setLocked] = useChatBlockState("locked", example);
+  const [feedback, setFeedback] = useChatBlockState<Feedback | null>("feedback", null);
+  const [error, setError] = useChatBlockState<string | null>("error", null);
   const ready = paperReady(answer);
   const frozen = example || skipped || locked || streaming;
 

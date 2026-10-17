@@ -24,6 +24,7 @@ test('one short core is the exact prefix in every mode, with optional ordered sl
   const { assembleChatSystemPrompt } = require('../lib/chat/system-prompt.ts');
   const words = CORE_SYSTEM_INSTRUCTION.split(/\s+/).length;
   assert.ok(words >= 150 && words <= 400, `core has ${words} words`);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /MUST avoid repeating information across formats; use a second form only for distinct value/u);
   assert.equal(assembleChatSystemPrompt({}), CORE_SYSTEM_INSTRUCTION);
   assert.equal(buildChatSystemPrompt({ ...base, projectTitle: '' }), CORE_SYSTEM_INSTRUCTION);
   const normal = `${CORE_SYSTEM_INSTRUCTION}\n\n<project_context>\nProject: Workspace.\n</project_context>`;

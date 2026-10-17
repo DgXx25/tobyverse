@@ -13,6 +13,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  startAfter,
   updateDoc,
   where,
   type Unsubscribe,
@@ -640,10 +641,11 @@ export async function addChatMessage(input: {
   );
   clearUntouchedNotebook(input.projectId);
 
-  await updateDoc(chatRef(input.projectId, threadId), {
+  // Recency metadata is best effort; a reconnect must not hold up an already saved message.
+  void updateDoc(chatRef(input.projectId, threadId), {
     updatedAt: serverTimestamp(),
   }).catch(() => undefined);
-  await setDoc(
+  void setDoc(
     chatIndexRef(publicChatId(input.projectId, threadId)),
     { updatedAt: serverTimestamp() },
     { merge: true },
@@ -692,11 +694,16 @@ export function subscribeChatMessages(
   onError?: (error: Error) => void,
   threadId = DEFAULT_CHAT_THREAD_ID,
 ): Unsubscribe {
+  const cached = new Map<string, ChatMessage>();
   return onSnapshot(
     query(messagesCollection(projectId, threadId), orderBy("createdAt", "desc"), limit(40)),
     (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        if (change.type === "removed") cached.delete(change.doc.id);
+        else cached.set(change.doc.id, mapMessage(change.doc.id, projectId, threadId, change.doc.data()));
+      }
       const messages = snapshot.docs
-        .map((item) => mapMessage(item.id, projectId, threadId, item.data()))
+        .map((item) => cached.get(item.id)!)
         .sort((a, b) => {
           const time = (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
           return time !== 0 ? time : a.id.localeCompare(b.id);
@@ -705,6 +712,15 @@ export function subscribeChatMessages(
     },
     (error) => onError?.(error),
   );
+}
+
+/** Fetch a single older page using the same decoder and ordering as the live page. */
+export async function listEarlierChatMessages(projectId: string, threadId: string, beforeId: string): Promise<ChatMessage[]> {
+  const messages = messagesCollection(projectId, threadId);
+  const cursor = await getDoc(doc(messages, beforeId));
+  if (!cursor.exists()) return [];
+  const snapshot = await getDocs(query(messages, orderBy("createdAt", "desc"), startAfter(cursor), limit(40)));
+  return snapshot.docs.reverse().map((item) => mapMessage(item.id, projectId, threadId, item.data()));
 }
 
 export async function deleteChatMessages(

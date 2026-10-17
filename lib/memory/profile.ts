@@ -14,7 +14,7 @@ function localKey(userId: string) {
 type LocalListener = (text: string) => void;
 const localListeners = new Map<string, Set<LocalListener>>();
 
-function readLocal(userId: string): string {
+export function cachedLearningProfile(userId: string): string {
   if (typeof window === "undefined" || !userId) return "";
   try {
     return sanitizePersonalization(window.localStorage.getItem(localKey(userId)));
@@ -22,6 +22,8 @@ function readLocal(userId: string): string {
     return "";
   }
 }
+
+const readLocal = cachedLearningProfile;
 
 function writeLocal(userId: string, text: string) {
   if (typeof window === "undefined" || !userId) return;
