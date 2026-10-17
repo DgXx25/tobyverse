@@ -31,6 +31,7 @@ export async function generatePracticeSet(input: {
   count?: number;
   family?: PracticeFamily;
   onStatus?: (status: string) => void;
+  signal?: AbortSignal;
 }): Promise<{ ids: string[]; count: number }> {
   const sources = await collectProjectSources({
     projectId: input.project.id,
@@ -70,6 +71,7 @@ export async function generatePracticeSet(input: {
   const response = await fetch("/api/exercises/generate", {
     method: "POST",
     headers: await authHeaders(),
+    signal: input.signal,
     body: JSON.stringify({
       types: plan.map((item) => item.type),
       projectTitle: input.project.title,
@@ -101,6 +103,7 @@ export async function generatePracticeSet(input: {
   const ids: string[] = [];
   try {
     for (const item of items.slice(0, requested)) {
+      input.signal?.throwIfAborted();
       const id = await createExercise({
         projectId: input.project.id,
         userId: input.userId,
@@ -112,6 +115,7 @@ export async function generatePracticeSet(input: {
       });
       ids.push(id);
     }
+    input.signal?.throwIfAborted();
   } catch (error) {
     await Promise.all(ids.map((id) => deleteExercise(input.project.id, id).catch(() => undefined)));
     throw error;

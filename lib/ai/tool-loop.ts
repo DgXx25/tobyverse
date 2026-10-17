@@ -1,4 +1,5 @@
-import { parseToolCall, type ChatToolCall } from "@/lib/ai/tools";
+import { isInternalTool, parseToolCall, type ChatToolCall } from "@/lib/ai/tools";
+import { withToolTimeout, type ToolExecutionStatus } from "@/lib/ai/tool-execution";
 
 export type ToolLoopPart = {
   text?: string;
@@ -12,6 +13,7 @@ export type ToolLoopResult = {
   tool: ChatToolCall | null;
   rounds: number;
   functionResponses: Array<{ name: string; response: unknown }>;
+  failed?: boolean;
 };
 
 export async function runToolLoop(input: {
@@ -19,12 +21,14 @@ export async function runToolLoop(input: {
     round: number;
     functionResponses: Array<{ name: string; response: unknown }>;
   }) => Promise<ToolLoopTurn>;
-  execute: (call: ChatToolCall) => Promise<unknown>;
+  execute: (call: ChatToolCall, options: { signal: AbortSignal }) => Promise<unknown>;
+  onToolStatus?: (event: ToolExecutionStatus) => void;
+  signal?: AbortSignal;
   /** Hand a completed tool back to the provider for a streamed text-only continuation. */
   stopAfterTool?: (call: ChatToolCall) => boolean;
   maxRounds?: number;
 }): Promise<ToolLoopResult> {
-  const maxRounds = Math.max(1, Math.min(3, input.maxRounds ?? 3));
+  const maxRounds = Math.max(1, Math.min(4, input.maxRounds ?? 4));
   let functionResponses: Array<{ name: string; response: unknown }> = [];
   let selected: ChatToolCall | null = null;
   let rounds = 0;
@@ -42,16 +46,32 @@ export async function runToolLoop(input: {
     });
 
     functionResponses = [];
+    let failed = false;
     for (const call of calls) {
-      if (!selected || (selected.name === "answer" && call.name !== "answer")) selected = call;
-      const response = await input.execute(call);
+      if (!isInternalTool(call.name) && (!selected || (selected.name === "answer" && call.name !== "answer"))) selected = call;
+      input.onToolStatus?.({ call, phase: "start" });
+      let response: unknown;
+      try {
+        response = await withToolTimeout((signal) => input.execute(call, { signal }), input.signal);
+      } catch (error) {
+        input.signal?.throwIfAborted();
+        response = { ok: false, error: error instanceof Error && error.name === "ToolTimeoutError"
+          ? error.message
+          : "Tool failed. Continue with a text answer using the available context; do not retry the tool." };
+      }
       functionResponses.push({ name: call.name, response });
+      const outcome = response as { ok?: boolean; error?: unknown } | null;
+      const callFailed = outcome?.ok === false || Boolean(outcome?.error);
+      failed ||= callFailed;
+      input.onToolStatus?.({ call, phase: callFailed ? "error" : "complete", response });
     }
+    if (failed) return { text: "", tool: null, rounds, functionResponses, failed: true };
 
-    if (selected && input.stopAfterTool?.(selected)) {
-      return { text: "", tool: selected, rounds, functionResponses };
+    const handoff = calls.find((call) => input.stopAfterTool?.(call));
+    if (handoff) {
+      return { text: "", tool: handoff, rounds, functionResponses };
     }
-    if (text.trim()) return { text, tool: selected, rounds, functionResponses };
+    if (calls.length === 0 && text.trim()) return { text, tool: selected, rounds, functionResponses };
     if (calls.length === 0) break;
   }
 

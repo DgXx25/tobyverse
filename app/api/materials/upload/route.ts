@@ -85,6 +85,7 @@ export async function POST(request: Request) {
         filename: uploadName || blobName,
         mime: blob.type || contentType,
         buffer: Buffer.from(await blob.arrayBuffer()),
+        chatImage: parsedPath.materialId.startsWith("chat-image-"),
       });
       buffer = normalized.buffer;
       if (normalized.converted) storedName = normalized.filename;

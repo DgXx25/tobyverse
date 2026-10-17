@@ -53,6 +53,7 @@ export function compactChatAttachment(input: {
   type?: string;
   materialId?: string;
   storagePath?: string;
+  sizeBytes?: number;
 }): ChatAttachment | null {
   const title = input.title.trim();
   if (!title) return null;
@@ -64,6 +65,9 @@ export function compactChatAttachment(input: {
   const storagePath = optionalText(input.storagePath);
   if (materialId) attachment.materialId = materialId;
   if (storagePath) attachment.storagePath = storagePath;
+  if (typeof input.sizeBytes === "number" && Number.isFinite(input.sizeBytes) && input.sizeBytes > 0) {
+    attachment.sizeBytes = Math.ceil(input.sizeBytes);
+  }
   return attachment;
 }
 
@@ -89,6 +93,7 @@ export function snapshotChatAttachments(
     title: string;
     type: string;
     status: string;
+    size?: number;
     materialId?: string;
     storagePath?: string;
   }>,
@@ -104,6 +109,7 @@ export function snapshotChatAttachments(
       type: image ? "image" : type,
       materialId: chip.materialId || material?.id,
       storagePath: chip.storagePath || material?.storagePath,
+      sizeBytes: chip.size,
     });
     return attachment ? [attachment] : [];
   });

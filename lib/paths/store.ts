@@ -134,8 +134,10 @@ export async function saveStudyPath(input: {
   sourceMaterialIds: string[];
   started?: boolean;
   kind?: PathKind;
+  signal?: AbortSignal;
 }): Promise<string> {
   const existing = await getLatestPath(input.projectId);
+  input.signal?.throwIfAborted();
   const started = input.started ?? existing?.started ?? false;
   const payload = omitUndefined({
     projectId: input.projectId,

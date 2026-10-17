@@ -592,12 +592,13 @@ export function ProjectView({
   }
 
   function paintWidth(reserve: HTMLDivElement | null, slot: HTMLDivElement | null, inner: HTMLDivElement | null, width: number) {
-    const px = `${width}px`;
-    if (reserve) reserve.style.width = px;
-    if (slot) slot.style.width = px;
+    const reservePx = `${width}px`;
+    const panelPx = `${Math.max(0, width - PANEL_OUTER_GAP)}px`;
+    if (reserve) reserve.style.width = reservePx;
+    if (slot) slot.style.width = panelPx;
     if (inner) {
-      inner.style.width = px;
-      inner.style.minWidth = px;
+      inner.style.width = panelPx;
+      inner.style.minWidth = panelPx;
     }
   }
 

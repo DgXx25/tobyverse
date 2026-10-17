@@ -1,4 +1,5 @@
 import { chatToolDefinition, isArtifactTool, type ChatToolCall, type ChatToolName } from "@/lib/ai/tools";
+import { toolFallbackText, toolStatusText, withToolTimeout, type ToolStatusUpdate } from "@/lib/ai/tool-execution";
 import {
   extractAppendCount,
   intentFromTool,
@@ -59,8 +60,9 @@ export type ChatDispatchContext = {
   /** Completed server image search, including an empty result; undefined uses the legacy client fallback. */
   imageSearchResults?: ChatImageHit[];
   onStatus?: (status: string) => void;
-  onNotesEvent?: (event: { status?: string | null; title?: string; block?: VisualBlock; blocks?: VisualBlock[]; sheetId?: string }) => void;
-  onPathEvent?: (event: { status?: string | null; title?: string; courses?: PathCourse[]; pathId?: string }) => void;
+  onToolStatus?: (update: ToolStatusUpdate) => void;
+  onNotesEvent?: (event: { status?: string | null; title?: string; block?: VisualBlock; blocks?: VisualBlock[]; sheetId?: string } | null) => void;
+  onPathEvent?: (event: { status?: string | null; title?: string; courses?: PathCourse[]; pathId?: string } | null) => void;
   signal?: AbortSignal;
   hintAsk?: boolean;
   examAsk?: boolean;
@@ -152,6 +154,7 @@ function textResult(ctx: ChatDispatchContext, extra?: Partial<ChatDispatchResult
   return {
     intent: intentFromTool(ctx.tool.name),
     content: stripArtifactMarkup(ctx.text),
+    ...(ctx.imageSearchResults !== undefined ? { images: ctx.imageSearchResults } : {}),
     ...extra,
   };
 }
@@ -242,8 +245,10 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
     prompt: generatePrompt(ctx),
     count: ctx.count,
     onStatus: ctx.onStatus,
+    signal: ctx.signal,
   });
   const path = ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
+  ctx.signal?.throwIfAborted();
   ctx.onStatus?.("Done");
   if (path?.currentNodeId) {
     const next = bindPracticeSet(path, path.currentNodeId, set.ids[0]);
@@ -284,6 +289,7 @@ async function runCreateSheet(ctx: ChatDispatchContext): Promise<ChatDispatchRes
   });
   if (!sheet.id) throw new Error("Could not save notes.");
   const path = ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
+  ctx.signal?.throwIfAborted();
   if (path && pathIsStarted(path) && path.currentNodeId) {
     const next = bindSheet(path, path.currentNodeId, sheet.id);
     await patchStudyPath(ctx.project.id, path.id, { courses: next.courses }).catch(() => undefined);
@@ -308,6 +314,7 @@ async function runEditPractice(ctx: ChatDispatchContext): Promise<ChatDispatchRe
     instruction: ctx.tool.args.instruction || ctx.prompt,
     materials: ctx.materials,
     onStatus: ctx.onStatus,
+    signal: ctx.signal,
   });
   return {
     intent: "edit",
@@ -334,6 +341,7 @@ async function runAppendPractice(ctx: ChatDispatchContext): Promise<ChatDispatch
     count,
     setIds: ids,
     onStatus: ctx.onStatus,
+    signal: ctx.signal,
   });
   const nextIds = [...ids, ...extra];
   return {
@@ -358,10 +366,11 @@ async function runSearchImages(ctx: ChatDispatchContext): Promise<ChatDispatchRe
     limit: count,
   });
   const seen = new Set(local.map((hit) => hit.thumb || hit.url).filter(Boolean));
-  const imageAttaches = ctx.imageSearchResults ?? await searchImagesClient(query, count);
+  const imageAttaches = ctx.imageSearchResults ?? await searchImagesClient(query, count, { signal: ctx.signal });
   const web = imageAttaches.flatMap((hit) => {
-    const key = hit.thumb || hit.url;
-    if (!key || seen.has(key) || !toImageAttach(hit)) return [];
+    const imageUrl = hit.thumb || hit.url;
+    const key = hit.galleryId ? `${hit.galleryId}:${imageUrl}` : imageUrl;
+    if (!imageUrl || seen.has(key) || !toImageAttach(hit)) return [];
     seen.add(key);
     return [hit];
   });
@@ -409,6 +418,7 @@ async function runCreatePath(ctx: ChatDispatchContext): Promise<ChatDispatchResu
 
 async function runAdvancePath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const path = ctx.path ?? (await getLatestPath(ctx.project.id));
+  ctx.signal?.throwIfAborted();
   if (!path) throw new Error("Open a path first.");
   if (!pathIsStarted(path)) throw new Error("Start the path first.");
   const currentId = path.currentNodeId;
@@ -444,6 +454,7 @@ async function runAdvancePath(ctx: ChatDispatchContext): Promise<ChatDispatchRes
 
 async function runRestartPath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const path = ctx.path ?? (await getLatestPath(ctx.project.id));
+  ctx.signal?.throwIfAborted();
   if (!path) throw new Error("Open a path first.");
   if (pathIsStarted(path)) {
     return {
@@ -475,6 +486,7 @@ async function runRestartPath(ctx: ChatDispatchContext): Promise<ChatDispatchRes
 
 async function runStartPath(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
   const path = ctx.path ?? (await getLatestPath(ctx.project.id));
+  ctx.signal?.throwIfAborted();
   if (!path) throw new Error("Open a path first.");
   const threadId = path.threadId || pathThreadId(path.id);
   const title = pathThreadTitle(path);
@@ -487,6 +499,7 @@ async function runStartPath(ctx: ChatDispatchContext): Promise<ChatDispatchResul
     title,
     pathId: path.id,
   });
+  ctx.signal?.throwIfAborted();
   if (!pathIsStarted(path) || path.threadId !== threadId) {
     await patchStudyPath(ctx.project.id, path.id, { started: true, threadId });
   }
@@ -519,6 +532,7 @@ async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResul
   const active = ctx.active;
   if (!active) throw new Error("Open a set or sheet first.");
   const sheet = await getStudySheet(ctx.project.id, active.id);
+  ctx.signal?.throwIfAborted();
   if (!sheet) throw new Error("Those notes are gone.");
   ctx.onStatus?.("Updating notes…");
   ctx.onNotesEvent?.({ status: "Updating notes…", title: sheet.title });
@@ -542,7 +556,8 @@ async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResul
   };
 }
 
-export const CHAT_TOOL_HANDLERS: Record<ChatToolName, ChatToolHandler> = {
+/** Server context tools stay in the model loop and have no client handler. */
+export const CHAT_TOOL_HANDLERS: Partial<Record<ChatToolName, ChatToolHandler>> = {
   answer: { run: runAnswer },
   clarify: { run: runClarify },
   illustrate: { run: runIllustrate },
@@ -593,8 +608,39 @@ export async function dispatchChatTool(ctx: ChatDispatchContext): Promise<ChatDi
   if (!handler) {
     return { intent: "ask", content: ctx.text };
   }
-  return chatToolDefinition(ctx.tool.name).execute({
-    call: ctx.tool,
-    invoke: async () => handler.run(ctx),
-  }) as Promise<ChatDispatchResult>;
+  let active = true;
+  const ka = promptIsKa(ctx.prompt);
+  const report = (phase: ToolStatusUpdate["phase"], response?: unknown) => ctx.onToolStatus?.({
+    id: `dispatch-${ctx.tool.name}`,
+    toolName: ctx.tool.name,
+    phase,
+    status: toolStatusText({ call: ctx.tool, phase, response }, ka),
+    detail: ctx.tool.args.query || ctx.tool.args.topic,
+  });
+  report("start");
+  ctx.onStatus?.(toolStatusText({ call: ctx.tool, phase: "start" }, ka));
+  try {
+    const result = await withToolTimeout((signal) => chatToolDefinition(ctx.tool.name).execute({
+      call: ctx.tool,
+      invoke: async () => handler.run({
+        ...ctx,
+        signal,
+        onStatus: (status) => { if (active && !signal.aborted) ctx.onStatus?.(status); },
+        onNotesEvent: (event) => { if (active && !signal.aborted) ctx.onNotesEvent?.(event); },
+        onPathEvent: (event) => { if (active && !signal.aborted) ctx.onPathEvent?.(event); },
+      }),
+    }) as Promise<ChatDispatchResult>, ctx.signal);
+    ctx.onStatus?.(toolStatusText({ call: ctx.tool, phase: "complete", response: result }, ka));
+    report("complete", result);
+    return result;
+  } catch {
+    if (ctx.tool.name === "create_sheet" || ctx.tool.name === "edit_sheet") ctx.onNotesEvent?.(null);
+    if (ctx.tool.name === "create_path") ctx.onPathEvent?.(null);
+    ctx.signal?.throwIfAborted();
+    ctx.onStatus?.(toolStatusText({ call: ctx.tool, phase: "error" }, ka));
+    report("error");
+    return { intent: "ask", content: stripArtifactMarkup(ctx.text).trim() || toolFallbackText(ka) };
+  } finally {
+    active = false;
+  }
 }

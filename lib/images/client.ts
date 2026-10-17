@@ -28,13 +28,14 @@ export function toImageAttach(hit: ChatImageHit): ImageSearchHit | null {
   };
 }
 
-export async function searchImagesClient(query: string, count = IMAGE_SEARCH_DEFAULT): Promise<ChatImageHit[]> {
+export async function searchImagesClient(query: string, count = IMAGE_SEARCH_DEFAULT, options: { signal?: AbortSignal } = {}): Promise<ChatImageHit[]> {
   let response: Response;
   try {
     response = await fetch("/api/images/search", {
       method: "POST",
       headers: await authHeaders(),
       body: JSON.stringify({ query, count }),
+      signal: options.signal,
     });
   } catch {
     throw new ImageSearchRequestError("Could not reach image search.", 0);

@@ -53,6 +53,8 @@ import PencilEdit01Icon from "../../node_modules/@hugeicons/core-free-icons/dist
 import PinIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PinIcon.js";
 import PlusSignIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PlusSignIcon.js";
 import Search01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Search01Icon.js";
+import SearchVisualIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SearchVisualIcon.js";
+import BulbIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/BulbIcon.js";
 import Settings01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Settings01Icon.js";
 import Share01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Share01Icon.js";
 import Shield01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Shield01Icon.js";
@@ -112,6 +114,8 @@ const ICONS = {
   minimize: Minimize01Icon,
   library: LibraryIcon,
   search: Search01Icon,
+  imageSearch: SearchVisualIcon,
+  bulb: BulbIcon,
   send: MoveUpIcon,
   appearance: PaintBoardIcon,
   usage: ChartColumnIcon,

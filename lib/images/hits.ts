@@ -1,4 +1,5 @@
 import { snapWikiThumbUrl, type ImageSearchHit } from "@/lib/images/types";
+import { imageGalleryId } from "@/lib/images/galleries";
 import type { ChatImageHit } from "@/types/chat";
 
 /** Shared by the server tool, SSE reader, and image search client. */
@@ -26,6 +27,10 @@ export function parseSearchHits(value: unknown): ChatImageHit[] {
       (typeof row.title === "string" ? row.title.trim() : "");
     const source = typeof row.source === "string" ? row.source.trim() : "";
     if (!url || !/^https:\/\//i.test(url)) return [];
-    return [toChatImageHit({ url, thumbnail: /^https:\/\//i.test(thumbnail) ? thumbnail : url, alt, source: source || "web" })];
+    const galleryId = imageGalleryId(row.galleryId);
+    return [{
+      ...toChatImageHit({ url, thumbnail: /^https:\/\//i.test(thumbnail) ? thumbnail : url, alt, source: source || "web" }),
+      ...(galleryId ? { galleryId } : {}),
+    }];
   });
 }

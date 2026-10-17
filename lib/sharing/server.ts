@@ -4,6 +4,7 @@ import { getAdminFirestore } from "@/lib/server/firestore-admin";
 import { collectThreadReferences } from "@/lib/sharing/thread-references";
 import { mapNoteRecord } from "@/lib/notes/compat";
 import { storedObjectName } from "@/lib/materials/storage-path";
+import { imageGalleryId } from "@/lib/images/galleries";
 import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode } from "@/types/chat";
 import type { Material, MaterialImage, MaterialStatus, MaterialType } from "@/types/material";
 import type { SharedChatSnapshot } from "@/lib/sharing/types";
@@ -54,6 +55,7 @@ function images(value: unknown): ChatImageHit[] | undefined {
       source: text(row.source),
       license: text(row.license),
       credit: text(row.credit),
+      ...(imageGalleryId(row.galleryId) ? { galleryId: imageGalleryId(row.galleryId) } : {}),
       ...(materialId ? { materialId, kind: "upload" as const } : {}),
     }];
   });

@@ -139,7 +139,11 @@ export function SharedChatView({ shareId }: { shareId: string }) {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      {message.content.trim() ? <RichContent text={message.content} /> : null}
+                      {message.content.trim() || message.images?.length ? (
+                        <RichContent text={message.content} images={message.images} onOpenImageUpload={(image) => {
+                          if (image.materialId) open({ kind: "material", id: image.materialId });
+                        }} />
+                      ) : null}
                       {message.artifact?.kind === "sheet" || message.artifact?.kind === "study_sheet" ? (
                         <button
                           type="button"

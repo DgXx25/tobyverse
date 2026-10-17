@@ -18,7 +18,8 @@ export type GenerateOptions = {
   /** Force one function only for an explicit slash/chip selection. */
   toolChoice?: ChatToolName;
   /** Server-owned tool execution; artifact tools still dispatch on the client. */
-  executeTool?: (call: ChatToolCall) => Promise<unknown>;
+  executeTool?: (call: ChatToolCall, options?: { signal: AbortSignal }) => Promise<unknown>;
+  signal?: AbortSignal;
   images?: GenerateImagePart[];
   usage?: AiUsageReporter;
 };

@@ -111,6 +111,8 @@ export type ChatSource = {
 export type ChatSourceRef = Omit<ChatSource, "text"> & { snippet: string };
 
 export type ChatImageHit = {
+  /** Server-generated search group, referenced by optional inline image-gallery fences. */
+  galleryId?: string;
   url: string;
   thumb: string;
   title: string;
@@ -130,6 +132,8 @@ export type ChatAttachment = {
   type: string;
   materialId?: string;
   storagePath?: string;
+  /** Actual stored bytes, used to release a standalone chat image's storage quota. */
+  sizeBytes?: number;
 };
 
 /** Context the model can use later (materials, knowledge bank). */

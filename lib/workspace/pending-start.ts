@@ -2,7 +2,10 @@ import type { ComposerIntent } from "@/lib/composer/intent";
 import { DEFAULT_COMPOSER_INTENT } from "@/lib/composer/intent";
 import { isComposerSkill, type ComposerSkill } from "@/lib/composer/slash";
 import { asChatMode } from "@/lib/core/chat-modes";
-import type { ChatMode } from "@/types/chat";
+import type { ChatAttachment, ChatMode } from "@/types/chat";
+import { compactChatAttachment } from "@/lib/composer/attach";
+
+export type StartIngestResult = { materialIds: string[]; attachments: ChatAttachment[] };
 
 export type PendingAttachment =
   | { id: string; kind: "file"; file: File }
@@ -12,6 +15,7 @@ export type PendingAttachment =
 export type PendingStart = {
   prompt: string;
   materialIds: string[];
+  attachments?: ChatAttachment[];
   intent?: ComposerIntent;
   skill?: ComposerSkill;
   mode?: ChatMode;
@@ -27,6 +31,7 @@ type StoredStart = {
   skill?: ComposerSkill;
   mode?: ChatMode;
   materialIds: string[];
+  attachments?: ChatAttachment[];
   awaitingIngest?: boolean;
   userMessageId?: string;
 };
@@ -38,14 +43,18 @@ function parsePendingStart(raw: string): PendingStart | null {
     ? stored.materialIds.filter((id) => typeof id === "string")
     : [];
   const awaitingIngest = stored.awaitingIngest === true;
+  const attachments = Array.isArray(stored.attachments)
+    ? stored.attachments.flatMap((item) => item && typeof item.title === "string" ? compactChatAttachment(item) ?? [] : [])
+    : [];
   const userMessageId = typeof stored.userMessageId === "string" ? stored.userMessageId : undefined;
-  if (!prompt.trim() && materialIds.length === 0 && !awaitingIngest) return null;
+  if (!prompt.trim() && materialIds.length === 0 && attachments.length === 0 && !awaitingIngest) return null;
   return {
     prompt,
     intent: stored.intent ?? DEFAULT_COMPOSER_INTENT,
     skill: isComposerSkill(stored.skill) ? stored.skill : undefined,
     mode: stored.mode ? asChatMode(stored.mode) : undefined,
     materialIds,
+    attachments,
     awaitingIngest,
     userMessageId,
   };
@@ -59,6 +68,7 @@ export function stashPendingStart(projectId: string, start: PendingStart): void 
     skill: start.skill,
     mode: start.mode,
     materialIds: start.materialIds,
+    attachments: start.attachments,
     awaitingIngest: start.awaitingIngest,
     userMessageId: start.userMessageId,
   };

@@ -1,10 +1,12 @@
 import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/gemini";
-import { eligibleChatToolNames, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
+import { eligibleChatToolNames, isInternalTool, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
+import { toolStatusText, withToolTimeout, type ToolExecutionStatus } from "@/lib/ai/tool-execution";
 import { DEFAULT_AI_PROVIDER, DEFAULT_GEMINI_MODEL, isAdminOnlyAiModel, isKnownAiModel, isEnabledProvider } from "@/lib/ai/catalog";
 import { FREE_CAPS } from "@/lib/account/plan";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
+import { createSkillLoader } from "@/lib/skills/server";
 import { parseChatArtifact } from "@/lib/artifacts/active";
 import { fallbackToolAfterProvider, forcedToolForRequest } from "@/lib/chat/tool-routing";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
@@ -332,36 +334,65 @@ export async function POST(request: Request) {
           Boolean(getAIProvider().generateToolStream) &&
           chatModeSendsToolDeclarations(mode);
         let toolSent = false;
+        let imagesSent = false;
         let imageResults: ChatImageHit[] | undefined;
-        const executeTool = async (call: ChatToolCall): Promise<unknown> => {
-          if (call.name !== "search_images") return { ok: true, tool: call.name };
-          if (guestContext.hintAsk || guestContext.examAsk) return { images: [], error: "This turn is a chat exercise or hint, not an image request." };
-          imageResults ??= [];
-          if (!allowImageSearch(session.uid)) return { images: [], error: "Image search rate limit reached. Answer using the available context." };
+        const loadSkill = createSkillLoader();
+        let usedContextTool = false;
+        let toolSequence = 0;
+        const reportToolStatus = (event: ToolExecutionStatus, id: string) => {
+          controller.enqueue(encodeSse({
+            type: "tool_status",
+            id,
+            status: toolStatusText(event, /[\u10A0-\u10FF]/.test(prompt)),
+            toolName: event.call.name,
+            phase: event.phase,
+            detail: (event.call.args.query || event.call.args.topic || (event.call.name === "load_skill" ? event.call.args.id : "") || "").trim().slice(0, 160) || undefined,
+          }));
+        };
+        const executeTool = async (call: ChatToolCall, options?: { signal: AbortSignal }): Promise<unknown> => {
+          const id = `tool-${++toolSequence}`;
+          if (isInternalTool(call.name)) usedContextTool = true;
+          reportToolStatus({ call, phase: "start" }, id);
+          if (call.name === "search_images") imageResults ??= [];
           try {
-            const query = call.args.query?.trim() || prompt;
-            const statusQuery = query.slice(0, 72);
-            const searching = /[\u10A0-\u10FF]/.test(prompt)
-              ? `ვეძებ ფოტოებს „${statusQuery}“…`
-              : `Searching photos for “${statusQuery}”…`;
-            controller.enqueue(encodeSse({ status: searching }));
-            const hits = await searchWebImages(query, clampImageCount(call.args.count), { usage: usageReporter });
-            const found = hits.map(toChatImageHit);
-            const seen = new Set(imageResults.map((hit) => hit.url));
-            for (const hit of found) {
-              if (!seen.has(hit.url)) imageResults.push(hit);
-              seen.add(hit.url);
-            }
-            return { images: found.map(({ title, source }) => ({ title, source })) };
+            const response = await withToolTimeout(async (signal) => {
+              if (call.name === "load_skill") return loadSkill(call.args.id);
+              // Artifact creation stays in the existing client dispatcher.
+              if (call.name !== "search_images") return { ok: true, tool: call.name, deferred: !toolStreamsText(call.name) };
+              if (guestContext.hintAsk || guestContext.examAsk) throw new Error("This turn is a chat exercise or hint.");
+              if (!allowImageSearch(session.uid)) throw new Error("Image search rate limit reached.");
+              const query = call.args.query?.trim() || prompt;
+              const hits = await searchWebImages(query, clampImageCount(call.args.count), { usage: usageReporter, signal });
+              signal.throwIfAborted();
+              const galleryId = `gallery-${crypto.randomUUID()}`;
+              const found = hits.map((hit) => ({ ...toChatImageHit(hit), galleryId }));
+              const seen = new Set<string>();
+              for (const hit of found) {
+                if (!seen.has(hit.url)) imageResults!.push(hit);
+                seen.add(hit.url);
+              }
+              return { galleryId, images: found.map(({ title, source }) => ({ title, source })) };
+            }, options?.signal ?? request.signal);
+            const failed = response && typeof response === "object" && "ok" in response && response.ok === false;
+            reportToolStatus({ call, phase: failed ? "error" : "complete", response }, id);
+            return response;
           } catch (error) {
-            console.warn("[chat-images] search failed", error instanceof Error ? error.message : error);
-            return { images: [], error: "Image search unavailable. Answer using the available context." };
+            request.signal.throwIfAborted();
+            reportToolStatus({ call, phase: "error" }, id);
+            console.warn("[chat-tool] execution failed", call.name, error instanceof Error ? error.message : error);
+            return { ok: false, images: [], error: "Tool unavailable. Answer in text using the available context; do not retry this tool." };
           }
         };
         const sendImageTool = async (tool: ChatToolCall) => {
           if (imageResults === undefined) await executeTool(tool);
-          controller.enqueue(encodeSse({ tool, images: imageResults ?? [] }));
+          controller.enqueue(encodeSse({ tool, ...(!imagesSent ? { images: imageResults ?? [] } : {}) }));
+          imagesSent = true;
           toolSent = true;
+        };
+        const sendCompletedImages = () => {
+          if (imageResults === undefined || imagesSent) return;
+          controller.enqueue(encodeSse({ images: imageResults }));
+          imagesSent = true;
         };
         let pendingProviderText = "";
         const explicit = guestContext.hintAsk || guestContext.examAsk
@@ -381,7 +412,10 @@ export async function POST(request: Request) {
               pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
             });
         if (explicit?.name === "clarify") {
+          const id = `tool-${++toolSequence}`;
+          reportToolStatus({ call: explicit, phase: "start" }, id);
           const question = explicit.args.question?.trim();
+          reportToolStatus({ call: explicit, phase: "complete" }, id);
           if (question) controller.enqueue(encodeSse({ delta: question }));
           controller.enqueue(encodeSse({ tool: explicit }));
           controller.enqueue(encodeSse({ done: true }));
@@ -403,6 +437,7 @@ export async function POST(request: Request) {
             images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
             usage: usageReporter,
             executeTool,
+            signal: request.signal,
           })) {
             if (part.tool && !raw) {
               raw = part.tool;
@@ -421,8 +456,9 @@ export async function POST(request: Request) {
                 controller.enqueue(encodeSse({ tool: preview }));
               }
             }
+            sendCompletedImages();
             const preview = raw;
-            const waitForTool = Boolean(guestContext.priorClarify && guestContext.pendingKind);
+            const waitForTool = Boolean(guestContext.priorClarify && guestContext.pendingKind && !usedContextTool);
             if (part.text && (!waitForTool || preview) && (!preview || toolStreamsText(preview.name))) {
               if (preview) {
                 streamed = true;
@@ -435,7 +471,11 @@ export async function POST(request: Request) {
         }
 
         if (!raw) {
-          raw = explicit ?? fallbackToolAfterProvider({
+          // A context tool followed by final text is an answer, not a zero-tool routing miss.
+          const guidedAnswer: ChatToolCall | null = usedContextTool && pendingProviderText.trim()
+            ? { name: "answer", args: {} }
+            : null;
+          raw = explicit ?? guidedAnswer ?? fallbackToolAfterProvider({
             prompt,
             mode,
             active: guestContext.activeArtifact,
@@ -469,6 +509,7 @@ export async function POST(request: Request) {
           }
         }
 
+        sendCompletedImages();
         let tool = raw ?? { name: "answer" as const, args: {} };
         if (session.anonymous) tool = gateGuestChatTool(tool);
         if (guestContext.hintAsk) {
@@ -482,15 +523,17 @@ export async function POST(request: Request) {
             streamed = true;
             controller.enqueue(encodeSse({ delta: tool.args.question }));
           } else {
-            const captionSystem =
+            const answerSystem =
               tool.name === "search_images"
-                ? `${systemInstruction}\n\nThis turn already called search_images. Write only one short line in the user's language introducing the photos. Nothing else. No URLs. No lists.`
+                ? imageResults?.length
+                  ? `${systemInstruction}\n\nCompleted image search results (reference data): ${JSON.stringify(imageResults.map(({ galleryId, title, source }) => ({ galleryId, title, source })))}\nAnswer the user's request using these completed results. You may place a gallery anywhere among prose and available native or visual blocks with an image-gallery code fence containing {"galleryId":"the returned ID"}. Use only returned gallery IDs and keep image URLs out of the answer. Unplaced results appear after the answer.`
+                  : `${systemInstruction}\n\nImage search returned no images. Answer in text using the available context and briefly mention that images are unavailable.`
                 : systemInstruction;
             for await (const delta of generateTextStream(prompt, {
               model: modelId,
               mode,
               history,
-              systemInstruction: captionSystem,
+              systemInstruction: answerSystem,
               images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
               usage: usageReporter,
             })) {

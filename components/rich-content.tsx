@@ -16,12 +16,15 @@ import { MixedText, TableCellRich, withInlineRich } from "@/components/visuals/m
 import { htmlToMarkdown } from "@/lib/visuals/html-rich";
 import { ChatBlock } from "@/components/workspace/chat-block";
 import { renderFormula } from "@/lib/visuals/catalog";
-import { protectInlineMath, restoreInlineMath, scrubLeakedMarkup, splitCodeFences, splitDisplayMath } from "@/lib/visuals/math";
+import { protectInlineMath, restoreInlineMath, scrubLeakedMarkup, splitDisplayMath } from "@/lib/visuals/math";
 import { CitationMark } from "@/components/workspace/citations";
 import { linkCitations, sourceNumberFromHref } from "@/lib/rag/sources";
 import { isInlineMarkHref, remarkInlineMarks } from "@/lib/visuals/markdown-marks";
 import { layoutChatTable, prepareChatMarkdown, splitMarkdownTables } from "@/lib/visuals/markdown-table";
 import type { VisualBlock } from "@/types/visual";
+import type { ChatImageHit } from "@/types/chat";
+import { layoutImageGalleries, type ImageGalleryPart } from "@/lib/images/galleries";
+import { ImageGallery } from "@/components/workspace/image-gallery";
 
 const HighlightedCode = dynamic(() => import("@/components/workspace/highlighted-code").then((mod) => mod.HighlightedCode), {
   loading: () => <code>…</code>,
@@ -34,10 +37,12 @@ type Segment =
   | { kind: "math"; value: string }
   | { kind: "code"; lang: string; text: string }
   | { kind: "visual"; block: VisualBlock }
-  | { kind: "toby"; block: ParsedChatBlock };
+  | { kind: "toby"; block: ParsedChatBlock }
+  | ImageGalleryPart;
 
-function splitRichContent(text: string): Segment[] {
-  return splitCodeFences(prepareChatMarkdown(text)).flatMap((part): Segment[] => {
+function splitRichContent(parts: ReturnType<typeof layoutImageGalleries>["segments"]): Segment[] {
+  return parts.flatMap((part): Segment[] => {
+    if (part.kind === "gallery") return [part];
     if (part.kind === "md") {
       return splitMarkdownTables(htmlToMarkdown(part.text)).flatMap((piece): Segment[] => {
         if (piece.kind === "table") return [piece];
@@ -235,17 +240,25 @@ function segmentKey(segment: Segment, index: number): string {
   if (segment.kind === "math") return `math-${index}`;
   if (segment.kind === "code") return `code-${index}-${segment.lang}`;
   if (segment.kind === "toby") return `toby-${index}-${segment.block.type}`;
+  if (segment.kind === "gallery") return `gallery-${segment.galleryId}`;
   return `visual-${index}`;
 }
 
 export function RichContent({
   text,
   streaming = false,
+  images = [],
+  ka = false,
+  onOpenImageUpload,
 }: {
   text: string;
   streaming?: boolean;
+  images?: ChatImageHit[];
+  ka?: boolean;
+  onOpenImageUpload?: (image: ChatImageHit) => void;
 }) {
-  const segments = splitRichContent(text);
+  const layout = layoutImageGalleries(prepareChatMarkdown(text), images);
+  const segments = splitRichContent(layout.segments);
   const liveIndex = streaming ? segments.length - 1 : -1;
   const frozen = streaming ? Math.max(0, liveIndex) : segments.length;
   const seenFrozen = useRef(0);
@@ -265,6 +278,13 @@ export function RichContent({
         const key = segmentKey(segment, index);
         if (segment.kind === "md") {
           return <MarkdownBody key={key} text={segment.text} streaming={live && streaming} />;
+        }
+        if (segment.kind === "gallery") {
+          return (
+            <div key={key} className={`my-5 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
+              <ImageGallery images={segment.images} ka={ka} onOpenUpload={onOpenImageUpload} />
+            </div>
+          );
         }
         if (segment.kind === "table") {
           return (
@@ -315,6 +335,11 @@ export function RichContent({
           </div>
         );
       })}
+      {!streaming && layout.remaining.length > 0 ? (
+        <div className="my-5 first:mt-0 last:mb-0">
+          <ImageGallery images={layout.remaining} ka={ka} onOpenUpload={onOpenImageUpload} />
+        </div>
+      ) : null}
       {streaming && (
         <span className="streaming-caret ml-0.5 inline-block h-4 w-1.5 translate-y-px bg-foreground align-middle" />
       )}

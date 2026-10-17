@@ -15,12 +15,14 @@ import type { AiCallUsage } from "@/types/billing";
 import {
   chatToolDefinition,
   eligibleChatToolDefinitions,
+  isArtifactTool,
   toGeminiTools,
   type ChatStreamPart,
   type ChatToolJsonProperty,
   type ChatToolName,
 } from "@/lib/ai/tools";
 import { runToolLoop } from "@/lib/ai/tool-loop";
+import { toolFallbackText } from "@/lib/ai/tool-execution";
 
 type GeminiUsageMetadata = {
   promptTokenCount?: number;
@@ -235,8 +237,9 @@ export class GeminiProvider implements AIProvider {
     const contents: Content[] = [...toHistory(prompt, options.history)];
     const firstParts = toPromptParts(prompt, options.images);
     const result = await runToolLoop({
-      maxRounds: options.toolChoice ? 1 : 3,
-      stopAfterTool: (call) => call.name === "search_images",
+      maxRounds: options.toolChoice ? 1 : 4,
+      stopAfterTool: (call) => isArtifactTool(call.name),
+      signal: options.signal,
       callModel: async ({ round, functionResponses }) => {
         const message: Content =
           round === 1
@@ -260,38 +263,49 @@ export class GeminiProvider implements AIProvider {
         reportGeminiResponse(options, model, turn.response);
         return { parts: loopParts(replay) };
       },
-      execute: async (call) =>
+      execute: async (call, { signal }) =>
         chatToolDefinition(call.name).execute({
           call,
-          invoke: options.executeTool ?? (async (current) => ({ ok: true, tool: current.name })),
+          invoke: async (current) => options.executeTool
+            ? options.executeTool(current, { signal })
+            : { ok: true, tool: current.name },
         }),
     });
-    if (result.tool) yield { tool: result.tool };
-    if (result.tool?.name === "search_images") {
+    if (result.failed) yield { tool: { name: "answer", args: {} } };
+    else if (result.tool) yield { tool: result.tool };
+    if (!result.text && result.functionResponses.length && (!result.tool || !isArtifactTool(result.tool.name))) {
       // Keep the raw signed function-call replay, then supply the actual result.
       // Override ANY from an explicit image selection so this call can answer in text.
-      const answer = await generative.generateContentStream({
-        contents: [
-          ...contents,
-          {
-            role: "user",
-            parts: [
-              ...result.functionResponses.map(({ name, response }) => ({
+      let wrote = false;
+      try {
+        const answer = await generative.generateContentStream({
+          contents: [
+            ...contents,
+            {
+              role: "user",
+              parts: result.functionResponses.map(({ name, response }) => ({
                 functionResponse: {
                   name,
                   response: response && typeof response === "object" ? response as object : { result: response ?? null },
                 },
               })),
-            ],
-          },
-        ],
-        toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.NONE } },
-      });
-      for await (const chunk of answer.stream) {
-        const text = loopParts(chunk.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("");
-        if (text) yield { text };
+            },
+          ],
+          toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.NONE } },
+        });
+        for await (const chunk of answer.stream) {
+          const text = loopParts(chunk.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("");
+          if (text) {
+            wrote = true;
+            yield { text };
+          }
+        }
+        reportGeminiResponse(options, model, await answer.response);
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        if (!result.failed) throw error;
       }
-      reportGeminiResponse(options, model, await answer.response);
+      if (!wrote) yield { text: toolFallbackText(/[\u10A0-\u10FF]/.test(prompt)) };
       return;
     }
     if (result.text) yield { text: result.text };

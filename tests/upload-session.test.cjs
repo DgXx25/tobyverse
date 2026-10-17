@@ -11,6 +11,7 @@ let nextId = 0;
 let cloudBytes = 0;
 let cloudCancelled = false;
 let deleted = 0;
+let normalizedInputs = [];
 const cap = 1024 * 1024 * 1024;
 const userPath = 'users/alice';
 
@@ -49,7 +50,7 @@ const mocks = {
   '@/lib/auth': { requireSignedInUser: async () => ({ uid: 'alice', getIdToken: async () => 'alice' }) },
   '@/lib/firestore': { materialStoragePath: (...segments) => segments.join('/') },
   '@/lib/materials/image-normalization': {
-    normalizeImageUpload: async () => ({ buffer: Buffer.alloc(10), filename: 'photo.jpg', mime: 'image/jpeg', converted: true }),
+    normalizeImageUpload: async (input) => { normalizedInputs.push(input); return { buffer: Buffer.alloc(10), filename: 'photo.jpg', mime: 'image/jpeg', converted: true }; },
   },
   '@/lib/storage-gcs': {
     startGcsResumableUpload: async () => 'https://storage.googleapis.com/private-session',
@@ -81,7 +82,19 @@ const request = (method, id = '', body, extra = {}) => new Request(`http://local
 async function begin(sizeBytes = 50 * 1024 * 1024, storagePath = objectPath, contentType = 'application/pdf') {
   return route.POST(request('POST', '', JSON.stringify({ path: storagePath, sizeBytes, contentType, reservePool: true })));
 }
-test.beforeEach(() => { docs.clear(); docs.set(userPath, { usage: { storageBytes: 1024 } }); cloudBytes = 0; cloudCancelled = false; deleted = 0; });
+test.beforeEach(() => { docs.clear(); docs.set(userPath, { usage: { storageBytes: 1024 } }); cloudBytes = 0; cloudCancelled = false; deleted = 0; normalizedInputs = []; });
+
+test('chunked chat photos receive vision preparation and charge the final optimized byte count', async () => {
+  const chatPath = 'users/alice/projects/project/materials/chat-image-test/photo.png';
+  const { id } = await (await begin(100, chatPath, 'image/png')).json();
+  const response = await route.PUT(request('PUT', id, new Blob([new Uint8Array(100)]), { 'x-upload-offset': '0' }));
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(normalizedInputs[0].chatImage, true);
+  assert.equal(result.contentType, 'image/jpeg');
+  assert.equal(result.sizeBytes, 10);
+  assert.equal(docs.get(userPath).usage.storageBytes, 1034);
+});
 
 test('50 MiB passes through route in chunks; quota charges once only on completion', async () => {
   const response = await begin();

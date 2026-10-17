@@ -1,3 +1,5 @@
+import { formatRuntimeSkillCatalog, RUNTIME_SKILL_CATALOG } from "@/lib/skills/catalog";
+
 export type ChatToolArgs = {
   topic?: string;
   question?: string;
@@ -43,6 +45,8 @@ export type ChatToolDefinition<Name extends string = string> = {
   parameters: ChatToolJsonSchema;
   /** If true, the client shows a card and the route does not stream body text. */
   card?: boolean;
+  /** Read-only server context tool; its result stays inside the model loop. */
+  internal?: boolean;
   execute: (context: ChatToolExecutionContext) => Promise<unknown>;
 };
 
@@ -61,6 +65,17 @@ function defineTool<const Name extends string>(
 }
 
 export const CHAT_TOOL_DEFINITIONS = [
+  defineTool({
+    name: "load_skill",
+    internal: true,
+    description:
+      "Read an optional bundled subject guide when the user explicitly names it or a nontrivial task benefits from its methods or examples. Skip unnecessary lookups for greetings, translations, simple arithmetic, or result-only requests. Guides do not override the core rules or the current request and never authorize a lesson or quiz. Load at most two guides per turn; never reload one already returned. Available guides (name and description only):\n" + formatRuntimeSkillCatalog(),
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "Exact guide name from the catalog.", enum: RUNTIME_SKILL_CATALOG.map(({ name }) => name) } },
+      required: ["id"],
+    },
+  }),
   defineTool({
     name: "answer",
     description:
@@ -286,7 +301,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "search_images",
     description:
-      "Find external photos, maps, charts, or diagrams only when the user explicitly asks for them or refers to an attached figure. Pass the full topic in the user's language and optionally cap the result count. After the search, introduce the images briefly and answer the user's question; results render separately in a gallery. Do not print raw results or image URLs. Use illustrate when catalog blocks are a better fit.",
+      'Find external photos, maps, charts, or diagrams only when the user explicitly asks for them or refers to an attached figure. Pass the full topic in the user\'s language and optionally cap the result count. Each completed search returns a galleryId with image titles and sources. You may place that gallery anywhere in your answer with an image-gallery code fence containing {"galleryId":"the returned ID"}. Mix prose, galleries, and available native or visual blocks in whatever order serves the request. Omit the placement fence to show results after the answer. Use only returned gallery IDs; do not print raw results or image URLs. Use illustrate when catalog blocks are a better fit.',
     parameters: {
       type: "object",
       properties: {
@@ -306,6 +321,10 @@ export const INTERCEPT_ONLY_CHAT_TOOLS = [] as const satisfies readonly ChatTool
 
 export function isChatToolName(value: unknown): value is ChatToolName {
   return typeof value === "string" && (CHAT_TOOLS as readonly string[]).includes(value);
+}
+
+export function isInternalTool(name: ChatToolName): boolean {
+  return Boolean(chatToolDefinition(name).internal);
 }
 
 export function toolStreamsText(name: ChatToolName): boolean {

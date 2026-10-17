@@ -9,20 +9,23 @@ import { HeadlineVerb } from "@/components/workspace/headline-verb";
 import { GuestGoogleCta } from "@/components/guest-google-cta";
 import { createChunkBuffer } from "@/lib/ai/chunk-stream";
 import { readChatSse } from "@/lib/ai/sse";
+import { upsertToolStatus, type ToolStatusUpdate } from "@/lib/ai/tool-execution";
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { dispatchChatTool, dispatchStatus, imageFailLine, imageFoundLine, analysingStatus, thinkingStatus } from "@/lib/chat/dispatch";
 import { latestOpenAsk, splitTeachingExam } from "@/lib/chat/prompt-ask";
 import { addChatMessage, allocateChatMessageId, ensureChatThread, patchChatMessage, subscribeChatMessages } from "@/lib/chats";
 import { DEFAULT_CHAT_THREAD_ID, DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
-import { pickChatFigures, shouldAttachChatFigures } from "@/lib/materials/figures";
+import { figureAttachmentsForTurn, pickChatFigures, shouldAttachChatFigures } from "@/lib/materials/figures";
 import { listMaterials, removeMaterial, waitForMaterialPreviews } from "@/lib/materials";
-import { ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl, urlsInText } from "@/lib/materials/ingest-client";
+import { ingestMaterialPaste, ingestMaterialUrl, urlsInText } from "@/lib/materials/ingest-client";
+import { discardChatImage, ingestComposerFile } from "@/lib/composer/attach-client";
 import { newChipId, attachmentsFromMaterials, snapshotChatAttachments } from "@/lib/composer/attach";
 import { patchComposerChip } from "@/lib/composer/chips";
 import {
   peekPendingStart,
   takePendingStart,
   type PendingStart,
+  type StartIngestResult,
 } from "@/lib/workspace/pending-start";
 import { peekOpeningPending, takeProjectStartIngest, waitForOpeningProject } from "@/lib/workspace/start-project";
 import { authHeaders } from "@/lib/api/client";
@@ -71,11 +74,7 @@ import { ChatSetCard } from "@/components/exercises/chat-set";
 import { ImageGallery } from "@/components/workspace/image-gallery";
 import { LinkifiedText } from "@/components/workspace/linkified-text";
 import { StatusWait, formatWorked } from "@/components/workspace/status-wait";
-import {
-  generateStatusText,
-  uploadStatusText,
-  type ComposerStatusState,
-} from "@/components/workspace/composer-status";
+import { ToolActivity } from "@/components/workspace/tool-activity";
 import { CitationProvider } from "@/components/workspace/citations";
 import { usedSources } from "@/lib/rag/sources";
 import { useShell } from "@/components/workspace/shell-context";
@@ -100,6 +99,7 @@ type StreamState = {
   content: string;
   intent: ComposerIntent;
   status?: string;
+  toolActivity?: ToolStatusUpdate[];
   startedAt?: number;
   artifact?: ChatArtifact | null;
   images?: ChatImageHit[];
@@ -432,6 +432,18 @@ export function ProjectChat({
   const [canRetry, setCanRetry] = useState(false);
   const [stream, setStream] = useState<StreamState | null>(openingUi.stream);
   const [chips, setChips] = useState<ComposerChip[]>([]);
+  const removedChipIds = useRef(new Set<string>());
+  const unsentChatImages = useRef(new Map<string, ChatAttachment>());
+  const uploadEpoch = useRef(0);
+  useEffect(() => {
+    const owned = unsentChatImages.current;
+    uploadEpoch.current += 1;
+    return () => {
+      uploadEpoch.current += 1;
+      for (const image of owned.values()) void discardChatImage(image).catch(() => undefined);
+      owned.clear();
+    };
+  }, [project.id, chatThreadId]);
   const [suggest, setSuggest] = useState<{ messageId: string; kind: "practice" | "exam" | "sheet" | "path" } | null>(null);
   const [suggestedFollowups, setSuggestedFollowups] = useState<{ messageId: string; prompts: string[] } | null>(null);
   const [followup, setFollowup] = useState<{ kind: "sheet" | "practice"; ka: boolean; since: number } | null>(null);
@@ -719,7 +731,9 @@ export function ProjectChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, isMainThread, chatThreadId]);
 
-  async function addChip(start: ComposerChip, work: () => Promise<string>) {
+  async function addChip(start: ComposerChip, work: () => Promise<string | ChatAttachment>) {
+    const epoch = uploadEpoch.current;
+    removedChipIds.current.delete(start.id);
     setChips((current) =>
       current.some((chip) => chip.id === start.id)
         ? patchComposerChip(current, start.id, { ...start, status: "uploading", error: undefined })
@@ -731,13 +745,23 @@ export function ProjectChat({
     };
     setCanRetry(true);
     try {
-      const materialId = await work();
-      const latest = await listMaterials(project.id);
+      const result = await work();
+      const materialId = typeof result === "string" ? result : result.materialId;
+      if (typeof result !== "string" && (removedChipIds.current.delete(start.id) || epoch !== uploadEpoch.current)) {
+        await discardChatImage(result);
+        return;
+      }
+      if (typeof result !== "string") unsentChatImages.current.set(start.id, result);
+      const latest = materialId ? await listMaterials(project.id) : [];
       const match = latest.find((item) => item.id === materialId);
       setChips((current) =>
         current.map((chip) =>
           chip.id === start.id
-            ? { ...chip, status: "ready", materialId, storagePath: match?.storagePath }
+            ? {
+                ...chip, status: "ready", materialId,
+                storagePath: typeof result === "string" ? match?.storagePath : result.storagePath,
+                ...(typeof result !== "string" ? { type: result.type, size: result.sizeBytes } : {}),
+              }
             : chip,
         ),
       );
@@ -767,7 +791,7 @@ export function ProjectChat({
         status: "uploading",
         previewUrl,
       },
-      () => ingestMaterialFile({ projectId: project.id, userId, file }),
+      () => ingestComposerFile({ projectId: project.id, userId, file }),
     );
   }
 
@@ -789,10 +813,10 @@ export function ProjectChat({
     );
   }
 
-  async function bootstrap(pending: PendingStart, ingest?: Promise<string[]> | null) {
+  async function bootstrap(pending: PendingStart, ingest?: Promise<StartIngestResult> | null) {
     const latest = await listMaterials(project.id);
     const pool = latest.length > 0 ? latest : materials;
-    const attachments = attachmentsFromMaterials(pending.materialIds, pool);
+    const attachments = [...attachmentsFromMaterials(pending.materialIds, pool), ...(pending.attachments ?? [])];
     if (pending.prompt.trim() || ingest) {
       await sendPrompt(pending.prompt.trim() || DEFAULT_FIRST_PROMPT, {
         materials: pool,
@@ -925,7 +949,7 @@ export function ProjectChat({
       startTransition(() => {
         setStream((current) =>
           current
-            ? { ...current, content: text, intent: intentFromTool(tool.name), status: text.trim() ? undefined : current.status }
+            ? { ...current, content: text, intent: intentFromTool(tool.name), ...(text.trim() ? { status: undefined, toolActivity: undefined } : {}) }
             : current,
         );
       });
@@ -945,6 +969,10 @@ export function ProjectChat({
           }
         },
         onStatus: (status) => input.onActivity?.("", status),
+        onToolStatus: (update) => setStream((current) => current ? {
+          ...current,
+          toolActivity: upsertToolStatus(current.toolActivity ?? [], update),
+        } : current),
         onImages: (list) => {
           imageSearchResults = list;
           setStream((current) => current ? { ...current, images: list } : current);
@@ -1057,7 +1085,7 @@ export function ProjectChat({
       attachments?: ChatAttachment[];
       pendingKind?: PendingKind;
       waitForPreview?: string[];
-      waitForIngest?: Promise<string[]>;
+      waitForIngest?: Promise<StartIngestResult>;
       leadPath?: boolean;
       hintAsk?: boolean;
       examAsk?: boolean;
@@ -1072,6 +1100,7 @@ export function ProjectChat({
     const urlIngest =
       promptUrls.length > 0
         ? Promise.all(promptUrls.map((url) => ingestMaterialUrl({ projectId: project.id, userId, url })))
+            .then((materialIds) => ({ materialIds, attachments: [] as ChatAttachment[] }))
         : undefined;
     const ingest = pendingIngest ?? urlIngest;
     let modelPrompt =
@@ -1085,7 +1114,27 @@ export function ProjectChat({
 
     clearUntouchedNotebook(project.id);
 
-    let pool = await materialsForTurn(attachments, options?.materials);
+    // Sending owns its photo snapshot before any await; chip removal cannot delete it mid-send.
+    const entryEpoch = uploadEpoch.current;
+    const claimed = options?.skipUser ? [] : [...unsentChatImages.current].filter(([, image]) => attachments.some((item) => item.storagePath === image.storagePath));
+    for (const [id] of claimed) unsentChatImages.current.delete(id);
+    const restoreClaimed = () => {
+      for (const [id, image] of claimed) {
+        if (entryEpoch === uploadEpoch.current && !removedChipIds.current.has(id)) unsentChatImages.current.set(id, image);
+        else void discardChatImage(image).catch(() => undefined);
+      }
+    };
+    let pool: Material[];
+    try {
+      pool = await materialsForTurn(attachments, options?.materials);
+    } catch (error) {
+      restoreClaimed();
+      throw error;
+    }
+    if (entryEpoch !== uploadEpoch.current) {
+      restoreClaimed();
+      return;
+    }
     let previewIds = guest ? [] : (options?.waitForPreview ?? []).filter(Boolean);
     const analysing = Boolean(ingest) || previewIds.length > 0;
     const assistantId = allocateChatMessageId(project.id, chatThreadId);
@@ -1190,17 +1239,22 @@ export function ProjectChat({
     try {
       let userMessageId: string | null = null;
       if (!options?.skipUser) {
-        userMessageId = await addChatMessage({
-          id: options?.userMessageId,
-          projectId: project.id,
-          userId,
-          role: "user",
-          mode: chatModeRef.current,
-          intent: "ask",
-          content: prompt,
-          attachments,
-          threadId: chatThreadId,
-        });
+        try {
+          userMessageId = await addChatMessage({
+            id: options?.userMessageId,
+            projectId: project.id,
+            userId,
+            role: "user",
+            mode: chatModeRef.current,
+            intent: "ask",
+            content: prompt,
+            attachments,
+            threadId: chatThreadId,
+          });
+        } catch (error) {
+          restoreClaimed();
+          throw error;
+        }
         setChips((current) => {
           for (const chip of current) {
             if (chip.previewUrl) URL.revokeObjectURL(chip.previewUrl);
@@ -1210,16 +1264,19 @@ export function ProjectChat({
       }
 
       if (ingest) {
-        const ids = await ingest;
+        const ingestedResult = await ingest;
+        const ids = ingestedResult.materialIds;
         if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
         const latest = await listMaterials(project.id);
-        const ingested = attachmentsFromMaterials(ids, latest);
+        const ingested = [...attachmentsFromMaterials(ids, latest), ...ingestedResult.attachments];
         pool = await materialsForTurn([...attachments, ...ingested], latest);
         previewIds = [...new Set([...previewIds, ...ids])];
         const visible = [
           ...attachments,
           ...ingested.filter((item) => item.type !== "url" || !prompt.includes(item.title)),
-        ].filter((item, index, list) => !item.materialId || list.findIndex((row) => row.materialId === item.materialId) === index);
+        ].filter((item, index, list) => list.findIndex((row) =>
+          item.materialId ? row.materialId === item.materialId : item.storagePath ? row.storagePath === item.storagePath : row === item,
+        ) === index);
         attachments = visible;
         if (userMessageId && visible.length > 0) {
           await patchChatMessage(project.id, userMessageId, { attachments: visible }, chatThreadId);
@@ -1249,9 +1306,10 @@ export function ProjectChat({
       // Passages come from the server-side index. Only the selection travels with the request.
       const attachedIds = attachments.flatMap((item) => (item.materialId ? [item.materialId] : []));
       const sourceIds = selectedIds.length > 0 ? [...new Set([...selectedIds, ...attachedIds])] : [];
-      const attachFigures = !mappingPath && shouldAttachChatFigures(modelPrompt, pool, attachments);
+      const visionAttachments = figureAttachmentsForTurn(modelPrompt, attachments, messages);
+      const attachFigures = !mappingPath && shouldAttachChatFigures(modelPrompt, pool, visionAttachments);
       const picked = attachFigures
-        ? await pickChatFigures(modelPrompt, pool, attachments)
+        ? await pickChatFigures(modelPrompt, pool, visionAttachments)
         : { figures: [], fileGets: 0 };
       const figures = picked.figures;
       const fileGets = picked.fileGets;
@@ -1332,6 +1390,10 @@ export function ProjectChat({
               ? { ...current, content: toolStreamsText(tool.name) ? text : "", intent, status }
               : current,
           ),
+        onToolStatus: (update) => setStream((current) => current ? {
+          ...current,
+          toolActivity: upsertToolStatus(current.toolActivity ?? [], update),
+        } : current),
         onNotesEvent: guest ? undefined : onNotesLive,
         onPathEvent: guest ? undefined : onPathLive,
       });
@@ -1375,6 +1437,7 @@ export function ProjectChat({
           ? {
               ...current,
               content,
+              toolActivity: undefined,
               intent: dispatched.intent,
               artifact: artifact,
               activity: activity.length ? [...activity] : undefined,
@@ -1690,27 +1753,6 @@ export function ProjectChat({
     [...messages].reverse().find((item) => item.role === "user")?.content ?? nowTitle,
   );
 
-  const uploadingChip = chips.find((chip) => chip.status === "uploading" || chip.status === "reading");
-  const generateKind =
-    sending && !stream?.quiet && (stream?.intent === "study" || stream?.intent === "rewrite_sheet")
-      ? "notes"
-      : sending && !stream?.quiet && stream?.intent === "practice"
-        ? "practice"
-        : sending && !stream?.quiet && stream?.intent === "plan"
-          ? "path"
-          : null;
-  const composerStatus: ComposerStatusState | null = uploadingChip
-    ? {
-        text: uploadStatusText(
-          uploadingChip.title,
-          uploadingChip.type === "url" ? "url" : "file",
-          threadKa,
-        ),
-      }
-    : generateKind
-      ? { text: generateStatusText(generateKind, threadKa) }
-      : null;
-
   useLayoutEffect(() => {
     if (loading || sending || stream) return;
     const examId = latestAsk?.messageId;
@@ -1746,11 +1788,12 @@ export function ProjectChat({
     const promptAsk = live?.promptAsk ?? message.promptAsk;
     const blocks = live?.blocks ?? message.blocks;
     const turnSources = live?.sources ?? message.sources;
-    const streaming = Boolean(live && !artifact && content && !messages.some((item) => item.id === live.id));
+    const streaming = Boolean(live && !artifact && !messages.some((item) => item.id === live.id));
     const exerciseOpen = exerciseStillOpen(messages, index, stream?.id, sending);
     const priorPapers = papersBefore(messages, index);
     const split = splitTeachingExam(content, promptAsk?.question);
     const taught = split.taught;
+    const showToolActivity = Boolean(live && !taught && (live.status || live.toolActivity?.length));
     const examText = split.exam;
     const visibleCopyText = [taught, examText, !taught && !examText ? promptAsk?.question : ""]
       .map((item) => item?.trim() ?? "")
@@ -1793,10 +1836,11 @@ export function ProjectChat({
       <ChatExerciseProvider priorPapers={priorPapers} interactive={exerciseOpen}>
       <div className="flex w-full flex-col">
         <div className="flex flex-col gap-4">
-          {memorized || live?.status || waiting || responseStatus || workedMs[message.id] != null ? (
+          {showToolActivity ? <ToolActivity rows={live?.toolActivity ?? []} status={live?.status} startedAt={live?.startedAt} /> : null}
+          {memorized || (live?.status && !showToolActivity) || waiting || responseStatus || workedMs[message.id] != null ? (
             <div className="flex flex-col gap-2">
               {memorized ? <MemorizedMark onOpen={() => openSettings("memory")} /> : null}
-              {live?.status ? (
+              {live?.status && !showToolActivity ? (
                 <StatusWait label={live.status} />
               ) : waiting ? (
                 <StatusWait label={waitLabel} since={followup?.since} timer />
@@ -1842,7 +1886,7 @@ export function ProjectChat({
                 />
               )}
             </>
-          ) : taught ? (
+          ) : taught || (images?.length && !live) ? (
             <div className="flex flex-col gap-2">
               {showOrient ? (
                 <p className="text-[13px] text-muted">
@@ -1851,12 +1895,20 @@ export function ProjectChat({
                 </p>
               ) : null}
               <CitationProvider sources={turnSources} onOpen={onOpenMaterial}>
-                <RichContent text={taught} streaming={streaming} />
+                <RichContent
+                  text={taught}
+                  streaming={streaming}
+                  images={images}
+                  ka={ka}
+                  onOpenImageUpload={(image) => {
+                    if (image.materialId) onOpenMaterial?.(image.materialId);
+                  }}
+                />
               </CitationProvider>
               <IllustrationBlocks blocks={blocks} />
             </div>
           ) : null}
-          {images?.length ? (
+          {artifact && images?.length ? (
             <ImageGallery
               images={images}
               ka={ka}
@@ -2053,7 +2105,7 @@ export function ProjectChat({
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
         ref={scrollerRef}
-        className="mr-[5px] min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
         <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
           <div className="chat-thread flex flex-col pt-8 max-md:pt-6" style={{ paddingBottom: composerH }}>
@@ -2158,7 +2210,7 @@ export function ProjectChat({
       ) : null}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-        <div ref={composerBoxRef} className="pointer-events-auto mx-auto w-full max-w-3xl bg-gradient-to-t from-background from-[28px] via-background/95 to-transparent px-8 pt-10 max-md:px-4">
+        <div ref={composerBoxRef} className="pointer-events-auto mx-auto w-full max-w-[calc(48rem-2px)] bg-gradient-to-t from-background from-[28px] via-background/95 to-transparent px-8 pt-10 max-md:px-4">
           <div>
             <ChatComposer
               ref={composerRef}
@@ -2167,7 +2219,6 @@ export function ProjectChat({
               sending={sending}
               locked={composerLocked}
               error={needGoogle ? null : error}
-              status={needGoogle ? null : composerStatus}
               onRetry={
                 canRetry
                   ? () => {
@@ -2182,11 +2233,16 @@ export function ProjectChat({
               className="composer-pad"
               onRemoveChip={(id) => {
                 const chip = chips.find((item) => item.id === id);
+                removedChipIds.current.add(id);
+                const unsentImage = unsentChatImages.current.get(id);
+                unsentChatImages.current.delete(id);
                 setChips((current) => current.filter((item) => item.id !== id));
                 if (chip?.previewUrl) URL.revokeObjectURL(chip.previewUrl);
                 if (chip?.materialId) {
                   const match = materials.find((item) => item.id === chip.materialId);
                   if (match) void removeMaterial(match);
+                } else if (unsentImage) {
+                  void discardChatImage(unsentImage).catch(() => undefined);
                 }
               }}
               onSend={() => void send()}

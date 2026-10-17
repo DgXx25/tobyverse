@@ -3,6 +3,7 @@ import { CHAT_IMAGE_LIMIT, CHAT_IMAGE_MAX_BYTES } from "@/lib/materials/limits";
 import { pickRelevantMaterials } from "@/lib/materials/relevance";
 import { isMissingMaterialFile, readStorageBytes } from "@/lib/materials/storage";
 import { storedObjectName } from "@/lib/materials/storage-path";
+import { mimeFromName } from "@/lib/materials/types";
 import type { ChatAttachment } from "@/types/chat";
 import type { Material, MaterialImage } from "@/types/material";
 
@@ -43,7 +44,7 @@ function wantsFigure(query: string): boolean {
   return /\b(figure|diagram|image|photo|picture)s?\b|სურათ|ფოტო|ფიგურ/i.test(query);
 }
 
-function imageLabel(material: Material, image: MaterialImage): string {
+function imageLabel(material: Pick<Material, "title">, image: MaterialImage): string {
   return `${material.title} · slide ${image.page}`;
 }
 
@@ -74,6 +75,19 @@ export function promptAsksForVisual(query: string): boolean {
   return askedPages(query).length > 0 || wantsFigure(query);
 }
 
+/** Reinspect the latest photo in this thread only when a follow-up refers to a visual. */
+export function figureAttachmentsForTurn(
+  query: string,
+  attachments: ChatAttachment[],
+  messages: { role: string; attachments: ChatAttachment[] }[],
+): ChatAttachment[] {
+  if (attachments.some((item) => isImageAttachment(item.type, item.title)) || !wantsFigure(query) || askedPages(query).length > 0) return attachments;
+  const previous = [...messages].slice(-20).reverse().find((message) =>
+    message.role === "user" && message.attachments.some((item) => isImageAttachment(item.type, item.title)),
+  );
+  return [...attachments, ...(previous?.attachments.filter((item) => isImageAttachment(item.type, item.title)) ?? [])];
+}
+
 export function shouldAttachChatFigures(
   query: string,
   materials: Material[],
@@ -81,21 +95,31 @@ export function shouldAttachChatFigures(
 ): boolean {
   if (promptAsksForVisual(query)) return true;
   const attachedImages = attachments.filter((item) => isImageAttachment(item.type, item.title));
-  return attachedImages.length === 1;
+  return attachedImages.length > 0;
 }
 
 export function pickFigureTargets(
   query: string,
   materials: Material[],
   attachments: ChatAttachment[] = [],
-): { material: Material; image: MaterialImage }[] {
+): { material: Pick<Material, "title">; image: MaterialImage }[] {
   if (!shouldAttachChatFigures(query, materials, attachments)) return [];
 
   const ranked = pickRelevantMaterials(query, materials, 4);
   const pages = askedPages(query);
-  const picks: { material: Material; image: MaterialImage }[] = [];
+  const picks: { material: Pick<Material, "title">; image: MaterialImage }[] = [];
+  const attachedImages = attachments.filter((item) => isImageAttachment(item.type, item.title));
 
-  if (pages.length > 0) {
+  if (attachedImages.length > 0) {
+    for (const attached of attachedImages) {
+      const material = materials.find((item) => item.id === attached.materialId);
+      const path = attached.storagePath || material?.storagePath;
+      const name = storedObjectName(path);
+      if (path && name && name !== "extracted.txt" && !isMissingMaterialFile(path)) {
+        picks.push({ material: material ?? { title: attached.title }, image: { page: 1, path, mime: mimeFromName(name, "image/jpeg") } });
+      }
+    }
+  } else if (pages.length > 0) {
     for (const material of ranked) {
       const images = existingMaterialImages(material);
       for (const page of pages) {
@@ -107,25 +131,9 @@ export function pickFigureTargets(
     const material = ranked.find((item) => existingMaterialImages(item).length > 0);
     const image = material ? existingMaterialImages(material)[0] : undefined;
     if (material && image) picks.push({ material, image });
-  } else {
-    const attached = attachments.find((item) => isImageAttachment(item.type, item.title));
-    const imageFile =
-      (attached?.materialId ? materials.find((item) => item.id === attached.materialId) : undefined) ||
-      materials.find((item) => item.type === "image");
-    if (imageFile) {
-      const sidecar = existingMaterialImages(imageFile)[0];
-      const path = sidecar?.path || attached?.storagePath || imageFile.storagePath;
-      const name = storedObjectName(path);
-      if (path && name && name !== "extracted.txt" && !isMissingMaterialFile(path)) {
-        picks.push({
-          material: imageFile,
-          image: sidecar ?? { page: 1, path, mime: imageFile.images[0]?.mime || "image/jpeg" },
-        });
-      }
-    }
   }
 
-  const unique: { material: Material; image: MaterialImage }[] = [];
+  const unique: { material: Pick<Material, "title">; image: MaterialImage }[] = [];
   const seen = new Set<string>();
   for (const pick of picks) {
     if (seen.has(pick.image.path)) continue;

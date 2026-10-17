@@ -1,5 +1,6 @@
 import type { ChatToolCall } from "@/lib/ai/tools";
-import { parseToolCall } from "@/lib/ai/tools";
+import { isChatToolName, parseToolCall } from "@/lib/ai/tools";
+import type { ToolStatusUpdate } from "@/lib/ai/tool-execution";
 import type { ChatImageHit, ChatSourceRef } from "@/types/chat";
 import { parseSearchHits } from "@/lib/images/hits";
 import { GUEST_CAP_CODE, GuestCapError } from "@/lib/guest";
@@ -19,7 +20,8 @@ export async function readChatSse(
     onTool?: (tool: ChatToolCall) => void;
     onSources?: (sources: ChatSourceRef[]) => void;
     onImages?: (images: ChatImageHit[]) => void;
-    onStatus?: (status: string) => void;
+    onStatus?: (status: string, type?: "thinking" | "tool_status") => void;
+    onToolStatus?: (update: ToolStatusUpdate) => void;
   },
 ): Promise<{ text: string; tool: ChatToolCall | null }> {
   if (!response.body) {
@@ -56,6 +58,12 @@ export async function readChatSse(
         sources?: ChatSourceRef[];
         images?: unknown;
         status?: unknown;
+        type?: unknown;
+        text?: unknown;
+        id?: unknown;
+        toolName?: unknown;
+        phase?: unknown;
+        detail?: unknown;
         error?: string;
         done?: boolean;
       };
@@ -65,7 +73,19 @@ export async function readChatSse(
       }
 
       if (Array.isArray(payload.sources)) handlers?.onSources?.(payload.sources);
-      if (typeof payload.status === "string" && payload.status.trim()) handlers?.onStatus?.(payload.status.trim());
+      const statusType = payload.type === "thinking" || payload.type === "tool_status" ? payload.type : undefined;
+      const status = payload.status ?? (statusType ? payload.text : undefined);
+      if (typeof status === "string" && status.trim()) handlers?.onStatus?.(status.trim(), statusType);
+      if (statusType === "tool_status" && typeof payload.id === "string" && isChatToolName(payload.toolName)
+        && (payload.phase === "start" || payload.phase === "complete" || payload.phase === "error") && typeof status === "string") {
+        handlers?.onToolStatus?.({
+          id: payload.id,
+          toolName: payload.toolName,
+          phase: payload.phase,
+          status: status.trim(),
+          detail: typeof payload.detail === "string" ? payload.detail : undefined,
+        });
+      }
 
       if (payload.tool && !tool) {
         tool = parseToolCall(payload.tool.name, payload.tool.args);

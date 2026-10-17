@@ -25,6 +25,7 @@ export async function generateStudySheetFromPrompt(input: {
   onEvent?: (event: NotesGenerateEvent) => void;
 }): Promise<{ id: string; title: string; blocks: VisualBlock[] }> {
   const generated = await requestNotes(input);
+  input.signal?.throwIfAborted();
   const title = input.title?.trim() || generated.title || "Notes";
   const id = await createStudySheet({
     projectId: input.projectId,
@@ -62,6 +63,7 @@ export async function rewriteStudySheetFromPrompt(input: {
     onEvent: input.onEvent,
   });
   const title = generated.title || input.currentTitle || "Notes";
+  input.signal?.throwIfAborted();
   await updateStudySheet(input.projectId, input.sheetId, {
     title,
     blocks: [],

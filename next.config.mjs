@@ -16,6 +16,7 @@ const firebaseAuthHelperHost = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
 const nextConfig = {
   distDir,
   outputFileTracingRoot: root,
+  outputFileTracingIncludes: { "/api/chat": ["./lib/skills/library/*/SKILL.md"] },
   transpilePackages: ["galaxyjs"],
   serverExternalPackages: ["unpdf", "mammoth", "jszip"],
   webpack: (config) => {

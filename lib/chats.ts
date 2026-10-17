@@ -21,7 +21,9 @@ import { asChatMode } from "@/lib/core/chat-modes";
 import { DEFAULT_CHAT_THREAD_ID } from "@/lib/core/constants";
 import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { compactChatAttachment } from "@/lib/composer/attach";
+import { discardChatImage } from "@/lib/composer/attach-client";
 import { stripArtifactMarkup } from "@/lib/composer/memory";
+import { imageGalleryId } from "@/lib/images/galleries";
 import { parseChatArtifact, compactChatArtifact } from "@/lib/artifacts/active";
 import { getFirebaseDb } from "@/lib/firebase";
 import { asString, toIsoDate } from "@/lib/timestamps";
@@ -210,6 +212,7 @@ function asAttachments(value: unknown): ChatAttachment[] {
       type: typeof row.type === "string" ? row.type : "file",
       materialId: typeof row.materialId === "string" ? row.materialId : undefined,
       storagePath: typeof row.storagePath === "string" ? row.storagePath : undefined,
+      sizeBytes: typeof row.sizeBytes === "number" ? row.sizeBytes : undefined,
     });
     return next ? [next] : [];
   });
@@ -284,6 +287,7 @@ function asImages(value: unknown): ChatImageHit[] | undefined {
         kind,
         materialId: typeof row.materialId === "string" ? row.materialId.trim() || undefined : undefined,
         storagePath: storagePath || undefined,
+        galleryId: imageGalleryId(row.galleryId),
       },
     ];
   });
@@ -708,6 +712,13 @@ export async function deleteChatMessages(
   threadId = DEFAULT_CHAT_THREAD_ID,
 ): Promise<void> {
   const snapshot = await getDocs(messagesCollection(projectId, threadId));
+  const chatImages = new Map<string, ChatAttachment>();
+  for (const message of snapshot.docs) {
+    for (const attachment of asAttachments(message.data().attachments)) {
+      if (!attachment.materialId && attachment.storagePath) chatImages.set(attachment.storagePath, attachment);
+    }
+  }
+  await Promise.all([...chatImages.values()].map((image) => discardChatImage(image).catch(() => undefined)));
   await Promise.all(snapshot.docs.map((item) => deleteDoc(item.ref)));
   await deleteDoc(chatRef(projectId, threadId)).catch(() => undefined);
   await deleteDoc(chatIndexRef(publicChatId(projectId, threadId))).catch(() => undefined);

@@ -10,6 +10,7 @@ import {
 import { getFirebaseDb } from "@/lib/firebase";
 import { mapNoteRecord } from "@/lib/notes/compat";
 import { collectThreadReferences } from "@/lib/sharing/thread-references";
+import { imageGalleryId } from "@/lib/images/galleries";
 import type { SharedChatSnapshot } from "@/lib/sharing/types";
 import type { ChatMessage, ChatMode } from "@/types/chat";
 import type { Material, MaterialStatus, MaterialType } from "@/types/material";
@@ -42,7 +43,7 @@ function mapMessage(id: string, projectId: string, threadId: string, raw: Record
     const url = materialId ? "" : str(item.url).trim();
     const thumb = materialId ? "" : str(item.thumb).trim();
     if (!materialId && !url && !thumb) return [];
-    return [{ url, thumb, title: str(item.title, "Image"), source: str(item.source), license: str(item.license), credit: str(item.credit), ...(materialId ? { materialId, kind: "upload" as const } : {}) }];
+    return [{ url, thumb, title: str(item.title, "Image"), source: str(item.source), license: str(item.license), credit: str(item.credit), ...(imageGalleryId(item.galleryId) ? { galleryId: imageGalleryId(item.galleryId) } : {}), ...(materialId ? { materialId, kind: "upload" as const } : {}) }];
   }) : [];
   const artifact = raw.artifact && typeof raw.artifact === "object" ? raw.artifact as Record<string, unknown> : null;
   const artifactId = str(artifact?.id).trim();

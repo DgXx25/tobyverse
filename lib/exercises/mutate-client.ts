@@ -20,10 +20,12 @@ async function generateOne(input: {
   avoid: string[];
   instruction?: string;
   current?: ProjectExercise["data"];
+  signal?: AbortSignal;
 }): Promise<{ type: ExerciseType; category: ExerciseCategory; data: ProjectExercise["data"] }> {
   const response = await fetch("/api/exercises/generate", {
     method: "POST",
     headers: await authHeaders(),
+    signal: input.signal,
     body: JSON.stringify({
       type: input.type,
       projectTitle: input.projectTitle,
@@ -52,6 +54,7 @@ export async function rewritePracticeItems(input: {
   instruction: string;
   materials: Material[];
   onStatus?: (status: string) => void;
+  signal?: AbortSignal;
 }): Promise<number> {
   const existing = await listExercises(input.project.id);
   const byId = new Map(existing.map((item) => [item.id, item]));
@@ -83,7 +86,9 @@ export async function rewritePracticeItems(input: {
         avoid,
         instruction: input.instruction,
         current: item.data,
+        signal: input.signal,
       });
+      input.signal?.throwIfAborted();
       await updateExercise(input.project.id, item.id, {
         type: next.type,
         category: next.category,
@@ -92,6 +97,7 @@ export async function rewritePracticeItems(input: {
       avoid.push(exerciseStem({ ...item, data: next.data }));
       updated += 1;
     } catch {
+      input.signal?.throwIfAborted();
       avoid.push(exerciseStem(item));
     }
   }
@@ -107,6 +113,7 @@ export async function appendPracticeItems(input: {
   count: number;
   setIds?: string[];
   onStatus?: (status: string) => void;
+  signal?: AbortSignal;
 }): Promise<string[]> {
   const existing = await listExercises(input.project.id);
   const setItems = input.setIds?.length
@@ -120,6 +127,7 @@ export async function appendPracticeItems(input: {
     count: input.count,
     family: practiceFamilyFromTypes(setItems.map((item) => item.type)),
     onStatus: input.onStatus,
+    signal: input.signal,
   });
   return extra.ids;
 }

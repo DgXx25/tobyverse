@@ -24,10 +24,7 @@ const CACHE_MAX = 200;
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 20;
 const FETCH_MS = 8000;
-const GOOGLE_MS = 4000;
 const UA = "Tobyverse/1.0 (study app; image search)";
-const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 type CacheEntry = { at: number; hits: ImageSearchHit[] };
 
@@ -174,13 +171,13 @@ function mergeHits(base: ImageSearchHit[], extra: ImageSearchHit[], limit: numbe
 
 type FetchJson = { ok: true; data: unknown } | { ok: false };
 
-async function fetchJson(url: string, headers: Record<string, string> = {}, timeoutMs = FETCH_MS): Promise<FetchJson> {
+async function fetchJson(url: string, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<FetchJson> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), FETCH_MS);
   try {
     const response = await fetch(url, {
       cache: "no-store",
-      signal: controller.signal,
+      signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
       headers: { Accept: "application/json", "User-Agent": UA, ...headers },
     });
     if (!response.ok) return { ok: false };
@@ -194,7 +191,7 @@ async function fetchJson(url: string, headers: Record<string, string> = {}, time
 
 type ProviderHits = { hits: ImageSearchHit[]; ok: boolean };
 
-async function searchWikimedia(query: string, count: number): Promise<ProviderHits> {
+async function searchWikimedia(query: string, count: number, signal?: AbortSignal): Promise<ProviderHits> {
   const url = new URL("https://commons.wikimedia.org/w/api.php");
   url.searchParams.set("action", "query");
   url.searchParams.set("format", "json");
@@ -207,7 +204,7 @@ async function searchWikimedia(query: string, count: number): Promise<ProviderHi
   url.searchParams.set("prop", "imageinfo");
   url.searchParams.set("iiprop", "url|mime");
   url.searchParams.set("iiurlwidth", String(IMAGE_PREVIEW_WIDTH));
-  const fetched = await fetchJson(url.toString());
+  const fetched = await fetchJson(url.toString(), {}, signal);
   if (!fetched.ok) return { hits: [], ok: false };
   const data = fetched.data as {
     query?: {
@@ -244,12 +241,12 @@ async function searchWikimedia(query: string, count: number): Promise<ProviderHi
   };
 }
 
-async function searchOpenverse(query: string, count: number): Promise<ProviderHits> {
+async function searchOpenverse(query: string, count: number, signal?: AbortSignal): Promise<ProviderHits> {
   const url = new URL("https://api.openverse.org/v1/images/");
   url.searchParams.set("q", query);
   url.searchParams.set("page_size", String(count));
   url.searchParams.set("mature", "false");
-  const fetched = await fetchJson(url.toString());
+  const fetched = await fetchJson(url.toString(), {}, signal);
   if (!fetched.ok) return { hits: [], ok: false };
   const data = fetched.data as {
     results?: Array<{ title?: unknown; url?: unknown; thumbnail?: unknown }>;
@@ -272,53 +269,13 @@ async function searchOpenverse(query: string, count: number): Promise<ProviderHi
   };
 }
 
-/** Port of Techblogogy/free-google-image-search, without the dead CORS proxy. Often blocked by Google. */
-async function searchGoogleImages(query: string, count: number): Promise<ProviderHits> {
-  const url =
-    "https://www.google.com/search?source=lnms&sa=X&gbv=1&tbm=isch&safe=active&q=" + encodeURIComponent(query);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GOOGLE_MS);
-  try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      signal: controller.signal,
-      headers: {
-        Accept: "text/html",
-        "User-Agent": BROWSER_UA,
-        Cookie: "CONSENT=YES+",
-      },
-    });
-    if (!response.ok) return { hits: [], ok: false };
-    const html = await response.text();
-    const hits: ImageSearchHit[] = [];
-    const seen = new Set<string>();
-    const pattern = /<img[^>]+src="(https:[^"]+)"/gi;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(html))) {
-      const src = match[1] ?? "";
-      if (!src || seen.has(src)) continue;
-      if (/gstatic|google\.com\/images|logo|sprite|favicon|data:/i.test(src)) continue;
-      const hit = asHit({ url: src, thumbnail: src, alt: query, source: "google", fallbackAlt: query });
-      if (!hit) continue;
-      seen.add(src);
-      hits.push(hit);
-      if (hits.length >= count) break;
-    }
-    return { hits, ok: true };
-  } catch {
-    return { hits: [], ok: false };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function searchPexels(query: string, count: number): Promise<ProviderHits> {
+async function searchPexels(query: string, count: number, signal?: AbortSignal): Promise<ProviderHits> {
   const key = pexelsKey();
   if (!key) return { hits: [], ok: true };
   const url = new URL("https://api.pexels.com/v1/search");
   url.searchParams.set("query", query);
   url.searchParams.set("per_page", String(count));
-  const fetched = await fetchJson(url.toString(), { Authorization: key });
+  const fetched = await fetchJson(url.toString(), { Authorization: key }, signal);
   if (!fetched.ok) return { hits: [], ok: false };
   const data = fetched.data as {
     photos?: Array<{
@@ -345,7 +302,7 @@ async function searchPexels(query: string, count: number): Promise<ProviderHits>
   };
 }
 
-async function searchPixabay(query: string, count: number): Promise<ProviderHits> {
+async function searchPixabay(query: string, count: number, signal?: AbortSignal): Promise<ProviderHits> {
   const key = pixabayKey();
   if (!key) return { hits: [], ok: true };
   const url = new URL("https://pixabay.com/api/");
@@ -354,7 +311,7 @@ async function searchPixabay(query: string, count: number): Promise<ProviderHits
   url.searchParams.set("image_type", "photo");
   url.searchParams.set("safesearch", "true");
   url.searchParams.set("per_page", String(Math.max(3, count)));
-  const fetched = await fetchJson(url.toString());
+  const fetched = await fetchJson(url.toString(), {}, signal);
   if (!fetched.ok) return { hits: [], ok: false };
   const data = fetched.data as {
     hits?: Array<{
@@ -383,43 +340,38 @@ async function searchPixabay(query: string, count: number): Promise<ProviderHits
   };
 }
 
-async function searchProviders(plan: ImageSearchPlan, keep: number): Promise<ImageSearchHit[]> {
+async function searchProviders(plan: ImageSearchPlan, keep: number, signal?: AbortSignal): Promise<ImageSearchHit[]> {
   const fetchCount = Math.min(20, Math.max(12, keep * 2));
   let hits: ImageSearchHit[] = [];
   let anyOk = false;
 
-  const wiki = await searchWikimedia(plan.query, fetchCount);
-  anyOk = anyOk || wiki.ok;
-  hits = pickImageHits(wiki.hits, plan, keep);
-  if (hits.length >= 3) return hits;
+  const [wiki, openverse] = await Promise.all([
+    searchWikimedia(plan.query, fetchCount, signal),
+    searchOpenverse(plan.query, fetchCount, signal),
+  ]);
+  signal?.throwIfAborted();
+  anyOk = wiki.ok || openverse.ok;
+  hits = pickImageHits(mergeHits(wiki.hits, openverse.hits, fetchCount * 2), plan, keep);
+  if (hits.length >= Math.min(3, keep)) return hits;
 
   const simple = plan.must.filter((word) => word.length > 3).slice(0, 3).join(" ");
   if (simple && simple !== plan.query) {
-    const wikiSimple = await searchWikimedia(simple, fetchCount);
+    const wikiSimple = await searchWikimedia(simple, fetchCount, signal);
     anyOk = anyOk || wikiSimple.ok;
     hits = mergeHits(hits, pickImageHits(wikiSimple.hits, plan, keep), keep);
     if (hits.length >= 3) return hits;
   }
 
-  const openverse = await searchOpenverse(plan.query, fetchCount);
-  anyOk = anyOk || openverse.ok;
-  hits = pickImageHits(mergeHits(hits, openverse.hits, fetchCount), plan, keep);
   if (hits.length >= 2) return hits;
 
   if (hits.length === 0) {
-    const google = await searchGoogleImages(plan.query, fetchCount);
-    anyOk = anyOk || google.ok;
-    hits = pickImageHits(google.hits, plan, keep);
-  }
-
-  if (hits.length === 0) {
-    const pexels = await searchPexels(plan.query, fetchCount);
+    const pexels = await searchPexels(plan.query, fetchCount, signal);
     anyOk = anyOk || pexels.ok;
     hits = pickImageHits(pexels.hits, plan, keep);
   }
 
   if (hits.length === 0) {
-    const pixabay = await searchPixabay(plan.query, fetchCount);
+    const pixabay = await searchPixabay(plan.query, fetchCount, signal);
     anyOk = anyOk || pixabay.ok;
     hits = pickImageHits(pixabay.hits, plan, keep);
   }
@@ -430,22 +382,24 @@ async function searchProviders(plan: ImageSearchPlan, keep: number): Promise<Ima
   return hits;
 }
 
-export async function searchWebImages(query: string, count?: number, options: { usage?: AiUsageReporter } = {}): Promise<ImageSearchHit[]> {
+export async function searchWebImages(query: string, count?: number, options: { usage?: AiUsageReporter; signal?: AbortSignal } = {}): Promise<ImageSearchHit[]> {
   const q = query.trim();
   if (!q) throw new ImageSearchError("Missing search query.");
   const limit = clampImageCount(count);
   const plan = await planImageSearch(q, options);
-  const key = `rel7:${normalizeImageQuery(plan.query)}:${plan.must.join("-")}:${limit}`;
+  options.signal?.throwIfAborted();
+  const key = `rel8:${normalizeImageQuery(plan.query)}:${plan.must.join("-")}:${limit}`;
   const cached = readCache(key);
   if (cached && cached.length > 0) return cached.slice(0, limit);
 
-  let hits = await searchProviders(plan, limit);
+  let hits = await searchProviders(plan, limit, options.signal);
   if (hits.length === 0) {
     const expanded = expandEnglishImageQuery(plan.query);
     if (expanded && expanded !== plan.query) {
-      hits = await searchProviders({ ...plan, query: expanded }, limit);
+      hits = await searchProviders({ ...plan, query: expanded }, limit, options.signal);
     }
   }
+  options.signal?.throwIfAborted();
   if (hits.length > 0) writeCache(key, hits);
   return hits;
 }

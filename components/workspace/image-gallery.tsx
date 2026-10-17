@@ -7,7 +7,7 @@ import type { ChatImageHit } from "@/types/chat";
 import { StorageThumb } from "@/components/workspace/sources-chip";
 import { UiIcon } from "@/components/workspace/ui-icon";
 
-const PREVIEW_COUNT = 5;
+const PREVIEW_COUNT = 3;
 
 function originLabel(images: ChatImageHit[], _ka: boolean): string | null {
   const web = images.filter((image) => image.kind !== "upload" && !image.storagePath);
@@ -75,7 +75,7 @@ export function ImageGallery({
             {moreLabel}
           </button>
         ) : null}
-        <div className="grid w-full grid-cols-5 gap-2">
+        <div className="grid w-full gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 12rem), 1fr))" }}>
           {preview.map((image, index) => (
             <ImageThumb
               key={`${image.storagePath || image.url || image.title}-${index}`}
@@ -149,7 +149,7 @@ function ImageThumb({ image, onClick }: { image: ChatImageHit; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="img-alpha-bg img-zoom aspect-square w-full overflow-hidden rounded-lg border border-border"
+      className="img-alpha-bg img-zoom aspect-[3/2] w-full overflow-hidden rounded-xl"
       title={image.title}
     >
       {upload ? (

@@ -15,6 +15,7 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
 }).outputText, filename);
 
 const { runToolLoop } = require('../lib/ai/tool-loop.ts');
+const { upsertToolStatus } = require('../lib/ai/tool-execution.ts');
 const { GeminiProvider } = require('../lib/ai/gemini.ts');
 const { readChatSse } = require('../lib/ai/sse.ts');
 const { createChunkBuffer } = require('../lib/ai/chunk-stream.ts');
@@ -46,6 +47,74 @@ test('image search completes before the loop hands off to streaming, discarding 
   assert.equal(result.text, '');
   assert.equal(result.tool.name, 'search_images');
   assert.deepEqual(result.functionResponses, [{ name: 'search_images', response: { images: [image] } }]);
+});
+
+test('the default loop reaches a fourth round and ignores pre-tool narration', async () => {
+  const statuses = [];
+  const executed = [];
+  const result = await runToolLoop({
+    callModel: async ({ round, functionResponses }) => {
+      if (round > 1) assert.equal(functionResponses[0].response.images.length, 1);
+      return round === 4
+        ? { parts: [{ text: 'Final comparison.' }] }
+        : { parts: [{ text: 'Searching next.' }, { functionCall: { name: 'search_images', args: { query: `leaf ${round}` } } }] };
+    },
+    execute: async (call) => { executed.push(call.args.query); return { images: [image] }; },
+    onToolStatus: (event) => statuses.push([event.call.args.query, event.phase]),
+  });
+  assert.equal(result.rounds, 4);
+  assert.equal(result.text, 'Final comparison.');
+  assert.deepEqual(executed, ['leaf 1', 'leaf 2', 'leaf 3']);
+  assert.deepEqual(statuses, [
+    ['leaf 1', 'start'], ['leaf 1', 'complete'],
+    ['leaf 2', 'start'], ['leaf 2', 'complete'],
+    ['leaf 3', 'start'], ['leaf 3', 'complete'],
+  ]);
+});
+
+test('a failed tool returns a nonfatal response for a text-only fallback', async () => {
+  const statuses = [];
+  const result = await runToolLoop({
+    callModel: async () => ({ parts: [{ functionCall: { name: 'search_images', args: { query: 'leaf' } } }] }),
+    execute: async () => { throw new Error('unavailable'); },
+    onToolStatus: (event) => statuses.push(event.phase),
+  });
+  assert.equal(result.tool, null, 'a failed tool must not be dispatched again');
+  assert.equal(result.failed, true);
+  assert.equal(result.functionResponses[0].response.ok, false);
+  assert.deepEqual(statuses, ['start', 'error']);
+});
+
+test('a failed parallel call still supplies a response for every call in the signed turn', async () => {
+  const result = await runToolLoop({
+    callModel: async () => ({ parts: [
+      { functionCall: { name: 'search_images', args: { query: 'leaf' } } },
+      { functionCall: { name: 'search_images', args: { query: 'stem' } } },
+    ] }),
+    execute: async (call) => { if (call.args.query === 'leaf') throw new Error('offline'); return { images: [image] }; },
+  });
+  assert.equal(result.failed, true);
+  assert.equal(result.functionResponses.length, 2);
+});
+
+test('a hanging tool times out after ten seconds and aborts its work', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let signal;
+  const statuses = [];
+  const pending = runToolLoop({
+    callModel: async () => ({ parts: [{ functionCall: { name: 'search_images', args: { query: 'leaf' } } }] }),
+    execute: async (_call, options) => { signal = options?.signal; return new Promise(() => {}); },
+    onToolStatus: (event) => statuses.push(event.phase),
+  });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  t.mock.timers.tick(9999);
+  assert.deepEqual(statuses, ['start']);
+  t.mock.timers.tick(1);
+  const result = await pending;
+  assert.equal(signal.aborted, true);
+  assert.equal(result.failed, true);
+  assert.match(result.functionResponses[0].response.error, /timed out/i);
+  assert.deepEqual(statuses, ['start', 'error']);
 });
 
 test('Gemini yields the executed image tool first, then live answer chunks with signed replay and no forced tool', async () => {
@@ -91,6 +160,95 @@ test('Gemini yields the executed image tool first, then live answer chunks with 
   for await (const part of iterator) answer += part.text ?? '';
   assert.equal(answer, chunks.join(''));
   assert.equal(usage.length, 2);
+});
+
+test('Gemini can search twice before answering and replays each completed result', async () => {
+  const provider = new GeminiProvider();
+  let rounds = 0;
+  const queries = [];
+  provider.getModel = () => ({
+    generateContent: async (request) => {
+      rounds++;
+      if (rounds > 1) assert.deepEqual(request.contents.at(-1).parts[0].functionResponse.response, { images: [image] });
+      const parts = rounds < 3
+        ? [{ functionCall: { name: 'search_images', args: { query: rounds === 1 ? 'mitosis' : 'meiosis' } }, thoughtSignature: `sig-${rounds}` }]
+        : [{ text: 'Here is the comparison.' }];
+      return { response: { candidates: [{ content: { parts } }] } };
+    },
+    generateContentStream: async () => { throw new Error('An existing final answer must be reused'); },
+  });
+  const parts = [];
+  for await (const part of provider.generateToolStream('Compare these cells', {
+    tools: true,
+    executeTool: async (call) => { queries.push(call.args.query); return { images: [image] }; },
+  })) parts.push(part);
+  assert.deepEqual(queries, ['mitosis', 'meiosis']);
+  assert.equal(rounds, 3);
+  assert.equal(parts.at(-1).text, 'Here is the comparison.');
+});
+
+test('Gemini switches to a text-only continuation on tool failure without dispatching it again', async () => {
+  const provider = new GeminiProvider();
+  provider.getModel = () => ({
+    generateContent: async () => ({ response: { candidates: [{ content: { parts: [{ functionCall: { name: 'search_images', args: { query: 'leaf' } }, thoughtSignature: 'sig-fail' }] } }] } }),
+    generateContentStream: async (request) => {
+      assert.equal(request.toolConfig.functionCallingConfig.mode, 'NONE');
+      assert.equal(request.contents.at(-1).parts[0].functionResponse.response.ok, false);
+      return { stream: (async function* () { yield { candidates: [{ content: { parts: [{ text: 'I can describe the leaf.' }] } }] }; })(), response: Promise.resolve({}) };
+    },
+  });
+  const parts = [];
+  for await (const part of provider.generateToolStream('Describe this leaf', { tools: true, executeTool: async () => { throw new Error('unavailable'); } })) parts.push(part);
+  assert.equal(parts[0].tool.name, 'answer');
+  assert.equal(parts[1].text, 'I can describe the leaf.');
+});
+
+test('SSE status events arrive separately from final text, including fragmented frames', async () => {
+  const encoder = new TextEncoder();
+  const wire = [
+    { type: 'thinking', text: 'Planning…' },
+    { type: 'tool_status', status: 'Searching images…' },
+    { type: 'tool_status', status: 'Found 5 results' },
+    { delta: 'Final answer.' },
+    { done: true },
+  ].map((payload) => `data: ${JSON.stringify(payload)}\n\n`).join('');
+  const bytes = encoder.encode(wire);
+  const response = new Response(new ReadableStream({ start(controller) {
+    for (let i = 0; i < bytes.length; i += 7) controller.enqueue(bytes.slice(i, i + 7));
+    controller.close();
+  } }));
+  const statuses = [];
+  const result = await readChatSse(response, { onStatus: (status, type) => statuses.push([status, type]) });
+  assert.deepEqual(statuses, [['Planning…', 'thinking'], ['Searching images…', 'tool_status'], ['Found 5 results', 'tool_status']]);
+  assert.equal(result.text, 'Final answer.');
+});
+
+test('structured progress preserves query and call identity across start and completion', async () => {
+  const events = [
+    { type: 'tool_status', id: 'tool-1', toolName: 'search_images', phase: 'start', status: 'Searching images…', detail: 'cute cat photo' },
+    { type: 'tool_status', id: 'tool-1', toolName: 'search_images', phase: 'complete', status: 'Found 3 results', detail: 'cute cat photo' },
+    { delta: 'Here are the images.' },
+  ];
+  const response = new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''));
+  const updates = [];
+  const result = await readChatSse(response, { onToolStatus: (update) => updates.push(update) });
+  assert.equal(updates.length, 2);
+  assert.equal(updates[0].detail, 'cute cat photo');
+  assert.equal(updates[0].id, updates[1].id);
+  assert.equal(updates[1].phase, 'complete');
+  assert.equal(result.text, 'Here are the images.');
+});
+
+test('progress updates settle their existing row and retain the order of multiple searches', () => {
+  const first = { id: 'a', toolName: 'search_images', phase: 'start', status: 'Searching images…', detail: 'cat' };
+  const second = { ...first, id: 'b', detail: 'dog' };
+  let rows = upsertToolStatus([], first);
+  rows = upsertToolStatus(rows, second);
+  rows = upsertToolStatus(rows, { ...first, phase: 'complete', status: 'Found 3 results' });
+  assert.deepEqual(rows.map(({ id, phase, detail }) => ({ id, phase, detail })), [
+    { id: 'a', phase: 'complete', detail: 'cat' }, { id: 'b', phase: 'start', detail: 'dog' },
+  ]);
+  assert.equal(first.phase, 'start', 'updating progress must not mutate previous state');
 });
 
 test('SSE delivers a gallery after its tool event and before Markdown deltas', async () => {
@@ -139,6 +297,7 @@ test('image dispatch reuses completed searches and preserves a multiline answer'
 test('chat route executes image search once, publishes gallery, and streams the full answer; search failures stay nonfatal', async () => {
   for (const failSearch of [false, true]) {
     const events = [];
+    const statuses = [];
     let searches = 0;
     const call = { name: 'search_images', args: { query: 'photosynthesis' } };
     const provider = {
@@ -167,11 +326,136 @@ test('chat route executes image search once, publishes gallery, and streams the 
       onTool: (tool) => { assert.equal(tool.name, 'search_images'); events.push('tool'); },
       onImages: (images) => { assert.equal(images.length, failSearch ? 0 : 1); events.push('images'); },
       onDelta: () => events.push('text'),
+      onStatus: (status, type) => statuses.push({ status, type }),
     });
     assert.equal(searches, 1);
+    assert.equal(statuses.length, 2);
+    assert.ok(statuses.every(({ type }) => type === 'tool_status'));
+    assert.match(statuses[0].status, /ფოტო/);
+    assert.match(statuses[1].status, failSearch ? /ტექსტით/ : /1/);
     assert.deepEqual(events, ['tool', 'images', 'text', 'text']);
     assert.match(result.text, /\n\n\| ნაწილი \| როლი \|\n/);
   }
+});
+
+test('client artifact dispatch times out, aborts generation, and returns text without late status updates', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let generation;
+  const statuses = [];
+  const noteEvents = [];
+  const { dispatchChatTool } = isolatedModule('lib/chat/dispatch.ts', {
+    '@/lib/images/client': {}, '@/lib/images/local': {},
+    '@/lib/exercises/generate-set': {}, '@/lib/exercises/mutate-client': {},
+    '@/lib/study-sheets/generate-client': { generateStudySheetFromPrompt: async (input) => { generation = input; return new Promise(() => {}); } },
+    '@/lib/study-sheets/store': {}, '@/lib/paths/generate-client': {}, '@/lib/paths/store': {}, '@/lib/chats': {},
+  });
+  const pending = dispatchChatTool({
+    tool: { name: 'create_sheet', args: { topic: 'cells' } },
+    prompt: 'Make notes on cells', text: '', materials: [], project: { id: 'p' }, userId: 'u',
+    onStatus: (status) => statuses.push(status),
+    onNotesEvent: (event) => noteEvents.push(event),
+  });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.ok(generation?.signal, 'artifact generation must receive a cancellation signal');
+  t.mock.timers.tick(10_000);
+  const result = await pending;
+  assert.equal(generation.signal.aborted, true);
+  assert.equal(result.intent, 'ask');
+  assert.ok(result.content.length > 0);
+  assert.equal(result.artifact, undefined);
+  assert.equal(noteEvents.at(-1), null, 'the live artifact session must be cleared on fallback');
+  const count = statuses.length;
+  generation.onEvent?.({ status: 'Late completion' });
+  assert.equal(statuses.length, count);
+});
+
+test('a timed-out path start cannot mutate the path when a pending read finishes', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let finishRead;
+  const writes = [];
+  const { dispatchChatTool } = isolatedModule('lib/chat/dispatch.ts', {
+    '@/lib/images/client': {}, '@/lib/images/local': {},
+    '@/lib/exercises/generate-set': {}, '@/lib/exercises/mutate-client': {},
+    '@/lib/study-sheets/generate-client': {}, '@/lib/study-sheets/store': {}, '@/lib/paths/generate-client': {},
+    '@/lib/paths/store': {
+      getLatestPath: () => new Promise((resolve) => { finishRead = resolve; }),
+      patchStudyPath: async () => writes.push('patch'),
+    },
+    '@/lib/chats': { pathThreadId: () => 'thread', pathThreadTitle: () => 'Path', ensureChatThread: async () => writes.push('thread') },
+  });
+  const pending = dispatchChatTool({ tool: { name: 'start_path', args: {} }, prompt: 'Start path', text: '', project: { id: 'p' } });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  t.mock.timers.tick(10_000);
+  assert.equal((await pending).intent, 'ask');
+  finishRead({ id: 'path', title: 'Path', started: false, courses: [], currentNodeId: 'node' });
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  assert.deepEqual(writes, [], 'late reads must not create a thread or change path progress');
+});
+
+test('saving a path checks cancellation after its internal lookup before writing', async () => {
+  let finishRead;
+  const writes = [];
+  const { saveStudyPath } = isolatedModule('lib/paths/store.ts', {
+    'firebase/firestore': {
+      collection: () => ({}), getDocs: () => new Promise((resolve) => { finishRead = resolve; }),
+      addDoc: async () => { writes.push('add'); return { id: 'new' }; }, serverTimestamp: () => 0,
+    },
+    '@/lib/firebase': { getFirebaseDb: () => ({}) },
+    '@/lib/firestore': { COLLECTIONS: {}, omitUndefined: (value) => value },
+  });
+  const controller = new AbortController();
+  const pending = saveStudyPath({ projectId: 'p', userId: 'u', title: 'Path', courses: [], signal: controller.signal });
+  controller.abort();
+  finishRead({ docs: [] });
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.deepEqual(writes, []);
+});
+
+test('failed client tool dispatch preserves an existing text answer', async () => {
+  const { dispatchChatTool } = isolatedModule('lib/chat/dispatch.ts', {
+    '@/lib/images/client': {}, '@/lib/images/local': {},
+    '@/lib/exercises/generate-set': {}, '@/lib/exercises/mutate-client': {},
+    '@/lib/study-sheets/generate-client': { generateStudySheetFromPrompt: async () => { throw new Error('offline'); } },
+    '@/lib/study-sheets/store': {}, '@/lib/paths/generate-client': {}, '@/lib/paths/store': {}, '@/lib/chats': {},
+  });
+  const result = await dispatchChatTool({ tool: { name: 'create_sheet', args: {} }, prompt: 'Make notes', text: 'Existing answer.', materials: [], project: {}, userId: 'u' });
+  assert.equal(result.content, 'Existing answer.');
+  assert.equal(result.intent, 'ask');
+  assert.equal(result.artifact, undefined);
+});
+
+test('image search starts Wikimedia and Openverse together and never scrapes Google', async (t) => {
+  const hosts = [];
+  let finishWiki;
+  t.mock.method(global, 'fetch', async (url) => {
+    const host = new URL(url).hostname;
+    hosts.push(host);
+    if (host === 'commons.wikimedia.org') return new Promise((resolve) => { finishWiki = () => resolve(Response.json({ query: { pages: [] } })); });
+    return Response.json({ results: [{ title: 'leaf', url: image.url, thumbnail: image.thumbnail }] });
+  });
+  const { searchWebImages } = isolatedModule('lib/images/search.ts', {
+    '@/lib/images/query': { ...require('../lib/images/query.ts'), planImageSearch: async () => ({ query: 'leaf', must: ['leaf'], avoid: [] }) },
+  });
+  const pending = searchWebImages('leaf', 5);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  const startedTogether = hosts.includes('api.openverse.org');
+  finishWiki();
+  const hits = await pending;
+  assert.equal(startedTogether, true, 'Openverse must start even while Wikimedia is pending');
+  assert.equal(hits[0].source, 'openverse');
+  assert.ok(hosts.every((host) => !host.includes('google')));
+});
+
+test('empty image providers do not fall back to the Google HTML scrape', async (t) => {
+  const hosts = [];
+  t.mock.method(global, 'fetch', async (url) => { hosts.push(new URL(url).hostname); return Response.json({ query: { pages: [] }, results: [], photos: [], hits: [] }); });
+  const { searchWebImages } = isolatedModule('lib/images/search.ts', {
+    '@/lib/images/query': { ...require('../lib/images/query.ts'), planImageSearch: async () => ({ query: 'leaf', must: ['leaf'], avoid: [] }) },
+  });
+  assert.deepEqual(await searchWebImages('leaf', 5), []);
+  assert.ok(hosts.includes('commons.wikimedia.org'));
+  assert.ok(hosts.includes('api.openverse.org'));
+  assert.ok(hosts.every((host) => !host.includes('google')));
 });
 
 test('artifact tool selection keeps its original non-streaming dispatch behavior', async () => {

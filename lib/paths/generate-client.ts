@@ -68,6 +68,7 @@ export async function generatePathFromPrompt(input: {
   });
 
   const generated = await readPathSse(response, input.onEvent);
+  input.signal?.throwIfAborted();
   const title = generated.title.trim() || "Path";
   const id = await saveStudyPath({
     projectId: input.projectId,
@@ -79,6 +80,7 @@ export async function generatePathFromPrompt(input: {
     currentNodeId: generated.currentNodeId,
     sourceMaterialIds: input.materials.map((item) => item.id),
     started: false,
+    signal: input.signal,
   });
   input.onEvent?.({ title, courses: generated.courses, pathId: id, status: null });
   return {

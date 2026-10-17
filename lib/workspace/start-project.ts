@@ -8,10 +8,12 @@ import { allocateChatMessageId, createChatThread } from "@/lib/chats";
 import { asChatMode } from "@/lib/core/chat-modes";
 import { DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { recipeForGoal } from "@/lib/core/recipes";
-import { stashPendingStart, type PendingAttachment, type PendingStart } from "@/lib/workspace/pending-start";
+import { stashPendingStart, type PendingAttachment, type PendingStart, type StartIngestResult } from "@/lib/workspace/pending-start";
+import { uploadChatImage, discardChatImage } from "@/lib/composer/attach-client";
+import { inferMaterialType } from "@/lib/materials/types";
 import type { ComposerIntent } from "@/lib/composer/intent";
 import type { ComposerSkill } from "@/lib/composer/slash";
-import type { ChatMode } from "@/types/chat";
+import type { ChatAttachment, ChatMode } from "@/types/chat";
 import type { Project } from "@/types/project";
 import { requireSignedInUser } from "@/lib/auth";
 import {
@@ -23,7 +25,7 @@ import {
 } from "@/lib/materials/ingest-client";
 import { DEFAULT_FIRST_PROMPT, PLACEHOLDER_CHAT_TITLE } from "@/lib/workspace/title";
 
-const ingestByProject = new Map<string, Promise<string[]>>();
+const ingestByProject = new Map<string, Promise<StartIngestResult>>();
 
 type OpeningProject = {
   project: Project;
@@ -141,10 +143,16 @@ async function ingestAttachments(input: {
   userId: string;
   attachments: PendingAttachment[];
   onPhase?: (phase: IngestPhase) => void;
-}): Promise<string[]> {
+}): Promise<StartIngestResult> {
   const prepared: PreparedMaterial[] = [];
+  const chatImages: ChatAttachment[] = [];
   try {
     for (const attachment of input.attachments) {
+      if (attachment.kind === "file" && inferMaterialType(attachment.file.name, attachment.file.type) === "image") {
+        input.onPhase?.("uploading");
+        chatImages.push(await uploadChatImage({ projectId: input.projectId, userId: input.userId, file: attachment.file }));
+        continue;
+      }
       prepared.push(
         await prepareMaterialIngest({
           projectId: input.projectId,
@@ -158,15 +166,16 @@ async function ingestAttachments(input: {
     for (const item of prepared) {
       materialIds.push(await commitMaterialText(item));
     }
-    return materialIds;
+    return { materialIds, attachments: chatImages };
   } catch (error) {
     await discardPreparedMaterials(prepared);
+    await Promise.all(chatImages.map((image) => discardChatImage(image).catch(() => undefined)));
     throw error;
   }
 }
 
 /** In-memory ingest started from the home screen. Files cannot go in sessionStorage. */
-export function takeProjectStartIngest(projectId: string): Promise<string[]> | null {
+export function takeProjectStartIngest(projectId: string): Promise<StartIngestResult> | null {
   return ingestByProject.get(projectId) ?? null;
 }
 
@@ -225,16 +234,16 @@ export async function startProjectFromPrompt(input: {
           onPhase: input.onPhase,
         }),
       )
-      .then((ids) => {
+      .then((result) => {
         const next: PendingStart = {
           ...pending,
-          materialIds: ids,
+          ...result,
           awaitingIngest: false,
         };
         stashPendingStart(projectId, next);
         const current = openingByProject.get(projectId);
         if (current) openingByProject.set(projectId, { ...current, pending: next });
-        return ids;
+        return result;
       });
     ingestByProject.set(projectId, ingest);
     void ingest
@@ -310,9 +319,9 @@ export async function startChatInProject(input: {
       userId: input.userId,
       attachments,
       onPhase: input.onPhase,
-    }).then((ids) => {
-      stashPendingStart(threadId, { ...pending, materialIds: ids, awaitingIngest: false });
-      return ids;
+    }).then((result) => {
+      stashPendingStart(threadId, { ...pending, ...result, awaitingIngest: false });
+      return result;
     });
     ingestByProject.set(threadId, ingest);
     void ingest.finally(() => {
