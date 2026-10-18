@@ -62,6 +62,8 @@ export const ChatComposer = forwardRef<
     onRemoveChip: (id: string) => void;
     onSend: () => void;
     onStop?: () => void;
+    onResume?: () => void;
+    resumeAvailable?: boolean;
     onFile: (file: File) => void;
     onPasteText: (text: string) => void;
     onUrl: (url: string) => void;
@@ -96,6 +98,8 @@ export const ChatComposer = forwardRef<
     onRemoveChip,
     onSend,
     onStop,
+    onResume,
+    resumeAvailable = false,
     onFile,
     onPasteText,
     placeholder = "Ask anything",
@@ -265,6 +269,7 @@ export const ChatComposer = forwardRef<
   }
 
   const busyChip = chips.some((chip) => chip.status === "uploading");
+  const showResume = resumeAvailable && Boolean(onResume) && !draft.trim() && !chips.some((chip) => chip.status === "ready");
   const canSend =
     !locked && !sending && !busyChip && Boolean(draft.trim() || chips.some((chip) => chip.status === "ready"));
   const isDrop = dropOver || dropActive;
@@ -563,25 +568,32 @@ export const ChatComposer = forwardRef<
           <div className="ml-auto flex items-center gap-1">
             {showParameters ? <ComposerParameters mode={chatMode} onMode={onChatMode} /> : null}
             <button
-              type={sending && onStop ? "button" : "submit"}
-              disabled={sending ? !onStop : !canSend}
+              type={(sending && onStop) || (!sending && showResume) ? "button" : "submit"}
+              disabled={sending ? !onStop : showResume ? locked : !canSend}
               onClick={
                 sending && onStop
                   ? (event) => {
                       event.preventDefault();
                       onStop();
                     }
+                  : !sending && showResume && onResume
+                    ? (event) => {
+                        event.preventDefault();
+                        onResume();
+                      }
                   : undefined
               }
               className={`composer-send flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background ${
                 sending && !onStop ? "" : "disabled:opacity-30"
               }`}
-              aria-label={sending ? (onStop ? "Stop" : "Starting") : "Send"}
+              aria-label={sending ? (onStop ? "Stop" : "Starting") : showResume ? "Continue response" : "Send"}
             >
               {sending && onStop ? (
                 <span className="block h-2.5 w-2.5 rounded-[2px] bg-current" />
               ) : sending ? (
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-background/30 border-t-background" />
+              ) : showResume ? (
+                <UiIcon name="play" size={16} />
               ) : (
                 <UiIcon name="send" size={16} />
               )}

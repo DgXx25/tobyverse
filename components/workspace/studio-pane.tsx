@@ -245,8 +245,8 @@ function StudioConfig({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="studio-config-title" className="w-full max-w-[640px] rounded-2xl bg-surface p-5 text-foreground shadow-2xl">
+    <div className="popup-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="studio-config-title" className="popup-surface w-full max-w-[640px] rounded-2xl bg-surface p-5 text-foreground shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 id="studio-config-title" className="flex items-center gap-2 text-[16px] font-medium">
             <span style={{ color: TILE_COLOR[tile.id] }}><UiIcon name={tile.icon} size={18} /></span>

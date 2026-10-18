@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, Fragment, isValidElement, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, type CSSProperties, type ReactNode } from "react";
 import "katex/dist/katex.min.css";
 import { renderFormula } from "@/lib/visuals/catalog";
 import { restoreInlineMath, scrubLeakedMarkup, splitRichParts } from "@/lib/visuals/math";
@@ -120,29 +120,31 @@ export function TableCellRich({ text, pair }: { text: string; pair?: boolean }) 
 
 function PlainTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
   return (
-    <div className="chat-table my-5">
-      <table>
-        <thead>
-          <tr>
-            {headers.map((cell, index) => (
-              <th key={index}>
-                <MixedText text={cell} />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className={splitTableCellContent(cell).some((part) => part.kind === "code") ? "chat-table-has-code" : undefined}>
-                  <TableCellRich text={cell} />
-                </td>
+    <div className="chat-table my-5" style={{ "--chat-table-columns": headers.length } as CSSProperties}>
+      <div className="chat-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {headers.map((cell, index) => (
+                <th key={index}>
+                  <MixedText text={cell} />
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => (
+                  <td key={cellIndex} className={splitTableCellContent(cell).some((part) => part.kind === "code") ? "chat-table-has-code" : undefined}>
+                    <TableCellRich text={cell} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -832,6 +832,7 @@ export function ProjectChat({
   async function streamChat(input: {
     prompt: string;
     history: ChatTurn[];
+    appendPrefix?: string;
     materialIds: string[];
     figures?: { name: string; page: number; path: string; mime: string; data: string }[];
     confirmed?: boolean;
@@ -945,7 +946,7 @@ export function ProjectChat({
       startTransition(() => {
         setStream((current) =>
           current
-            ? { ...current, content: text, intent: intentFromTool(tool.name), ...(text.trim() ? { status: undefined, toolActivity: undefined } : {}) }
+            ? { ...current, content: `${input.appendPrefix ?? ""}${text}`, intent: intentFromTool(tool.name), ...(text.trim() ? { status: undefined, toolActivity: undefined } : {}) }
             : current,
         );
       });
@@ -1088,6 +1089,9 @@ export function ProjectChat({
       replyTo?: string;
       userMessageId?: string;
       studio?: boolean;
+      resumeAssistantId?: string;
+      resumePrefix?: string;
+      resumeHistory?: ChatTurn[];
     },
   ) {
     let attachments = guest ? [] : (options?.attachments ?? []);
@@ -1123,7 +1127,7 @@ export function ProjectChat({
     let pool: Material[];
     let previewIds = guest ? [] : (options?.waitForPreview ?? []).filter(Boolean);
     const analysing = Boolean(ingest) || previewIds.length > 0;
-    const assistantId = allocateChatMessageId(project.id, chatThreadId);
+    const assistantId = options?.resumeAssistantId ?? allocateChatMessageId(project.id, chatThreadId);
     const activity: string[] = [];
     const recordActivity = (entry: string, status?: string) => {
       const clean = entry.replace(/\s+/g, " ").trim().slice(0, 100);
@@ -1140,6 +1144,16 @@ export function ProjectChat({
     setSending(true);
     setStoppable(true);
     setError(null);
+    if (options?.resumeAssistantId) {
+      setMessages((current) => current.map((item) => item.id === assistantId
+        ? { ...item, responseStatus: undefined }
+        : item));
+      setStoppedIds((current) => {
+        const next = new Set(current);
+        next.delete(assistantId);
+        return next;
+      });
+    }
     retryRef.current = () => {
       void sendPrompt(prompt, { ...options, userMessageId: savedUserMessageId });
     };
@@ -1149,7 +1163,7 @@ export function ProjectChat({
     setFollowup(null);
     setStream({
       id: assistantId,
-      content: "",
+      content: options?.resumePrefix ?? "",
       intent: "ask",
       status: options?.leadPath
         ? "Teaching…"
@@ -1169,7 +1183,7 @@ export function ProjectChat({
     pinBottomRef.current = !options?.studio;
     initialScrollRef.current = !options?.studio;
 
-    const history = historyWithoutCurrentPrompt(historyTurnsFromMessages(messages), modelPrompt);
+    const history = options?.resumeHistory ?? historyWithoutCurrentPrompt(historyTurnsFromMessages(messages), modelPrompt);
     let followTopic: string | undefined;
     let followTeach: string | undefined;
     const recordResponseStatus = async (
@@ -1327,6 +1341,7 @@ export function ProjectChat({
       const streamed = await streamChat({
         prompt: modelPrompt,
         history,
+        appendPrefix: options?.resumePrefix,
         materialIds: sourceIds,
         figures,
         confirmed: options?.confirmed,
@@ -1354,7 +1369,7 @@ export function ProjectChat({
 
       if (!toolStreamsText(tool.name)) {
         setStream((current) =>
-          current ? { ...current, content: "", intent, status: dispatchStatus(intent, tool.name, promptIsKa(modelPrompt)) } : current,
+          current ? { ...current, content: options?.resumePrefix ?? "", intent, status: dispatchStatus(intent, tool.name, promptIsKa(modelPrompt)) } : current,
         );
       }
 
@@ -1421,7 +1436,10 @@ export function ProjectChat({
         options?.leadPath && modelPrompt.startsWith("Tutor-lead (not a user request):")
           ? splitTeachingExam(dispatched.content, dispatched.promptAsk?.question)
           : null;
-      const content = leadExam?.taught || dispatched.content;
+      const generatedContent = leadExam?.taught || dispatched.content;
+      const content = options?.resumePrefix
+        ? `${options.resumePrefix.trimEnd()}${generatedContent.trim() ? `\n\n${generatedContent.trimStart()}` : ""}`
+        : generatedContent;
       const promptAsk =
         options?.leadPath && modelPrompt.startsWith("Tutor-lead (not a user request):")
           ? undefined
@@ -1632,6 +1650,33 @@ export function ProjectChat({
       attachments,
       acceptedTool: guest ? undefined : acceptedToolFromSkill(nextSkill),
     });
+  }
+
+  function resumeStoppedResponse() {
+    if (sendingRef.current) return;
+    let assistantIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "assistant") {
+        assistantIndex = index;
+        break;
+      }
+    }
+    if (assistantIndex < 0) return;
+    const stopped = messages[assistantIndex];
+    const prefix = stripArtifactMarkup(stopped.content).trim();
+    if (!(stopped.responseStatus === "stopped" || stoppedIds.has(stopped.id)) || stopped.artifact || !prefix) return;
+
+    const history: ChatTurn[] = historyTurnsFromMessages(messages.slice(0, assistantIndex));
+    history.push({ role: "assistant", content: prefix });
+    void sendPrompt(
+      "Continue your previous answer from where it stopped. Keep the saved text unchanged, do not repeat it, and finish the response naturally.",
+      {
+        skipUser: true,
+        resumeAssistantId: stopped.id,
+        resumePrefix: prefix,
+        resumeHistory: history,
+      },
+    );
   }
 
   async function beginPath() {
@@ -2119,6 +2164,14 @@ export function ProjectChat({
     }];
   }, [messages, pendingStreamId, project.id, chatThreadId]);
   const emptyThread = !loading && messages.length === 0 && !stream && !sending;
+  const latestAssistant = [...messages].reverse().find((item) => item.role === "assistant");
+  const resumeAvailable = Boolean(
+    !guest &&
+    latestAssistant &&
+    !latestAssistant.artifact &&
+    (latestAssistant.responseStatus === "stopped" || stoppedIds.has(latestAssistant.id)) &&
+    stripArtifactMarkup(latestAssistant.content).trim(),
+  );
 
   function requestHint() {
     const ask = latestAsk?.question;
@@ -2130,7 +2183,7 @@ export function ProjectChat({
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
         ref={scrollerRef}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+        className="chat-thread-viewport min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
         <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
             {loadingOlder ? <span role="status" className="pointer-events-none absolute top-2 z-10 rounded-full bg-background px-3 py-1 text-xs text-muted">Loading older messages…</span> : null}
@@ -2204,8 +2257,8 @@ export function ProjectChat({
         </div>
       ) : null}
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-        <div ref={composerBoxRef} className="pointer-events-auto mx-auto w-full max-w-[calc(48rem-2px)] bg-gradient-to-t from-background from-[28px] via-background/95 to-transparent px-8 pt-10 max-md:px-4">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background from-[28px] via-background/95 to-transparent">
+        <div ref={composerBoxRef} className="pointer-events-auto mx-auto w-full max-w-[calc(48rem-2px)] px-8 pt-10 max-md:px-4">
           <div>
             <ChatComposer
               ref={composerRef}
@@ -2240,6 +2293,8 @@ export function ProjectChat({
               }}
               onSend={() => void send()}
               onStop={stoppable ? () => abortRef.current?.abort() : undefined}
+              onResume={resumeStoppedResponse}
+              resumeAvailable={resumeAvailable}
               onFile={onFile}
               onPasteText={onPasteText}
               onUrl={onUrl}

@@ -36,7 +36,21 @@ function envFirebaseConfig() {
 function authDomainForOrigin(configured?: string): string | undefined {
   // Firebase's handler is always https://<authDomain>/__/auth/handler.
   // Using localhost makes Chrome open https://localhost:3000, which this dev
-  // server does not speak, so sign-in dies with ERR_SSL_PROTOCOL_ERROR.
+  // server does not speak, so sign-in dies with ERR_SSL_PROTOCOL_ERROR. On
+  // Safari, using the app's own Firebase-authorized host avoids the
+  // cross-site storage restrictions that break Firebase's redirect helper.
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname.toLowerCase();
+    const appHosts = new Set([
+      "tobyverse.ge",
+      "www.tobyverse.ge",
+      "tobyverse.web.app",
+      "tobyverse.firebaseapp.com",
+      "ugstuff-c351a.web.app",
+      "ugstuff-c351a.firebaseapp.com",
+    ]);
+    if (appHosts.has(host)) return host === "www.tobyverse.ge" ? "tobyverse.ge" : host;
+  }
   return configured;
 }
 

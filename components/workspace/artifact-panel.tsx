@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { subscribeChatMessages } from "@/lib/chats";
 import { subscribeMaterials } from "@/lib/materials";
 import { subscribeStudySheets } from "@/lib/study-sheets/store";
@@ -41,7 +41,6 @@ export function ArtifactPanel({
   listedProject,
   focus,
   session,
-  onResizeStart,
   onCloseMaterial,
   onStartPractice,
   onExitSession,
@@ -49,6 +48,7 @@ export function ArtifactPanel({
   onViewChange,
   onActivate,
   onPanelChromeChange,
+  hideTopBarOverride = false,
   liveNote = null,
   livePath = null,
   onLiveSettled,
@@ -62,7 +62,6 @@ export function ArtifactPanel({
   listedProject: boolean;
   focus: ArtifactFocus | null;
   session: { setId: string; ids: string[]; mode?: "practice" | "exam" } | null;
-  onResizeStart: (event: MouseEvent) => void;
   onCloseMaterial?: () => void;
   onStartPractice: (artifact: ChatArtifact) => void;
   onExitSession: () => void;
@@ -70,6 +69,7 @@ export function ArtifactPanel({
   onViewChange?: (view: TabId) => void;
   onActivate?: (artifact: ChatArtifact) => void;
   onPanelChromeChange?: (ownsChrome: boolean) => void;
+  hideTopBarOverride?: boolean;
   liveNote?: NotesLiveState | null;
   livePath?: PathLiveState | null;
   onLiveSettled?: () => void;
@@ -225,7 +225,7 @@ export function ArtifactPanel({
 
   const selectedMaterial = materials.find((item) => item.id === materialId) ?? null;
   const selectedSheet = sheets.find((item) => item.id === sheetId) ?? null;
-  const hideTopBar = Boolean(session) ||
+  const hideTopBar = hideTopBarOverride || Boolean(session) ||
     (tab === "materials" && Boolean(selectedMaterial)) ||
     (tab === "sheets" && (Boolean(selectedSheet) || Boolean(liveNote))) ||
     (tab === "path" && Boolean(selectedPath || livePath));
@@ -250,12 +250,6 @@ export function ArtifactPanel({
 
   return (
     <aside className="relative z-[1] flex h-full w-full shrink-0 flex-col overflow-hidden bg-transparent max-md:!w-full">
-      <button
-        type="button"
-        aria-label="Resize panel"
-        onMouseDown={onResizeStart}
-        className="absolute inset-y-0 left-0 z-10 hidden w-2 cursor-col-resize md:block"
-      />
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
         {session ? (
           <PracticeSession

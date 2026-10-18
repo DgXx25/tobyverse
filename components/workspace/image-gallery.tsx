@@ -189,7 +189,7 @@ function ImageGalleryModal({
   }, [ignoreEscape, onClose]);
   if (!mounted) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[80] overflow-y-auto bg-black/80 p-4" onClick={onClose}>
+    <div className="popup-backdrop fixed inset-0 z-[80] overflow-y-auto p-4" onClick={onClose}>
       <button
         type="button"
         aria-label="Close"
@@ -255,7 +255,7 @@ function ImageLightbox({
   }, [canNext, canPrev, index, onClose, onIndexChange]);
   if (!mounted || !image) return null;
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-16 py-14" onClick={onClose}>
+    <div className="popup-backdrop fixed inset-0 z-[90] flex items-center justify-center px-16 py-14" onClick={onClose}>
       <button
         type="button"
         aria-label="Close"

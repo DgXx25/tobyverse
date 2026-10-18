@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "eslint",
-    "deploy": "npm run clean && next build && firebase deploy --only hosting --force"
+    "deploy": "npm run clean && next build && firebase deploy --only auth,hosting --force"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

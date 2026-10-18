@@ -291,10 +291,13 @@ export function subscribeProjectsForUser(
   userId: string,
   onChange: (projects: Project[]) => void,
   onError?: (error: Error) => void,
+  options: { waitForServer?: boolean } = {},
 ): Unsubscribe {
   return onSnapshot(
     query(collection(getFirebaseDb(), COLLECTIONS.projects), where("userId", "==", userId)),
+    options.waitForServer ? { includeMetadataChanges: true } : {},
     (snapshot) => {
+      if (options.waitForServer && snapshot.metadata.fromCache) return;
       onChange(uniqueProjects(snapshot.docs.map((item) => mapProject(item.id, item.data()))));
     },
     (error) => onError?.(error),

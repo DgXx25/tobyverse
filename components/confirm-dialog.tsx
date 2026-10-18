@@ -19,12 +19,12 @@ export function ConfirmDialog({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      className="popup-backdrop fixed inset-0 z-50 flex items-center justify-center px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !pending) onCancel();
       }}
     >
-      <div className="w-full max-w-sm rounded-lg border border-border bg-surface p-5">
+      <div className="popup-surface w-full max-w-sm rounded-lg border border-border bg-surface p-5">
         <h2 className="text-sm font-medium text-foreground">{title}</h2>
         <p className="mt-2 text-sm leading-6 text-muted">{description}</p>
         {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}

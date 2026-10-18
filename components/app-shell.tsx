@@ -1,18 +1,19 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Topbar } from "@/components/topbar";
 import { ShellProvider, useShell } from "@/components/workspace/shell-context";
 import { WhatsNewModal } from "@/components/whats-new-modal";
-import { ChatSearch } from "@/components/chat-search";
 import { ChatModeSync } from "@/components/account/chat-mode-sync";
 import { ProjectTabKeepAlive } from "@/components/workspace/project-tab-keep-alive";
+import { CHAT_SEARCH_OPEN_EVENT } from "@/lib/workspace/ui-events";
 
 const SettingsModal = dynamic(() => import("@/components/workspace/settings-modal").then((mod) => mod.SettingsModal), { ssr: false });
 const AccountSheet = dynamic(() => import("@/components/account-sheet").then((mod) => mod.AccountSheet), { ssr: false });
+const ChatSearch = dynamic(() => import("@/components/chat-search").then((mod) => mod.ChatSearch), { ssr: false });
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, configured } = useAuth();
@@ -68,8 +69,30 @@ function AppShellFrame({ userId, children }: { userId: string; children: React.R
       {settingsOpen ? <SettingsModal /> : null}
       {accountSheetOpen ? <AccountSheet /> : null}
       <WhatsNewModal />
-      <ChatSearch userId={userId} />
+      <LazyChatSearch userId={userId} />
       <ChatModeSync />
     </div>
   );
+}
+
+function LazyChatSearch({ userId }: { userId: string }) {
+  const [requested, setRequested] = useState(false);
+
+  useEffect(() => {
+    const open = () => setRequested(true);
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+        event.preventDefault();
+        setRequested(true);
+      }
+    };
+    window.addEventListener(CHAT_SEARCH_OPEN_EVENT, open);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener(CHAT_SEARCH_OPEN_EVENT, open);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  return requested ? <ChatSearch userId={userId} initiallyOpen /> : null;
 }

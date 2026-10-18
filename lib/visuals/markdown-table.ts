@@ -24,6 +24,10 @@ function isSeparator(line: string): boolean {
   return text.length > 0 && /^[\s:|-]+$/.test(line) && /---/.test(line.replace(/\s/g, ""));
 }
 
+function isStandaloneDivider(line: string): boolean {
+  return /^\s*(?:-{3,}|(?:\*\s*){3,}|(?:_\s*){3,})\s*$/.test(line);
+}
+
 function cellCount(line: string): number {
   const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
   return trimmed.split("|").length;
@@ -73,6 +77,11 @@ export function splitMarkdownTables(source: string): Array<{ kind: "md"; text: s
         headers: repaired.headers.map(restore),
         rows: repaired.rows.map((row) => row.map(restore)),
       });
+      let afterTable = i;
+      while (afterTable < lines.length && !lines[afterTable].trim()) afterTable += 1;
+      if (afterTable < lines.length && isStandaloneDivider(lines[afterTable])) {
+        i = afterTable + 1;
+      }
     } else {
       md.push(...lines.slice(start, i));
     }

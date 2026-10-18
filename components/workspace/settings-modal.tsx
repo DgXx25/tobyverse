@@ -46,12 +46,12 @@ export function SettingsModal() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 hidden items-center justify-center bg-overlay p-4 md:flex" onClick={closeSettings}>
+    <div className="popup-backdrop fixed inset-0 z-50 hidden items-center justify-center p-4 md:flex" onClick={closeSettings}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
-        className="relative flex h-[min(640px,86vh)] w-full max-w-[860px] overflow-hidden rounded-2xl bg-surface shadow-2xl"
+        className="popup-surface relative flex h-[min(640px,86vh)] w-full max-w-[860px] overflow-hidden rounded-2xl bg-surface shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <aside className="flex w-[220px] shrink-0 flex-col px-2 py-3">

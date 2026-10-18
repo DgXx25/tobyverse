@@ -1,35 +1,40 @@
 "use client";
 
-import { useEffect } from "react";
-
-const ID_KEY = "tv.google-id-token";
-const ERR_KEY = "tv.google-oauth-error";
-const PENDING_KEY = "tv.google-oidc";
+import { useEffect, useState } from "react";
+import { consumeGoogleIdTokenFromUrl, POST_LOGIN_PATH } from "@/lib/auth";
 
 export default function GoogleCallbackPage() {
+  const [message, setMessage] = useState("Signing in…");
+
   useEffect(() => {
-    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
-    const params = new URLSearchParams(hash);
-    if (!params.get("id_token") && !params.get("error")) {
-      const query = new URLSearchParams(window.location.search);
-      for (const [key, value] of query) params.set(key, value);
-    }
-    try {
-      const idToken = params.get("id_token");
-      const error = params.get("error");
-      if (idToken) {
-        sessionStorage.setItem(ID_KEY, idToken);
-        sessionStorage.setItem(PENDING_KEY, "1");
+    let active = true;
+    void consumeGoogleIdTokenFromUrl().then(({ credential, error }) => {
+      if (!active) return;
+      if (credential?.user && !credential.user.isAnonymous) {
+        window.location.replace(POST_LOGIN_PATH);
+        return;
       }
-      if (error) sessionStorage.setItem(ERR_KEY, error);
-    } catch {
-      /* ignore */
-    }
-    const target = new URL("/", window.location.origin);
-    target.search = window.location.search;
-    target.hash = window.location.hash;
-    window.location.replace(target.toString());
+      if (error) {
+        setMessage(error);
+        return;
+      }
+      setMessage("Sign-in was cancelled or expired. Please try again.");
+    }).catch(() => {
+      if (active) setMessage("Sign-in failed. Please try again.");
+    });
+    return () => { active = false; };
   }, []);
 
-  return <p className="p-6 text-sm text-muted">Signing in…</p>;
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background px-6 text-center text-foreground">
+      <div className="max-w-sm">
+        <p role="status" className="text-sm text-muted">{message}</p>
+        {message !== "Signing in…" ? (
+          <a href="/login" className="mt-4 inline-flex rounded-full bg-surface px-4 py-2 text-sm text-foreground">
+            Return to sign in
+          </a>
+        ) : null}
+      </div>
+    </main>
+  );
 }

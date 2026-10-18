@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { ProjectSymbol, iconSearchLabel } from "@/components/workspace/pack-icon";
-import { ICON_NAMES } from "@/lib/workspace/icon-names";
 import { deleteProject, updateProjectMeta, updateProjectTitle } from "@/lib/projects";
 import { countMaterials } from "@/lib/materials";
 import { createNotebook } from "@/lib/workspace/notebook";
@@ -96,14 +95,14 @@ export function NotebooksHome() {
   if (!user) return null;
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-6 pb-16 pt-10 max-md:px-4 max-md:pt-6">
+    <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-6 pb-16 pt-10 max-[1100px]:px-3 max-[1100px]:pt-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[28px] font-medium tracking-tight text-foreground max-md:text-[24px]">Projects</h1>
+        <h1 className="text-[28px] font-medium tracking-tight text-foreground max-[1100px]:text-[24px]">Projects</h1>
         <button
           type="button"
           onClick={() => void create()}
           disabled={creating}
-          className="inline-flex h-10 items-center gap-2 rounded-full bg-foreground px-4 text-[14px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="project-card inline-flex h-10 items-center gap-2 rounded-full bg-foreground px-4 text-[14px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           <UiIcon name="plus" size={16} />
           New project
@@ -121,10 +120,12 @@ export function NotebooksHome() {
 
       {error ? <p role="alert" className="mt-4 text-[13px] text-red-400">{error}</p> : null}
 
-      <div className="mt-6 grid grid-cols-4 gap-4 max-md:grid-cols-2">
-        {shown.map((project) => (
-          <NotebookCard key={project.id} project={project} userId={user.uid} sourceCount={sourceCounts[project.id]} />
-        ))}
+      <div className="mt-6 grid grid-cols-4 gap-4 max-[1100px]:mt-4 max-[1100px]:grid-cols-1 max-[1100px]:gap-0 max-[1100px]:border-t max-[1100px]:border-border">
+        {!ready
+          ? Array.from({ length: 8 }, (_, index) => <NotebookCardSkeleton key={index} />)
+          : shown.map((project) => (
+              <NotebookCard key={project.id} project={project} userId={user.uid} sourceCount={sourceCounts[project.id]} />
+            ))}
       </div>
 
       {ready && notebooks.length === 0 ? (
@@ -132,6 +133,20 @@ export function NotebooksHome() {
           Create a project, add your sources, and ask anything about them.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function NotebookCardSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex aspect-[5/3] animate-pulse flex-col rounded-2xl bg-gradient-to-br from-surface via-surface-2 to-surface p-4 max-[1100px]:aspect-auto max-[1100px]:min-h-[68px] max-[1100px]:flex-row max-[1100px]:items-center max-[1100px]:gap-3 max-[1100px]:rounded-none max-[1100px]:border-b max-[1100px]:border-border max-[1100px]:p-2"
+    >
+      <span className="h-12 w-12 shrink-0 rounded-xl bg-foreground/10 max-[1100px]:h-8 max-[1100px]:w-8" />
+      <span className="h-4 w-3/4 rounded bg-foreground/10 max-[1100px]:mt-0 max-[1100px]:h-3 max-[1100px]:w-4/5" />
+      <span className="mt-2 h-4 w-1/2 rounded bg-foreground/10 max-[1100px]:hidden" />
+      <span className="mt-auto h-3 w-2/5 rounded bg-foreground/10 max-[1100px]:hidden" />
     </div>
   );
 }
@@ -209,8 +224,8 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
   useEffect(() => {
     if (view !== "icon") return;
     let cancel = false;
-    void Promise.resolve(ICON_NAMES).then((names) => {
-      if (!cancel) setPackNames(names.slice());
+    void import("@/lib/workspace/icon-names").then(({ ICON_NAMES }) => {
+      if (!cancel) setPackNames(ICON_NAMES.slice());
     });
     return () => {
       cancel = true;
@@ -249,7 +264,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
   return (
     <div
       ref={rootRef}
-      className="group relative"
+      className="group relative max-[1100px]:border-b max-[1100px]:border-border"
       onContextMenu={(event) => {
         event.preventDefault();
         show("main");
@@ -259,17 +274,20 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
     >
       <Link
         href={`/p/${project.id}`}
-        className="project-card flex aspect-[5/3] flex-col rounded-2xl bg-surface p-4 transition-colors"
+        className="project-card flex aspect-[5/3] flex-col rounded-2xl bg-surface p-4 max-[1100px]:aspect-auto max-[1100px]:min-h-[68px] max-[1100px]:flex-row max-[1100px]:items-center max-[1100px]:gap-3 max-[1100px]:rounded-none max-[1100px]:bg-transparent max-[1100px]:px-2 max-[1100px]:py-2 max-[1100px]:pr-10"
       >
-        <span className="flex h-12 w-12 items-center justify-center text-foreground">
-          <ProjectSymbol name={icon} size={38} color={project.iconColor} className={project.iconColor ? "" : "accent-symbol"} />
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center text-foreground max-[1100px]:h-8 max-[1100px]:w-8">
+          <ProjectSymbol name={icon} size={38} color={project.iconColor} className={`${project.iconColor ? "" : "accent-symbol"} max-[1100px]:hidden`} />
+          <ProjectSymbol name={icon} size={20} color={project.iconColor} className={`${project.iconColor ? "" : "accent-symbol"} hidden max-[1100px]:block`} />
         </span>
-        <h3 className="mt-4 line-clamp-2 min-h-[2.75em] text-[18px] font-medium leading-snug tracking-tight text-foreground">
-          {notebookTitle(project.title)}
-        </h3>
-        <p className="mt-auto pt-4 text-[12px] text-muted">
-          {projectMeta(project.updatedAt || project.createdAt, sourceCount)}
-        </p>
+        <span className="flex min-w-0 flex-1 flex-col max-[1100px]:justify-center">
+          <h3 className="mt-4 line-clamp-2 min-h-[2.75em] text-[18px] font-medium leading-snug tracking-tight text-foreground max-[1100px]:mt-0 max-[1100px]:min-h-0 max-[1100px]:text-[14px]">
+            {notebookTitle(project.title)}
+          </h3>
+          <p className="mt-auto truncate pt-4 text-[12px] text-muted max-[1100px]:mt-1 max-[1100px]:pt-0 max-[1100px]:text-[11px]">
+            {projectMeta(project.updatedAt || project.createdAt, sourceCount)}
+          </p>
+        </span>
       </Link>
 
       <button
@@ -282,7 +300,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
           show("main");
           setOpen((current) => !current);
         }}
-        className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-foreground/10 hover:text-foreground"
+        className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-foreground/10 hover:text-foreground max-[1100px]:right-0 max-[1100px]:top-1/2 max-[1100px]:-translate-y-1/2"
       >
         <UiIcon name="moreVertical" size={18} />
       </button>

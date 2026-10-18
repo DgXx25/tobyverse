@@ -115,6 +115,7 @@ export function SourcesPane({
   readingId = null,
   onCloseReading,
   onClose,
+  hideTopBar = false,
   className = "",
 }: {
   projectId: string;
@@ -126,6 +127,7 @@ export function SourcesPane({
   readingId?: string | null;
   onCloseReading?: () => void;
   onClose?: () => void;
+  hideTopBar?: boolean;
   className?: string;
 }) {
   const [pending, setPending] = useState<Pending[]>([]);
@@ -339,19 +341,21 @@ export function SourcesPane({
       {reading ? (
         <MaterialText material={reading} onBack={() => onCloseReading?.()} />
       ) : <>
-      <header className="flex h-11 shrink-0 items-center justify-end px-2">
-        {onClose ? (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Hide sources"
-            title="Hide sources"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-foreground md:hidden"
-          >
-            <UiIcon name="close" size={17} />
-          </button>
-        ) : null}
-      </header>
+      {!hideTopBar ? (
+        <header className="flex h-11 shrink-0 items-center justify-end px-2">
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Hide sources"
+              title="Hide sources"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-foreground md:hidden"
+            >
+              <UiIcon name="close" size={17} />
+            </button>
+          ) : null}
+        </header>
+      ) : null}
 
       <div className="shrink-0 px-3 pt-3">
         <button
@@ -518,7 +522,7 @@ export function SourcesPane({
       {menu ? createPortal(
         <div
           data-source-menu
-          className="fixed z-[70] w-[196px] overflow-hidden rounded-xl bg-surface-2 p-1 shadow-xl"
+          className="fixed z-[70] w-[196px] overflow-hidden rounded-xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-1 shadow-xl"
           style={menu.pointer
             ? positionContextMenu(menu.pointer.x, menu.pointer.y, 196, 84, window.innerWidth, window.innerHeight)
             : { top: menu.top, right: menu.right }}
@@ -535,12 +539,12 @@ export function SourcesPane({
         document.body,
       ) : null}
       {renameTarget ? createPortal(
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setRenameTarget(null); }}>
+        <div className="popup-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setRenameTarget(null); }}>
           <form
             role="dialog"
             aria-modal="true"
             aria-labelledby="rename-source-title"
-            className="w-full max-w-[440px] rounded-2xl bg-surface p-5 text-foreground shadow-2xl"
+            className="popup-surface w-full max-w-[440px] rounded-2xl bg-surface p-5 text-foreground shadow-2xl"
             onSubmit={(event) => { event.preventDefault(); void saveRename(); }}
           >
             <h2 id="rename-source-title" className="text-[16px] font-medium tracking-tight">Rename {renameTarget.title}?</h2>
@@ -606,12 +610,12 @@ function AddSourcesDialog({
   }, [onClose]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="popup-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section
         role="dialog"
         aria-modal="true"
         aria-label="Add sources"
-        className="w-full max-w-[560px] rounded-2xl bg-surface p-4 text-foreground shadow-2xl"
+        className="popup-surface w-full max-w-[560px] rounded-2xl bg-surface p-4 text-foreground shadow-2xl"
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes("Files")) return;
           event.preventDefault();

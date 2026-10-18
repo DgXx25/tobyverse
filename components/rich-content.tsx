@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { StreamAnimRoot } from "@/components/workspace/stream-text";
 import { ChatBlockStateScope } from "@/components/workspace/chat-block-state";
@@ -93,7 +93,7 @@ function ChatTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
   const view = layoutChatTable(headers, rows);
   const even = view.compact.every((shrink) => !shrink);
   return (
-    <div className="chat-table">
+    <div className="chat-table" style={{ "--chat-table-columns": view.compact.length } as CSSProperties}>
       <div className="chat-table-scroll">
         <table className={even ? "chat-table-even" : undefined}>
           <colgroup>

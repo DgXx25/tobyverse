@@ -23,7 +23,7 @@ html.light {
   --highlight-bg: color-mix(in srgb, #ea7a2f 16%, var(--surface-2));
   --highlight-border: color-mix(in srgb, #ea7a2f 36%, var(--border));
   --scrollbar: var(--panel-border);
-  --overlay: rgba(24, 24, 27, 0.45);
+  --overlay: rgba(24, 24, 27, 0.24);
   --app-wallpaper: none;
   --app-wallpaper-opacity: 0;
   --toby-c0: var(--palette-blue, var(--accent));
@@ -59,7 +59,7 @@ html.dark {
   --highlight-bg: color-mix(in srgb, #ea7a2f 20%, var(--surface-2));
   --highlight-border: color-mix(in srgb, #ea7a2f 40%, var(--border));
   --scrollbar: var(--panel-border);
-  --overlay: rgba(10, 8, 7, 0.64);
+  --overlay: rgba(10, 8, 7, 0.34);
   --app-wallpaper: none;
   --app-wallpaper-opacity: 0;
   --toby-c0: var(--palette-blue, var(--accent));
@@ -95,7 +95,7 @@ html.marketing.dark {
   --highlight-bg: color-mix(in srgb, #ea7a2f 20%, var(--surface-2));
   --highlight-border: color-mix(in srgb, #ea7a2f 40%, var(--border));
   --scrollbar: var(--panel-border);
-  --overlay: rgba(10, 8, 7, 0.64);
+  --overlay: rgba(10, 8, 7, 0.34);
 }
 
 html.marketing.light {
@@ -114,7 +114,7 @@ html.marketing.light {
   --accent: #0088ff;
   --pick: #0088ff;
   --scrollbar: var(--panel-border);
-  --overlay: rgba(255, 255, 255, 0.64);
+  --overlay: rgba(255, 255, 255, 0.3);
 }
 
 .accent-symbol {
@@ -238,13 +238,74 @@ html.dark.high-contrast {
   --text: #ffffff;
   --text-muted: #c2c2c7;
   --scrollbar: var(--panel-border);
-  --overlay: rgba(0, 0, 0, 0.84);
+  --overlay: rgba(0, 0, 0, 0.5);
+}
+
+@keyframes popup-backdrop-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes popup-backdrop-exit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes popup-surface-enter {
+  from { opacity: 0; transform: scale(0.975); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes popup-surface-exit {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.985); }
+}
+
+.popup-overlay {
+  background-color: var(--overlay) !important;
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.popup-backdrop {
+  background-color: var(--overlay) !important;
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: popup-backdrop-enter 160ms ease-out both;
+}
+
+.popup-surface {
+  animation: popup-surface-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: center;
+}
+
+.popup-backdrop.popup-closing {
+  animation: popup-backdrop-exit 150ms ease-in both;
+}
+
+.popup-surface.popup-closing {
+  animation: popup-surface-exit 150ms ease-in both;
+}
+
+.app-shell:has(.popup-backdrop) > main {
+  z-index: 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-backdrop,
+  .popup-surface {
+    animation: none !important;
+  }
 }
 
 html.theme-switching,
 html.theme-switching *,
 html.theme-switching *::before,
 html.theme-switching *::after {
+  transition: none !important;
+}
+
+*:hover {
   transition: none !important;
 }
 
@@ -326,7 +387,14 @@ html.dark .topbar-tabs .sidebar-item-active:has(:focus-visible) {
 
 html.light .project-card:hover,
 html.light .project-card:focus-visible {
-  background-color: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
+  outline: 1px solid var(--text);
+  outline-offset: 3px;
+}
+
+html.dark .project-card:hover,
+html.dark .project-card:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: 3px;
 }
 
 .sidebar-project-control,
@@ -673,19 +741,72 @@ html.nav-lock body {
 }
 
 .mobile-tabbar {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: none;
+  overflow: hidden;
+  background: transparent;
 }
 
-@media (max-width: 767px) {
+.mobile-tab-indicator {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 3);
+  border-radius: 999px;
+  background: var(--item-active-bg);
+  transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1);
+  pointer-events: none;
+}
+
+@media (max-width: 1000px) {
+  .mobile-topbar {
+    min-width: 0;
+  }
+
+  .topbar-tabs,
+  .mobile-search-button,
+  .mobile-topbar a[aria-label="Library"] {
+    display: none !important;
+  }
+
+  .mobile-tabbar {
+    display: flex;
+  }
+
+  .project-workspace.mobile-panel-background {
+    background: var(--panel-bg);
+  }
+
+  .artifact-panel-reserve,
+  .desktop-pane-control,
+  .artifact-panel-slot:not(.mobile-page) {
+    display: none !important;
+  }
+
+  .mobile-pane-hidden {
+    display: none !important;
+  }
+
+  @keyframes mobile-pane-enter {
+    from { opacity: 0.82; transform: translate3d(12px, 0, 0); }
+    to { opacity: 1; transform: translate3d(0, 0, 0); }
+  }
+
+  .mobile-pane-enter {
+    animation: mobile-pane-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
   .artifact-panel-slot.mobile-page {
     position: relative !important;
     inset: auto !important;
-    width: calc(100% - 16px) !important;
+    width: 100% !important;
     min-width: 0 !important;
     max-width: none !important;
-    height: calc(100% - 16px);
-    margin: 8px;
-    border-radius: 1rem;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--panel-bg);
   }
 
   .artifact-panel-slot.mobile-page > div {
@@ -695,13 +816,133 @@ html.nav-lock body {
     min-width: 0 !important;
     max-width: none !important;
     height: 100%;
+    background: var(--panel-bg);
   }
 }
 
-@media (max-width: 767px) {
+/* The app shell can leave the project workspace narrower than the viewport. */
+.app-shell:has(.project-workspace.phone-layout) .mobile-topbar {
+  min-width: 0;
+}
+
+.app-shell:has(.project-workspace.phone-layout) .topbar-tabs,
+.app-shell:has(.project-workspace.phone-layout) .mobile-search-button,
+.app-shell:has(.project-workspace.phone-layout) .mobile-topbar a[aria-label="Library"],
+.app-shell:has(.project-workspace.phone-layout) .mobile-topbar button[aria-label="Expand pane"],
+.app-shell:has(.project-workspace.phone-layout) .mobile-topbar button[aria-label="Restore pane"] {
+  display: none !important;
+}
+
+.project-workspace.phone-layout .mobile-tabbar {
+  display: flex;
+}
+
+.project-workspace.phone-layout.mobile-panel-background {
+  background: var(--panel-bg);
+}
+
+.project-workspace.phone-layout .artifact-panel-reserve,
+.project-workspace.phone-layout .desktop-pane-control,
+.project-workspace.phone-layout .artifact-panel-slot:not(.mobile-page) {
+  display: none !important;
+}
+
+.project-workspace.phone-layout .mobile-pane-hidden {
+  display: none !important;
+}
+
+.project-workspace.phone-layout .artifact-panel-slot button[aria-label="Resize panel"],
+.project-workspace.phone-layout .laptop-source-panel button[aria-label="Resize sources"] {
+  display: none !important;
+}
+
+.project-workspace.phone-layout .artifact-panel-slot.mobile-page {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--panel-bg);
+}
+
+.project-workspace.phone-layout .artifact-panel-slot.mobile-page > div {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100%;
+  background: var(--panel-bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-workspace.phone-layout .mobile-pane-enter {
+    animation: none;
+  }
+
+  .project-workspace.phone-layout .mobile-tab-indicator {
+    transition: none;
+  }
+}
+
+@media (max-width: 1000px) and (prefers-reduced-motion: reduce) {
+  .mobile-pane-enter {
+    animation: none;
+  }
+
+  .mobile-tab-indicator {
+    transition: none;
+  }
+}
+
+@media (max-width: 1000px) {
   .mobile-topbar button[aria-label="Expand pane"],
   .mobile-topbar button[aria-label="Restore pane"] {
     display: none;
+  }
+}
+
+@media (min-width: 1001px) {
+  .single-panel-switch {
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .single-panel-indicator {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 2px;
+    width: calc((100% - 4px) / 2);
+    border-radius: 999px;
+    background: var(--item-active-bg);
+    transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1);
+    pointer-events: none;
+  }
+
+  .single-panel-workspace .laptop-source-reserve,
+  .single-panel-workspace .laptop-source-panel,
+  .single-panel-workspace .desktop-pane-control {
+    display: none !important;
+  }
+
+  .single-panel-workspace .single-panel-reserve {
+    display: block !important;
+  }
+
+  .single-panel-workspace .artifact-panel-slot button[aria-label="Resize panel"] {
+    right: 0;
+    left: auto;
+  }
+}
+
+@media (min-width: 1001px) and (prefers-reduced-motion: reduce) {
+  .single-panel-indicator {
+    transition: none;
   }
 }
 
@@ -841,7 +1082,7 @@ html.ios-standalone.marketing::before {
 
 .artifact-panel-slot {
   contain: layout paint;
-  transition: width 180ms cubic-bezier(0.32, 0.72, 0, 1), opacity 180ms ease;
+  transition: width 180ms cubic-bezier(0.32, 0.72, 0, 1), opacity 180ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .artifact-panel-slot[data-panel-open="false"] {
@@ -1014,17 +1255,45 @@ html.ios-standalone.marketing::before {
 }
 
 .chat-table {
-  width: 100%;
+  width: calc(100% + 36px);
+  max-width: min(calc(100vw - 24px), calc(100% + 36px));
   margin: 20px 0;
+  margin-inline: -18px;
   overflow: hidden;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  border-radius: 12px;
+  background: var(--panel-bg);
 }
 
 .chat-table-scroll {
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: var(--scrollbar) transparent;
+  scrollbar-width: thin;
+}
+
+.chat-thread-viewport {
+  container-type: inline-size;
+}
+
+@media (min-width: 768px) {
+  .chat-thread-viewport .chat-table {
+    --chat-table-expanded-size: max(100%, calc(var(--chat-table-columns, 2) * 204px));
+    --chat-table-rendered-size: min(var(--chat-table-expanded-size), calc(100cqw - 8px));
+    width: var(--chat-table-rendered-size);
+    max-width: calc(100cqw - 8px);
+    margin-left: calc((100% - var(--chat-table-rendered-size)) / 2);
+    margin-right: 0;
+  }
+}
+
+html:not(.platform-mac) .chat-table-scroll::-webkit-scrollbar {
+  height: 7px;
+}
+
+html:not(.platform-mac) .chat-table-scroll::-webkit-scrollbar-thumb {
+  cursor: grab;
 }
 
 .chat-body > .chat-table:first-child {
@@ -1046,12 +1315,13 @@ html.ios-standalone.marketing::before {
 
 .chat-table table {
   border-collapse: collapse;
-  width: 100%;
-  table-layout: fixed;
+  width: max(100%, calc(var(--chat-table-columns, 2) * 156px));
+  min-width: 100%;
+  table-layout: auto;
 }
 
 .chat-table table.chat-table-even {
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .chat-body th,
@@ -1063,7 +1333,7 @@ html.ios-standalone.marketing::before {
 
 .chat-table th,
 .chat-table td {
-  padding: 12px 14px;
+  padding: 12px 20px;
   vertical-align: top;
   text-align: left;
   background: transparent;
@@ -1073,9 +1343,29 @@ html.ios-standalone.marketing::before {
   box-shadow: none;
 }
 
-.chat-table thead tr,
+@media (min-width: 768px) {
+  .chat-table th,
+  .chat-table td {
+    min-width: 144px;
+  }
+}
+
+.chat-table .chat-inline-math {
+  white-space: nowrap;
+}
+
+.chat-table thead tr {
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 24%, transparent);
+}
+
 .chat-table tbody tr:not(:last-child) {
   border-bottom: 1px solid var(--panel-border);
+}
+
+.chat-table tbody tr:last-child,
+.chat-table tbody tr:last-child > th,
+.chat-table tbody tr:last-child > td {
+  border-bottom: 0 !important;
 }
 
 .chat-table .chat-table-prose {
@@ -1152,6 +1442,16 @@ html.ios-standalone.marketing::before {
 }
 
 @media (max-width: 640px) {
+  .chat-table {
+    width: calc(100% + 24px);
+    max-width: min(calc(100vw - 16px), calc(100% + 24px));
+    margin-inline: -12px;
+  }
+
+  .chat-table table {
+    width: max(100%, calc(var(--chat-table-columns, 2) * 136px));
+  }
+
   .chat-table table {
     font-size: 13px;
     line-height: 1.55;
@@ -1159,7 +1459,7 @@ html.ios-standalone.marketing::before {
 
   .chat-table th,
   .chat-table td {
-    padding: 10px 8px;
+    padding: 10px 12px;
   }
 }
 
@@ -1539,13 +1839,15 @@ html.ios-standalone.marketing::before {
   display: inline-flex;
   align-items: center;
   margin: 0 0.15em;
-  padding: 0.05em 0.4em;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  padding: 0;
+  border-radius: 0;
+  background: none;
   vertical-align: middle;
 }
 
 .note-mark .chat-inline-math {
+  padding: 0.05em 0.4em;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--highlight) 16%, transparent);
 }
 

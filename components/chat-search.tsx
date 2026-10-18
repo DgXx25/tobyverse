@@ -41,13 +41,12 @@ import {
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { useShell } from "@/components/workspace/shell-context";
 import { StorageThumb } from "@/components/workspace/sources-chip";
+import { CHAT_SEARCH_OPEN_EVENT } from "@/lib/workspace/ui-events";
 import type { Project } from "@/types/project";
-
-export const CHAT_SEARCH_OPEN_EVENT = "tobyverse:open-search";
 
 type SearchTab = "chats" | "media";
 
-export function ChatSearch({ userId }: { userId: string }) {
+export function ChatSearch({ userId, initiallyOpen = false }: { userId: string; initiallyOpen?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const { setSelectedProjectId } = useShell();
@@ -59,7 +58,7 @@ export function ChatSearch({ userId }: { userId: string }) {
   const loadedSignature = useRef("");
   const catalogRef = useRef<SearchChat[]>([]);
   const threadsHydrated = useRef(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const [tab, setTab] = useState<SearchTab>("chats");
   const [query, setQuery] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -430,7 +429,7 @@ export function ChatSearch({ userId }: { userId: string }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-4 py-7 backdrop-blur-[6px] max-md:p-0"
+      className="popup-backdrop fixed inset-0 z-50 flex items-center justify-center px-4 py-7 max-md:p-0"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) closeSearch();
       }}
@@ -440,7 +439,7 @@ export function ChatSearch({ userId }: { userId: string }) {
         role="dialog"
         aria-modal="true"
         aria-label="Search chats and media"
-        className={`chat-search-shell flex flex-col overflow-hidden border border-border bg-surface-2 shadow-[0_28px_90px_rgba(0,0,0,0.28)] max-md:h-dvh max-md:w-screen max-md:rounded-none max-md:border-0 ${fullscreen ? "h-dvh w-screen rounded-none" : "h-[min(680px,calc(100dvh-56px))] w-[min(960px,calc(100vw-32px))] rounded-[26px]"}`}
+        className={`popup-surface chat-search-shell flex flex-col overflow-hidden border border-border bg-surface-2 shadow-[0_28px_90px_rgba(0,0,0,0.28)] max-md:h-dvh max-md:w-screen max-md:rounded-none max-md:border-0 ${fullscreen ? "h-dvh w-screen rounded-none" : "h-[min(680px,calc(100dvh-56px))] w-[min(960px,calc(100vw-32px))] rounded-[26px]"}`}
       >
         <header className="flex h-[58px] shrink-0 items-center border-b border-border px-5 max-md:h-auto max-md:flex-wrap max-md:px-3 max-md:py-2">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -613,8 +612,8 @@ export function ChatSearch({ userId }: { userId: string }) {
       </section>
 
       {deleteOpen && selectedResult ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 px-4" onMouseDown={(event) => event.target === event.currentTarget && !deletePending && setDeleteOpen(false)}>
-          <div ref={confirmRef} role="dialog" aria-modal="true" aria-labelledby="chat-search-delete-title" className="w-full max-w-sm rounded-2xl border border-border bg-surface-2 p-5 shadow-2xl">
+        <div className="popup-backdrop fixed inset-0 z-[60] flex items-center justify-center px-4" onMouseDown={(event) => event.target === event.currentTarget && !deletePending && setDeleteOpen(false)}>
+          <div ref={confirmRef} role="dialog" aria-modal="true" aria-labelledby="chat-search-delete-title" className="popup-surface w-full max-w-sm rounded-2xl border border-border bg-surface-2 p-5 shadow-2xl">
             <h2 id="chat-search-delete-title" className="text-[15px] font-medium text-foreground">Delete “{selectedResult.chat.title}”?</h2>
             <p className="mt-2 text-[13px] leading-5 text-muted">
               {searchDeletionScope({

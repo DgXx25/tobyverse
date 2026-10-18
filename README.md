@@ -31,7 +31,7 @@ Production build, then `next start` on port 3000.
 
 ## Hosting
 
-Classic Firebase Hosting is a CDN. It cannot execute this Next.js app (API routes, App Router, no `output: "export"`). The working path is the Firebase web-frameworks adapter: `hosting.source` is this repo, and `firebase deploy --only hosting` builds Next and updates Cloud Function / Cloud Run `ssrtobyverse` (us-central1) plus the `tobyverse` Hosting site on project `ugstuff-c351a`. Do not rewrite Hosting to the old `ssrugstuffc351a` service — that leaves `/project/[id]` and other dynamic routes on a stale build while `/new` looks current.
+Classic Firebase Hosting is a CDN. It cannot execute this Next.js app (API routes, App Router, no `output: "export"`). The working path is the Firebase web-frameworks adapter: `hosting.source` is this repo, and `firebase deploy --only auth,hosting` applies Google sign-in configuration, builds Next, and updates Cloud Function / Cloud Run `ssrtobyverse` (us-central1) plus the `tobyverse` Hosting site on project `ugstuff-c351a`. Do not rewrite Hosting to the old `ssrugstuffc351a` service — that leaves `/project/[id]` and other dynamic routes on a stale build while `/new` looks current.
 
 One-time (if `webframeworks` is off):
 
@@ -43,10 +43,10 @@ Publish this repo’s current UI:
 
 ```bash
 npm run build
-firebase deploy --only hosting
+firebase deploy --only auth,hosting
 ```
 
-Or `npm run deploy` (enables the experiment, builds, then deploys hosting). Live URL: [https://tobyverse.web.app](https://tobyverse.web.app). Requires the Firebase CLI and `firebase login`. Does not deploy Cloud Functions as a separate product; the Next server is the frameworks Cloud Run service.
+Or `npm run deploy` (builds, then deploys Auth and Hosting). Live URL: [https://tobyverse.web.app](https://tobyverse.web.app). Requires the Firebase CLI and `firebase login`. Does not deploy Cloud Functions as a separate product; the Next server is the frameworks Cloud Run service.
 
 Do not set `hosting.public` to `public/`. That only uploads favicons and static files from `public/`; `/account` and the app shell keep coming from the last Cloud Run revision.
 

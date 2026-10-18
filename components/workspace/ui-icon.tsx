@@ -51,6 +51,7 @@ import PaintBoardIcon from "../../node_modules/@hugeicons/core-free-icons/dist/e
 import PaperclipIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PaperclipIcon.js";
 import PencilEdit01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PencilEdit01Icon.js";
 import PinIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PinIcon.js";
+import PlayIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PlayIcon.js";
 import PlusSignIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/PlusSignIcon.js";
 import Search01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Search01Icon.js";
 import SearchVisualIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/SearchVisualIcon.js";
@@ -122,6 +123,7 @@ const ICONS = {
   imageSearch: SearchVisualIcon,
   bulb: BulbIcon,
   send: MoveUpIcon,
+  play: PlayIcon,
   appearance: PaintBoardIcon,
   usage: ChartColumnIcon,
   data: Database01Icon,

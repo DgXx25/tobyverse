@@ -43,7 +43,7 @@ export function ReportContentModal({
 
   return createPortal((
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay/70 px-4 py-6 backdrop-blur-[2px]"
+      className="popup-backdrop fixed inset-0 z-[100] flex items-center justify-center px-4 py-6"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose();
       }}
@@ -52,7 +52,7 @@ export function ReportContentModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="report-content-title"
-        className="flex max-h-[min(90vh,760px)] w-full max-w-[560px] flex-col rounded-[24px] border border-border bg-surface p-5 text-foreground shadow-2xl max-sm:p-4"
+        className="popup-surface flex max-h-[min(90vh,760px)] w-full max-w-[560px] flex-col rounded-[24px] border border-border bg-surface p-5 text-foreground shadow-2xl max-sm:p-4"
       >
         <header className="flex items-center justify-between gap-4">
           <h2 id="report-content-title" className="text-[18px] font-semibold tracking-tight">Report content</h2>

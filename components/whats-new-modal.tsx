@@ -42,7 +42,7 @@ export function WhatsNewModal() {
       {open ? (
         <motion.div
           key="whats-new"
-          className="fixed inset-0 z-[70] flex items-end justify-center bg-overlay p-4 sm:items-center"
+          className="popup-overlay fixed inset-0 z-[70] flex items-end justify-center p-4 sm:items-center"
           initial={reduceMotion ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

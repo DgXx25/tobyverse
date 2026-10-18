@@ -35,6 +35,7 @@ export function useNotebooks(userId: string | undefined): { notebooks: Project[]
         setReady(true);
       },
       () => setReady(true),
+      { waitForServer: true },
     );
   }, [userId]);
 

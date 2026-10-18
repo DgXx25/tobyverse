@@ -24,6 +24,7 @@ import { useAuth } from "@/components/auth-provider";
 import { ProjectChat } from "@/components/project-chat";
 import { ProjectLoading } from "@/components/project-loading";
 import { ArtifactPanel, type ArtifactFocus, type ArtifactTabId } from "@/components/workspace/artifact-panel";
+import { ProjectSettingsPane } from "@/components/workspace/project-settings-pane";
 import { SourcesPane } from "@/components/workspace/sources-pane";
 import type { StudioRequest, StudioTile } from "@/lib/workspace/studio";
 import { useShell } from "@/components/workspace/shell-context";
@@ -49,6 +50,7 @@ const SOURCES_MIN = 260;
 const SOURCES_MAX = 440;
 const SOURCES_DEFAULT = 320;
 const PANEL_OUTER_GAP = 8;
+const SINGLE_PANEL_COLLAPSED_WIDTH = 56;
 const SOURCES_KEY = "tv.sources.open";
 const SOURCES_WIDTH_KEY = "tv.sources.width";
 const STUDIO_KEY = "tv.studio.open";
@@ -123,6 +125,7 @@ export function ProjectView({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [notebookSettingsOpen, setNotebookSettingsOpen] = useState(false);
   const [panelExpanded, setPanelExpanded] = useState(false);
   const [panelOwnChrome, setPanelOwnChrome] = useState(false);
   const [composerHeight, setComposerHeight] = useState(128);
@@ -136,7 +139,9 @@ export function ProjectView({
   const [panelView, setPanelView] = useState<ArtifactTabId>("studio");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [phone, setPhone] = useState(false);
+  const [singlePanel, setSinglePanel] = useState(false);
   const [mobilePane, setMobilePane] = useState<"chat" | "sources" | "studio">("chat");
+  const [sidePane, setSidePane] = useState<"sources" | "studio">("studio");
   const [studioRequest, setStudioRequest] = useState<StudioRequest | null>(null);
   const [readingId, setReadingId] = useState<string | null>(null);
   const studioSeq = useRef(0);
@@ -155,7 +160,7 @@ export function ProjectView({
   const workspaceRef = useRef<HTMLDivElement>(null);
   const materialReturn = useRef<{ focus: ArtifactFocus | null; panelOpen: boolean } | null>(null);
   widthRef.current = artifactWidth;
-  sourcesWidthRef.current = sourcesOpen ? sourcesWidth : 0;
+  sourcesWidthRef.current = sourcesOpen && !singlePanel ? sourcesWidth : 0;
 
   useEffect(() => {
     if (!shareNotice) return;
@@ -175,28 +180,38 @@ export function ProjectView({
   }, [getWorkspaceWidth]);
 
   useLayoutEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
+    let previousPhone: boolean | null = null;
     function apply() {
-      const mobile = mq.matches;
+      const width = workspaceRef.current?.clientWidth || window.innerWidth;
+      const mobile = width <= 1000;
+      if (mobile === previousPhone) return;
+      previousPhone = mobile;
       setPhone(mobile);
+      setSinglePanel(!mobile);
       if (mobile) return;
       setSourcesOpen(readFlag(SOURCES_KEY) ?? true);
       setPanelOpen(readFlag(STUDIO_KEY) ?? true);
       setSourcesWidth(readWidth(SOURCES_WIDTH_KEY, SOURCES_DEFAULT, SOURCES_MIN, SOURCES_MAX));
     }
     apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
+    const workspace = workspaceRef.current;
+    const observer = workspace ? new ResizeObserver(apply) : null;
+    if (workspace) observer?.observe(workspace);
+    window.addEventListener("resize", apply);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", apply);
+    };
   }, [projectId]);
 
   useEffect(() => {
     if (!prefsReady) return;
     function clampPanelWidths() {
       const workspace = workspaceRef.current?.clientWidth || window.innerWidth;
-      let sources = sourcesOpen ? sourcesWidth : 0;
+      let sources = sourcesOpen && !singlePanel ? sourcesWidth : 0;
       let artifact = panelOpen ? artifactWidth : 0;
       const overflow = Math.max(0, sources + artifact + MIN_CHAT - workspace);
-      const sourcesSlack = sourcesOpen ? Math.max(0, sources - SOURCES_MIN) : 0;
+      const sourcesSlack = sourcesOpen && !singlePanel ? Math.max(0, sources - SOURCES_MIN) : 0;
       const artifactMin = session
         ? Math.round(window.innerWidth * 0.42)
         : panelView === "sheets" || panelView === "path"
@@ -216,7 +231,7 @@ export function ProjectView({
     clampPanelWidths();
     window.addEventListener("resize", clampPanelWidths);
     return () => window.removeEventListener("resize", clampPanelWidths);
-  }, [prefsReady, sourcesOpen, sourcesWidth, panelOpen, artifactWidth, panelView, session]);
+  }, [prefsReady, sourcesOpen, sourcesWidth, panelOpen, artifactWidth, panelView, session, singlePanel]);
 
   useLayoutEffect(() => {
     const seeded = peekOpeningProject(projectId);
@@ -334,6 +349,11 @@ export function ProjectView({
 
   useEffect(() => {
     if (!pendingPanel || pendingPanel.projectId !== projectId) return;
+    if (pendingPanel.kind === "settings") {
+      setNotebookSettingsOpen(true);
+      setPendingPanel(null);
+      return;
+    }
     const next = focusFromPending(pendingPanel);
     if (next.kind === "material") {
       setReadingId(next.id);
@@ -639,12 +659,15 @@ export function ProjectView({
     const startX = event.clientX;
     const startW = widthRef.current;
     const slot = (event.currentTarget.closest(".artifact-panel-slot") as HTMLDivElement | null);
-    const reserve = slot?.previousElementSibling as HTMLDivElement | null;
+    const reserve = singlePanel
+      ? (slot?.parentElement?.querySelector(".single-panel-reserve") as HTMLDivElement | null)
+      : (slot?.previousElementSibling as HTMLDivElement | null);
     const inner = slot?.firstElementChild as HTMLDivElement | null;
     const min = session ? Math.round(window.innerWidth * 0.42) : panelView === "sheets" || panelView === "path" ? MIN_NOTES : MIN_ARTIFACT;
     setResizing(true);
     function move(ev: MouseEvent) {
-      const next = clampPane(startW + (startX - ev.clientX), min, MAX_ARTIFACT, sourcesOpen ? sourcesWidthRef.current : 0);
+      const delta = singlePanel ? ev.clientX - startX : startX - ev.clientX;
+      const next = clampPane(startW + delta, min, MAX_ARTIFACT, sourcesOpen ? sourcesWidthRef.current : 0);
       widthRef.current = next;
       paintWidth(reserve, slot, inner, next);
     }
@@ -682,21 +705,65 @@ export function ProjectView({
   }
 
   return (
-    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent md:overflow-x-auto md:overflow-y-hidden ${resizing ? "pane-resizing" : ""}`}>
+    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent md:overflow-x-auto md:overflow-y-hidden ${phone ? "phone-layout" : ""} ${phone && mobilePane !== "chat" ? "mobile-panel-background" : ""} ${singlePanel ? "single-panel-workspace" : ""} ${resizing ? "pane-resizing" : ""}`}>
+      <nav aria-label="Workspace" className="mobile-tabbar relative mx-3 my-1 flex h-8 shrink-0 items-center rounded-full">
+        <span
+          aria-hidden="true"
+          className="mobile-tab-indicator"
+          style={{ transform: `translateX(${mobilePane === "sources" ? 0 : mobilePane === "chat" ? 100 : 200}%)` }}
+        />
+        {(
+          [
+            ["sources", "Sources", "materials"],
+            ["chat", "Chat", "chat"],
+            ["studio", "Studio", "spark"],
+          ] as const
+        ).map(([id, label, icon]) => (
+          <button
+            key={id}
+            type="button"
+            aria-current={mobilePane === id ? "page" : undefined}
+            onClick={() => {
+              const active = document.activeElement;
+              if (active instanceof HTMLElement) active.blur();
+              setMobilePane(id);
+            }}
+            className={`relative z-[1] inline-flex h-full min-w-0 flex-1 items-center justify-center gap-1 px-1 text-[11px] ${
+              mobilePane === id ? "text-foreground" : "text-muted"
+            }`}
+          >
+            <UiIcon name={icon} size={15} />
+            <span className="truncate">{label}</span>
+          </button>
+        ))}
+      </nav>
+      {singlePanel ? (
+        <button
+          type="button"
+          aria-label={panelOpen ? "Hide side panel" : "Show side panel"}
+          aria-pressed={panelOpen}
+          onClick={() => setStudio(!panelOpen)}
+          className="single-panel-toggle absolute left-4 top-[14px] z-40 flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-foreground"
+        >
+          <UiIcon name="sidebarLeft" size={16} />
+        </button>
+      ) : null}
       <div
         className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
         style={phone ? undefined : {
-          minWidth: (sourcesOpen ? sourcesWidth : 0) + (panelOpen ? artifactWidth : 0) + MIN_CHAT,
+          minWidth: (singlePanel
+            ? panelOpen ? artifactWidth : SINGLE_PANEL_COLLAPSED_WIDTH + PANEL_OUTER_GAP
+            : (sourcesOpen ? sourcesWidth : 0) + (panelOpen ? artifactWidth : 0)) + MIN_CHAT,
         }}
       >
       <div
         aria-hidden="true"
-        className="artifact-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
+        className="artifact-panel-reserve laptop-source-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
         style={{ width: sourcesOpen ? sourcesWidth : 0 }}
       />
-      {phone ? null : (
+      {phone || singlePanel ? null : (
       <div
-        className={`artifact-panel-slot edge-stroke absolute left-0 top-0 bottom-0 z-30 hidden max-w-full bg-surface md:left-2 md:top-2 md:bottom-2 md:rounded-2xl shrink-0 overflow-hidden md:block ${
+        className={`artifact-panel-slot laptop-source-panel edge-stroke absolute left-0 top-0 bottom-0 z-30 hidden max-w-full bg-surface md:left-2 md:top-2 md:bottom-2 md:rounded-2xl shrink-0 overflow-hidden md:block ${
           sourcesOpen ? "pointer-events-auto" : "pointer-events-none"
         }`}
         style={{ width: sourcesOpen ? Math.max(0, sourcesWidth - PANEL_OUTER_GAP) : 0 }}
@@ -727,7 +794,7 @@ export function ProjectView({
       </div>
       )}
       {phone && mobilePane === "sources" ? (
-        <div className="absolute inset-2 z-[35] min-w-0 overflow-hidden rounded-2xl border border-border bg-surface-2">
+        <div className="mobile-pane-enter absolute inset-0 z-[35] min-w-0 overflow-hidden bg-surface-2">
           <SourcesPane
             className="h-full w-full"
             projectId={project.id}
@@ -741,13 +808,18 @@ export function ProjectView({
           />
         </div>
       ) : null}
-      <div className="pointer-events-none absolute left-3 top-2 z-40 hidden md:flex">
+      <div
+        aria-hidden="true"
+        className="artifact-panel-reserve single-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
+        style={{ width: singlePanel ? (panelOpen ? artifactWidth : SINGLE_PANEL_COLLAPSED_WIDTH + PANEL_OUTER_GAP) : 0 }}
+      />
+      <div className="desktop-pane-control pointer-events-none absolute left-3 top-2 z-40 hidden md:flex">
         <QuietIconCluster className="pointer-events-auto" size={18} actions={[sourcesToggleAction]} />
       </div>
-      <div className="pointer-events-none absolute right-3 top-2 z-40 hidden md:flex">
+      <div className="desktop-pane-control pointer-events-none absolute right-3 top-2 z-40 hidden md:flex">
         <QuietIconCluster className="pointer-events-auto" size={18} actions={[panelToggleAction]} />
       </div>
-      <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${mobilePane === "chat" ? "" : "max-md:hidden"}`} style={phone ? undefined : { minWidth: MIN_CHAT }}>
+      <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ${phone && mobilePane === "chat" ? "mobile-pane-enter" : ""} ${mobilePane === "chat" || singlePanel ? "" : "mobile-pane-hidden max-md:hidden"}`} style={phone ? undefined : { minWidth: MIN_CHAT }}>
         {shareNotice ? (
           <div
             role={shareNotice === "error" ? "alert" : "status"}
@@ -785,19 +857,14 @@ export function ProjectView({
           finishedSet={finishedSet}
           onFinishedSetHandled={() => setFinishedSet(null)}
           onComposerHeightChange={setComposerHeight}
-          chatLayoutWidth={panelOpen ? artifactWidth : 0}
+          chatLayoutWidth={phone ? 0 : singlePanel ? (panelOpen ? artifactWidth : SINGLE_PANEL_COLLAPSED_WIDTH + PANEL_OUTER_GAP) : panelOpen ? artifactWidth : 0}
           studioRequest={studioRequest}
           onStudioRequestHandled={(id) => setStudioRequest((current) => (current?.id === id ? null : current))}
         />
       </div>
       <div
-        aria-hidden="true"
-        className="artifact-panel-reserve pointer-events-none relative hidden h-full shrink-0 md:block"
-        style={{ width: panelOpen ? artifactWidth : 0 }}
-      />
-      <div
-        className={`artifact-panel-slot edge-stroke absolute inset-y-0 right-0 z-30 max-w-full bg-surface md:right-2 md:top-2 md:bottom-2 md:rounded-2xl shrink-0 overflow-hidden ${
-          mobilePane === "studio" ? "mobile-page max-md:pointer-events-auto" : "max-md:hidden"
+        className={`artifact-panel-slot edge-stroke absolute inset-y-0 z-30 max-w-full bg-surface ${singlePanel ? "left-0 md:left-2 md:right-auto" : "right-0 md:right-2"} md:top-2 md:bottom-2 md:rounded-2xl shrink-0 overflow-hidden ${
+          mobilePane === "studio" ? "mobile-page mobile-pane-enter max-md:pointer-events-auto" : "mobile-pane-hidden max-md:hidden"
         } ${
           panelExpanded
             ? "max-md:max-w-none"
@@ -806,13 +873,19 @@ export function ProjectView({
           resizing ? "artifact-panel-resizing" : ""
         } ${studioShown ? "pointer-events-auto" : "pointer-events-none"}`}
         style={{
-          width: studioShown
-            ? phone
+          width: singlePanel
+            ? panelOpen
+              ? panelExpanded
+                ? `calc(100% - ${PANEL_OUTER_GAP}px)`
+                : Math.max(0, artifactWidth - PANEL_OUTER_GAP)
+              : SINGLE_PANEL_COLLAPSED_WIDTH
+            : studioShown
+              ? phone
               ? "100%"
               : panelExpanded
                 ? `calc(100% - ${PANEL_OUTER_GAP}px)`
                 : Math.max(0, artifactWidth - PANEL_OUTER_GAP)
-            : 0,
+              : 0,
           ["--composer-height" as string]: `${composerHeight}px`,
         }}
         data-panel-open={studioShown}
@@ -820,65 +893,109 @@ export function ProjectView({
         inert={studioShown ? undefined : true}
       >
         <div
-          className={`absolute inset-y-0 right-0 h-full overflow-hidden transition-opacity duration-[160ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none ${studioShown ? "opacity-100" : "opacity-0"}`}
+          className={`single-panel-body absolute inset-y-0 ${singlePanel ? "left-0" : "right-0"} flex h-full flex-col overflow-hidden`}
           style={{
-            width: phone || panelExpanded ? "100%" : Math.max(0, artifactWidth - PANEL_OUTER_GAP),
-            minWidth: phone || panelExpanded ? undefined : Math.max(0, artifactWidth - PANEL_OUTER_GAP),
+            width: singlePanel
+              ? panelExpanded ? `calc(100% - ${PANEL_OUTER_GAP}px)` : Math.max(0, artifactWidth - PANEL_OUTER_GAP)
+              : phone || panelExpanded ? "100%" : Math.max(0, artifactWidth - PANEL_OUTER_GAP),
+            minWidth: singlePanel
+              ? panelExpanded ? undefined : Math.max(0, artifactWidth - PANEL_OUTER_GAP)
+              : phone || panelExpanded ? undefined : Math.max(0, artifactWidth - PANEL_OUTER_GAP),
           }}
         >
-          <ArtifactPanel
-            projectId={project.id}
-            userId={user.uid}
-            listedProject
-            onStudioCreate={createFromStudio}
-            studioBusy={studioRequest !== null || notesLive != null || pathLive != null}
-            generatingLabel={
-              studioRequest?.label ?? (notesLive != null || pathLive != null ? "Studio" : null)
-            }
-            focus={focus}
-            session={session}
-            onResizeStart={onResizeStart}
-            onCloseMaterial={closeMaterial}
-            onStartPractice={startPractice}
-            onExitSession={exitSession}
-            onPracticeComplete={setFinishedSet}
-            onViewChange={onPanelViewChange}
-            onActivate={(artifact) => rememberActive(artifact, "open")}
-            onPanelChromeChange={setPanelOwnChrome}
-            liveNote={notesLive}
-            livePath={pathLive}
-            onLiveSettled={() => setNotesLive(null)}
-            onLivePathSettled={() => setPathLive(null)}
-          />
-        </div>
-      </div>
-      </div>
-      <nav aria-label="Workspace" className="mobile-tabbar flex shrink-0 border-t border-border bg-background md:hidden">
-        {(
-          [
-            ["chat", "Chat", "chat"],
-            ["sources", "Sources", "materials"],
-            ["studio", "Studio", "spark"],
-          ] as const
-        ).map(([id, label, icon]) => (
-          <button
-            key={id}
-            type="button"
-            aria-current={mobilePane === id ? "page" : undefined}
-            onClick={() => {
-              const active = document.activeElement;
-              if (active instanceof HTMLElement) active.blur();
-              setMobilePane(id);
-            }}
-            className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px] ${
-              mobilePane === id ? "text-foreground" : "text-muted"
-            }`}
+          {singlePanel ? (
+            <header className="single-panel-header flex h-11 shrink-0 items-center justify-start overflow-hidden pl-12 pr-2">
+              <div
+                role="tablist"
+                aria-label="Side panel"
+                aria-hidden={!panelOpen}
+                inert={!panelOpen ? true : undefined}
+                className="single-panel-switch relative flex h-8 w-[184px] shrink-0 items-center rounded-full p-0.5"
+              >
+                <span aria-hidden="true" className="single-panel-indicator" style={{ transform: `translateX(${sidePane === "sources" ? 0 : 100}%)` }} />
+                {(
+                  [
+                    ["sources", "Sources", "materials"],
+                    ["studio", "Studio", "spark"],
+                  ] as const
+                ).map(([id, label, icon]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={sidePane === id}
+                    onClick={() => setSidePane(id)}
+                    className={`relative z-[1] inline-flex h-full min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full px-2 text-[12px] ${sidePane === id ? "text-foreground" : "text-muted"}`}
+                  >
+                    <UiIcon name={icon} size={15} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </header>
+          ) : null}
+          <div
+            className="single-panel-content relative min-h-0 flex-1 overflow-hidden"
+            aria-hidden={singlePanel && !panelOpen}
+            inert={singlePanel && !panelOpen ? true : undefined}
           >
-            <UiIcon name={icon} size={18} />
-            {label}
-          </button>
-        ))}
-      </nav>
+          <div className={`h-full w-full ${singlePanel && sidePane === "sources" ? "hidden" : ""}`}>
+            <ArtifactPanel
+              projectId={project.id}
+              userId={user.uid}
+              listedProject
+              onStudioCreate={createFromStudio}
+              studioBusy={studioRequest !== null || notesLive != null || pathLive != null}
+              generatingLabel={
+                studioRequest?.label ?? (notesLive != null || pathLive != null ? "Studio" : null)
+              }
+              focus={focus}
+              session={session}
+              onCloseMaterial={closeMaterial}
+              onStartPractice={startPractice}
+              onExitSession={exitSession}
+              onPracticeComplete={setFinishedSet}
+              onViewChange={onPanelViewChange}
+              onActivate={(artifact) => rememberActive(artifact, "open")}
+              onPanelChromeChange={setPanelOwnChrome}
+              hideTopBarOverride={singlePanel}
+              liveNote={notesLive}
+              livePath={pathLive}
+              onLiveSettled={() => setNotesLive(null)}
+              onLivePathSettled={() => setPathLive(null)}
+            />
+          </div>
+          <div className={`h-full w-full ${singlePanel && sidePane === "sources" ? "" : "hidden"}`}>
+            <SourcesPane
+              className="h-full w-full"
+              projectId={project.id}
+              userId={user.uid}
+              items={materials}
+              selectedIds={selectedIds}
+              onSelectedIds={setSelectedIds}
+              onOpenMaterial={openMaterial}
+              readingId={readingId}
+              onCloseReading={() => setReadingId(null)}
+              hideTopBar={singlePanel}
+            />
+          </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Resize panel"
+          onMouseDown={onResizeStart}
+          className={`absolute inset-y-0 z-10 hidden w-2 cursor-col-resize md:block ${singlePanel ? "right-0" : "left-0"}`}
+        />
+      </div>
+      </div>
+      {notebookSettingsOpen && project ? (
+        <ProjectSettingsPane
+          projectId={project.id}
+          presentation="dialog"
+          onClose={() => setNotebookSettingsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

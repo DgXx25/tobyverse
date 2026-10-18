@@ -9,11 +9,10 @@ import { getFirebaseAuth } from "@/lib/firebase";
 import { writeSignedInCookie } from "@/lib/signed-in-cookie";
 import { useAuth } from "@/components/auth-provider";
 import { BrandMark } from "@/components/brand-mark";
-import { CHAT_SEARCH_OPEN_EVENT } from "@/components/chat-search";
+import { CHAT_SEARCH_OPEN_EVENT } from "@/lib/workspace/ui-events";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { ProjectSymbol, iconSearchLabel } from "@/components/workspace/pack-icon";
-import { ICON_NAMES } from "@/lib/workspace/icon-names";
 import { updateProjectMeta, updateProjectTitle } from "@/lib/projects";
 import { useTheme } from "@/components/workspace/theme-provider";
 import { accentColor, type AccentId } from "@/lib/workspace/theme";
@@ -71,6 +70,7 @@ export function Topbar() {
   const [editorMode, setEditorMode] = useState<"rename" | "icon">("rename");
   const [titleDraft, setTitleDraft] = useState("");
   const [iconDraft, setIconDraft] = useState("");
+  const [iconNames, setIconNames] = useState<string[]>([]);
   const [iconQuery, setIconQuery] = useState("");
   const [iconColor, setIconColor] = useState<AccentId>("blue");
   const [savingEdit, setSavingEdit] = useState(false);
@@ -111,6 +111,17 @@ export function Topbar() {
   useEffect(() => {
     if (openIdsLoaded) writeOpen(openIds);
   }, [openIds, openIdsLoaded]);
+
+  useEffect(() => {
+    if (!editorId || editorMode !== "icon") return;
+    let cancel = false;
+    void import("@/lib/workspace/icon-names").then(({ ICON_NAMES }) => {
+      if (!cancel) setIconNames([...ICON_NAMES]);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [editorId, editorMode]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -228,7 +239,7 @@ export function Topbar() {
   const editedProject = notebooks.find((item) => item.id === editorId);
   const matchingIcons = (() => {
     const query = iconQuery.trim().toLowerCase();
-    return (query ? ICON_NAMES.filter((value) => iconSearchLabel(value).includes(query) || value.toLowerCase().includes(query)) : ICON_NAMES).slice(0, 64);
+    return (query ? iconNames.filter((value) => iconSearchLabel(value).includes(query) || value.toLowerCase().includes(query)) : iconNames).slice(0, 64);
   })();
 
   async function handleSignOut() {
@@ -243,7 +254,7 @@ export function Topbar() {
   }
 
   return (
-    <header className="mobile-topbar relative z-20 flex h-12 shrink-0 items-center gap-1 bg-background px-2 max-md:h-auto max-md:min-h-[48px]">
+    <header className="mobile-topbar relative z-20 flex h-12 shrink-0 items-center gap-1 bg-background px-2 max-md:h-auto max-md:min-h-[44px]">
       <div className="flex shrink-0 items-center">
         <span className="flex h-9 w-9 items-center justify-center">
           <BrandMark href="/new" />
@@ -292,20 +303,20 @@ export function Topbar() {
             </span>
           );
         })}
-        <Link
-          href="/new"
-          aria-label="Projects"
-          className="sidebar-item-rest flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-foreground"
-        >
-          <UiIcon name="plus" size={16} />
-        </Link>
+        {pathname !== "/new" ? (
+          <Link
+            href="/new"
+            aria-label="Projects"
+            className="sidebar-item-rest flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-foreground"
+          >
+            <UiIcon name="plus" size={16} />
+          </Link>
+        ) : null}
       </nav>
 
-      <div className="min-w-0 flex-1 md:hidden" />
-
-      <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-0.5 md:flex-none">
         {activeProject ? (
-          <div ref={identityRef} className="relative mr-1 max-w-[250px]">
+          <div ref={identityRef} className="relative mr-1 min-w-0 max-w-[250px] flex-1 md:flex-none">
             <button
               type="button"
               aria-label={`Edit project ${notebookTitle(activeProject.title)}`}
@@ -349,7 +360,7 @@ export function Topbar() {
             ) : null}
           </div>
         ) : null}
-        <span className="max-md:hidden">
+        <span className="mobile-search-button max-md:hidden">
           <IconButton label="Search" onClick={() => window.dispatchEvent(new Event(CHAT_SEARCH_OPEN_EVENT))}>
             <UiIcon name="search" size={17} />
           </IconButton>
