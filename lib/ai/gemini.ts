@@ -197,7 +197,10 @@ export class GeminiProvider implements AIProvider {
               : { mode: FunctionCallingMode.AUTO },
           }
         : undefined,
-      generationConfig: options.json ? { responseMimeType: "application/json" } : undefined,
+      generationConfig: options.json || options.maxOutputTokens ? {
+        ...(options.json ? { responseMimeType: "application/json" } : {}),
+        ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
+      } : undefined,
     });
   }
 

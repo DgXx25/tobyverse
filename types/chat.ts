@@ -158,6 +158,8 @@ export type ChatKnowledgeContext = {
 };
 
 export type ChatGenerationContext = {
+  /** Server-selected, evidence-backed observations; never accepted from a client payload. */
+  adaptiveContext?: string;
   projectId: EntityId;
   projectTitle: string;
   projectDescription: string;

@@ -72,6 +72,11 @@ function looksLikeQuestionOnly(prompt: string): boolean {
   return /^(რა |როდის |რითი |როგორ |რომელ |why |what |when |how |which )/i.test(text);
 }
 
+/** Automatic learning stays quiet; a confirmation belongs only to a deliberate remember request. */
+export function isExplicitMemoryRequest(prompt: string): boolean {
+  return /\bremember\b|დაიმახსოვრ|დამიმახსოვრ/i.test(prompt);
+}
+
 /** Notes / practice / path requests have no signal — skip extract so they never show Memorized. */
 export function shouldExtractMemory(prompt: string): boolean {
   const text = prompt.replace(/\s+/g, " ").trim();

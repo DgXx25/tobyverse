@@ -13,6 +13,8 @@ export type GenerateOptions = {
   mode?: ChatMode;
   history?: ChatTurn[];
   json?: boolean;
+  /** Optional output budget for bounded background tasks; ordinary chat keeps provider defaults. */
+  maxOutputTokens?: number;
   /** `true` = non-intercept tools. An array is that turn’s mode allowlist. Omit / false = no declarations. */
   tools?: boolean | readonly ChatToolName[];
   /** Force one function only for an explicit slash/chip selection. */

@@ -11,6 +11,7 @@ import { parseChatArtifact } from "@/lib/artifacts/active";
 import { fallbackToolAfterProvider, forcedToolForRequest } from "@/lib/chat/tool-routing";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
 import { asMemoryFacts, sanitizePersonalization } from "@/lib/memory/normalize";
+import { adaptiveContextForChat } from "@/lib/adaptation/server";
 import { asChatMode, chatModeSendsToolDeclarations, chatModeTools } from "@/lib/core/chat-modes";
 import { retrieveChunks } from "@/lib/rag/server";
 import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
@@ -294,6 +295,7 @@ export async function POST(request: Request) {
     }
   }
   const context = asContext(body.context, mode);
+  const adaptiveContext = session.anonymous ? Promise.resolve(undefined) : adaptiveContextForChat(session.uid, context.projectId, prompt);
   const threadPaper = context.threadPaper || papersInTurns(history).length > 0;
 
   // The answer is grounded in the user's own materials: retrieve server-side from the vector index.
@@ -318,7 +320,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const withPrompt = { ...context, prompt, threadPaper, sources };
+  const withPrompt = { ...context, prompt, threadPaper, sources, adaptiveContext: await adaptiveContext };
   const guestContext = session.anonymous
     ? { ...withPrompt, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
     : withPrompt;

@@ -54,6 +54,8 @@ import { artifactFacts, historyTurnsFromMessages, historyWithoutCurrentPrompt, l
 import { listMemories } from "@/lib/memory/store";
 import { cachedLearningProfile, getLearningProfile } from "@/lib/memory/profile";
 import { syncUserMemories } from "@/lib/memory/client";
+import { observeConversation } from "@/lib/adaptation/client";
+import { isExplicitMemoryRequest } from "@/lib/memory/normalize";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { autoNameChat } from "@/lib/workspace/auto-title";
 import { isStudioConfigPrompt, type StudioRequest } from "@/lib/workspace/studio";
@@ -881,7 +883,7 @@ export function ProjectChat({
           onProjectMemory: (lines) => onProjectPatch?.({ projectMemory: lines }),
         });
     void memory.then((saved) => {
-      if (!saved || !turnId) return;
+      if (!saved || !turnId || !isExplicitMemoryRequest(input.prompt)) return;
       setStream((current) =>
         current?.id === turnId ? { ...current, memorized: true } : current,
       );
@@ -995,6 +997,9 @@ export function ProjectChat({
       const text = full.trim() || tool.args.question || "";
       if (toolStreamsText(tool.name) && !text && tool.name !== "search_images" && !chunks.raw.trim()) {
         throw new Error("The model returned an empty reply.");
+      }
+      if (!guest && !input.skipMemory && turnId) {
+        void observeConversation({ userId, projectId: project.id, threadId: chatThreadId, turnId, prompt: input.prompt, history: input.history, answer: text });
       }
       return { text, tool, memory, sources, imageSearchResults };
     } catch (err) {
@@ -1868,7 +1873,8 @@ export function ProjectChat({
       !guest &&
       !sending &&
       chatMode !== "fast";
-    const memorized = Boolean(live?.memorized || message.memorized || memorizedIds.has(message.id));
+    const memorized = Boolean(live?.memorized || message.memorized || memorizedIds.has(message.id))
+      && isExplicitMemoryRequest(prev?.role === "user" ? prev.content : "");
     const likeActive = turnReaction[message.id] === "like";
     const dislikeActive = turnReaction[message.id] === "dislike";
     const dislikeHighlighted = dislikeActive || dislikeOpen === message.id;

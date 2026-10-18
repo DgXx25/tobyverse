@@ -45,6 +45,8 @@ Richer optional subject guides live in `lib/skills/library/<name>/SKILL.md`. The
 
 Memory is optional background in all reply styles, including Fast. Use it only where it affects the answer. The current request takes priority over remembered preferences. A learning profile does not authorize tutoring, a mandatory example, or a fixed format. This mindset is repository policy, never per-user Memory.
 
+Optional adaptive observations live separately from explicitly shared preferences. A bounded background observer reads ordinary conversational samples after completed replies, using evidence from the user's own messages. Repeated, situation-specific patterns can help choose an explanation, a useful question or a working approach across learning and professional tasks. The current request and explicit preferences take priority. Do not infer fixed learning styles, diagnoses, intelligence or personal traits, and do not turn observations into standing instructions. Questions should materially advance the current goal, never become an automatic interview, diagnostic or quiz. Topic maps distinguish exposure, working through an idea, evidenced difficulty and an applied example; none is a mastery score. Users can inspect, remove, clear or pause observations. The conditional `user_memory` slot includes only bounded server-selected observations; the canonical core, tool routing, RAG and existing explicit memory extraction remain unchanged. See `docs/adaptive-context.md`.
+
 ## Formatting is chosen for utility
 
 - Prose suits conversation, factual accounts, explanations, and updates. Lists help with parallel items or sequences.

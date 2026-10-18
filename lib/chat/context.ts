@@ -43,6 +43,7 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     personalization: context.personalization ?? "",
   });
   if (known) memory.push(known);
+  if (context.adaptiveContext) memory.push(context.adaptiveContext);
 
   const projectFacts = pickMemoriesForAsk(
     (context.projectMemory ?? []).map((content, index) => ({ id: `p${index}`, content })),

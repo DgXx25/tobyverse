@@ -8,6 +8,7 @@ import { FREE_CAPS } from "@/lib/account/plan";
 import { deleteMemory, subscribeMemories } from "@/lib/memory/store";
 import { deleteLearningProfile, subscribeLearningProfile } from "@/lib/memory/profile";
 import type { UserMemory } from "@/types/memory";
+import { ObservationsPanel } from "@/components/account/observations-panel";
 
 export function MemoriesPanel() {
   const { user } = useAuth();
@@ -63,7 +64,7 @@ export function MemoriesPanel() {
       setProfile("");
       setConfirmClearProfile(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not clear how you learn.");
+      setError(err instanceof Error ? err.message : "Could not clear preferences.");
     } finally {
       setClearingProfile(false);
     }
@@ -75,10 +76,11 @@ export function MemoriesPanel() {
 
   return (
     <div>
+      <ObservationsPanel key={userId} userId={userId} />
       <section>
-        <h3 className="text-[15px] font-medium text-foreground">How you learn</h3>
+        <h3 className="text-[15px] font-medium text-foreground">Preferences you shared</h3>
         <p className="mt-1 text-[14px] leading-6 text-muted">
-          One short note Toby uses to teach you — how you like to study, and why you ask.
+          How you prefer to work, understand things, and communicate with TobyVerse.
         </p>
         {profile ? (
           <>
@@ -93,7 +95,7 @@ export function MemoriesPanel() {
           </>
         ) : (
           <p className="mt-4 text-[14px] leading-6 text-muted">
-            Nothing stored yet. How you learn will appear here as you study.
+            Preferences you share with TobyVerse will appear here.
           </p>
         )}
       </section>
@@ -135,8 +137,8 @@ export function MemoriesPanel() {
 
       {confirmClearProfile ? (
         <ConfirmDialog
-          title="Clear how you learn?"
-          description="TobyVerse will forget this learning note. Response instructions are kept. This cannot be undone."
+          title="Clear shared preferences?"
+          description="TobyVerse will forget this preference note. Other memories and observations are kept. This cannot be undone."
           confirmLabel="Clear"
           pending={clearingProfile}
           error={error}
