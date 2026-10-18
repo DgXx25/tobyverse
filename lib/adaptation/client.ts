@@ -1,8 +1,10 @@
 import { authHeaders } from "@/lib/api/client";
 import { advanceObservationSchedule, observationSample, type AdaptivePattern, type KnowledgeGraph, type ObservationSchedule } from "@/lib/adaptation/model";
 import type { ChatTurn } from "@/types/chat";
+import type { ChatMemoryContext } from "@/types/memory";
+import { pickMemoriesForAsk } from "@/lib/memory/prompt";
 
-export type InsightsView = { enabled: boolean; patterns: AdaptivePattern[]; updatedAt: number; graph?: KnowledgeGraph; projects?: { id: string; title: string }[] };
+export type InsightsView = { patterns: AdaptivePattern[]; updatedAt: number; graph?: KnowledgeGraph; projects?: { id: string; title: string }[] };
 export const INSIGHTS_CHANGED = "tobyverse:insights-changed";
 const running = new Set<string>();
 const schedules = new Map<string, ObservationSchedule>();
@@ -16,7 +18,7 @@ export async function getInsights(projectId?: string): Promise<InsightsView> {
   if (!response.ok) throw new Error("Could not load observations. Try again.");
   return response.json();
 }
-export async function changeInsights(input: { enabled?: boolean; clear?: boolean; removeKey?: string; projectId?: string; clearGraph?: boolean }): Promise<InsightsView> {
+export async function changeInsights(input: { clear?: boolean; removeKey?: string; projectId?: string; clearGraph?: boolean }): Promise<InsightsView> {
   const response = await fetch("/api/insights", { method: "PATCH", headers: await authHeaders(), body: JSON.stringify(input) });
   if (!response.ok) throw new Error("Could not save this change. Try again.");
   const state: InsightsView = await response.json();
@@ -25,7 +27,7 @@ export async function changeInsights(input: { enabled?: boolean; clear?: boolean
 }
 
 /** Runs after a complete response, outside the stream and existing explicit-memory path. */
-export async function observeConversation(input: { userId: string; projectId: string; threadId: string; turnId: string; prompt: string; history: ChatTurn[]; answer: string }): Promise<void> {
+export async function observeConversation(input: { userId: string; projectId: string; threadId: string; turnId: string; prompt: string; history: ChatTurn[]; answer: string; memories?: ChatMemoryContext[]; personalization?: string }): Promise<void> {
   const key = `tobyverse.observation-schedule.${input.userId}.${input.projectId}.${input.threadId}`;
   let previous = schedules.get(key);
   if (!previous && typeof window !== "undefined") {
@@ -45,7 +47,7 @@ export async function observeConversation(input: { userId: string; projectId: st
   try {
     const response = await fetch("/api/insights", {
       method: "POST", headers: await authHeaders(),
-      body: JSON.stringify({ projectId: input.projectId, threadId: input.threadId, history: history.slice(-14) }),
+      body: JSON.stringify({ projectId: input.projectId, threadId: input.threadId, history: history.slice(-14), memories: pickMemoriesForAsk(input.memories ?? [], input.prompt), personalization: input.personalization ?? "" }),
       signal: AbortSignal.timeout(55_000),
     });
     if (response.ok && (await response.json()).updated) changed(input.projectId);

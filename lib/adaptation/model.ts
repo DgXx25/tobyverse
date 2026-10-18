@@ -40,17 +40,17 @@ export type KnowledgeNode = {
 };
 export type KnowledgeGraph = { nodes: KnowledgeNode[]; links: { from: string; to: string; label: string }[] };
 export type AdaptiveState = {
-  enabled: boolean; revision: number; patterns: AdaptivePattern[]; updatedAt: number;
+  revision: number; patterns: AdaptivePattern[]; updatedAt: number;
   lastRunAt: number; day: string; dailyRuns: number; lastBatch: string;
 };
 
 export function emptyAdaptiveState(): AdaptiveState {
-  return { enabled: true, revision: 0, patterns: [], updatedAt: 0, lastRunAt: 0, day: "", dailyRuns: 0, lastBatch: "" };
+  return { revision: 0, patterns: [], updatedAt: 0, lastRunAt: 0, day: "", dailyRuns: 0, lastBatch: "" };
 }
 
 export function canObserve(state: AdaptiveState, batch: string, now: number): boolean {
   const day = new Date(now).toISOString().slice(0, 10);
-  return state.enabled && state.lastBatch !== batch && now - state.lastRunAt >= OBSERVATION_COOLDOWN
+  return state.lastBatch !== batch && now - state.lastRunAt >= OBSERVATION_COOLDOWN
     && (state.day !== day || state.dailyRuns < OBSERVATION_DAILY_CAP);
 }
 
@@ -62,7 +62,7 @@ const rows = (value: unknown): Record<string, unknown>[] => Array.isArray(value)
 export function asAdaptiveState(value: unknown): AdaptiveState {
   const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
   return {
-    enabled: row.enabled !== false, revision: number(row.revision), updatedAt: number(row.updatedAt),
+    revision: number(row.revision), updatedAt: number(row.updatedAt),
     lastRunAt: number(row.lastRunAt), day: bounded(row.day, 10), dailyRuns: number(row.dailyRuns), lastBatch: bounded(row.lastBatch, 64),
     patterns: rows(row.patterns).flatMap(p => {
       const key = bounded(p.key, 64), when = bounded(p.when, 120), observation = bounded(p.observation, 180), approach = bounded(p.approach, 180);

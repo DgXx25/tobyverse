@@ -68,15 +68,32 @@ test('a plain content question is not evidence of weakness', () => {
   assert.equal(result.graph.nodes[0].status, 'explored');
 });
 
-test('cooldown, daily budget and disabled state prevent new observer spending', () => {
-  const { canObserve, emptyAdaptiveState } = load();
+test('observation is always active while cooldown and daily budget bound spending', () => {
+  const { canObserve, emptyAdaptiveState, asAdaptiveState } = load();
   const state = emptyAdaptiveState();
   assert.equal(canObserve(state, 'batch', now), true);
-  assert.equal(canObserve({ ...state, enabled: false }, 'batch', now), false);
+  assert.equal(canObserve(asAdaptiveState({ ...state, enabled: false }), 'batch', now), true);
   assert.equal(canObserve({ ...state, lastBatch: 'batch' }, 'batch', now), false);
   assert.equal(canObserve({ ...state, lastRunAt: now - 1000 }, 'batch', now), false);
   assert.equal(canObserve({ ...state, day: '2026-10-19', dailyRuns: 12 }, 'batch', now), false);
   assert.equal(canObserve({ ...state, day: '2026-10-18', dailyRuns: 12 }, 'batch', now), true);
+});
+
+test('shared instructions and observed behavior form one memory context', () => {
+  const { formatKnownUserBlock } = require('../lib/memory/prompt.ts');
+  const prompt = formatKnownUserBlock({ memories: [{ id: 'm', content: 'Reply in Georgian.' }], personalization: 'Prefers plain paragraphs.', adaptiveContext: 'OBSERVED_WORKING_PATTERN' });
+  assert.match(prompt, /Reply in Georgian/);
+  assert.match(prompt, /plain paragraphs/);
+  assert.match(prompt, /OBSERVED_WORKING_PATTERN/);
+  assert.match(prompt, /shared preferences take priority over inferred observations/i);
+  assert.equal(prompt.match(/Known about this user:/g).length, 1);
+});
+
+test('the observer sees existing response instructions as part of the same user model', () => {
+  const { observationPrompt } = require('../lib/adaptation/prompt.ts');
+  const payload = JSON.parse(observationPrompt([], [], { nodes: [], links: [] }, { memories: [{ id: 'm', content: 'Reply in Georgian.' }], personalization: 'Prefers paragraphs.' }));
+  assert.deepEqual(payload.sharedContext.memories, [{ id: 'm', content: 'Reply in Georgian.' }]);
+  assert.equal(payload.sharedContext.personalization, 'Prefers paragraphs.');
 });
 
 test('a malformed connection does not discard valid user observations', () => {

@@ -67,7 +67,6 @@ export function KnowledgeMapDetails({ projectId }: { projectId: string }) {
           <p className="text-[13px] leading-6 text-muted">Topics and connections from this project&apos;s conversations. They show what you have explored and applied, not a score of what you know.</p>
         </header>
         {error ? <p role="alert" className="px-6 pb-4 text-sm text-red-400">{error} <button onClick={reload} className="underline">Try again</button></p> : null}
-        {data && !data.enabled ? <p className="px-6 pb-4 text-[13px] text-muted">Observation is paused. Your existing map is available to browse.</p> : null}
         {!data && !error ? <p className="px-6 py-16 text-center text-sm text-muted">Loading your map…</p> : null}
         {data && !graph.nodes.length ? <div className="px-8 py-20 text-center"><UiIcon name="brain" size={32} className="mx-auto text-muted" /><p className="mt-5 text-lg">Your conversations will grow this map.</p><p className="mx-auto mt-2 max-w-md text-sm leading-7 text-muted">Discuss a few connected ideas, work through a problem, or explore a project. TobyVerse will connect the topics as you go.</p></div> : null}
         {graph.nodes.length > 0 ? <div>

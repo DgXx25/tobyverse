@@ -41,9 +41,9 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
   const known = formatKnownUserBlock({
     memories: pickMemoriesForAsk(context.memories ?? [], context.prompt ?? ""),
     personalization: context.personalization ?? "",
+    adaptiveContext: context.adaptiveContext,
   });
   if (known) memory.push(known);
-  if (context.adaptiveContext) memory.push(context.adaptiveContext);
 
   const projectFacts = pickMemoriesForAsk(
     (context.projectMemory ?? []).map((content, index) => ({ id: `p${index}`, content })),

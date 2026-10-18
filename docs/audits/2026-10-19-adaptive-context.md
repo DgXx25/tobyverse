@@ -30,3 +30,14 @@ Screenshot: `.superpowers/adaptive-settings.png` (local review artifact, not pro
 A separate code reviewer reproduced and identified three issues: irrelevant pattern selection, losing prior application evidence after a new question, and stale process caches after controls changed. All three were corrected and covered by regression tests. A follow-up found child-chat/account access to maps was missing; an owner-verified project selector fixed it. Final review found no further actionable issues.
 
 This is bounded conversational inference, not a measurement of all knowledge or proof of long-term learning gains. Continued real use is needed to evaluate whether the inferred adjustments improve outcomes. Optional context reads have a 350 ms fallback deadline. No dependency, stable core voice or tool-routing rule was changed.
+
+## Follow-up: unified, continuously active memory
+
+The user subsequently removed the pause concept and requested one system that includes response instructions. Legacy `enabled: false` records are now ignored. Direct instructions and periodic conversational observations share one memory lifecycle and one conditional prompt block, with explicit preferences ahead of inference. Existing stored preferences remain readable. Settings presents one list, with knowledge connections inline; no observation switch, separate response-instruction section or automatic popup remains.
+
+- Focused adaptive suites: 26 passed, including legacy paused records, shared preference input to the observer and unified prompt composition.
+- Regression run covering adaptive context/storage, memory sessions, prompt architecture, chat refinements, tool foundation, RAG, runtime skills and chat scenes: 83 passed. The separately documented baseline source-regex failure remains outside this run.
+- TypeScript and focused ESLint passed. Regenerated prompt examples remained unchanged.
+- Reloaded the user's local project, inspected Settings > Memory, confirmed the shared preferences and expanded the existing topic connections. Screenshot: `.superpowers/unified-memory-settings.png`.
+- The production build exposed a pre-existing impure CSS-module selector hiding the landing's development overlay. Scoped it to the landing root with `body:has(.experience)` so it remains valid in production compilation.
+- Production build passed. Final review identified and fixed an indefinite wait on direct memory updates: observation proceeds after at most 1.5 seconds even if that storage path stalls. Tests cover this fallback, guest skipping, blocked browser storage and deletion invalidation across tabs without Settings mounted.

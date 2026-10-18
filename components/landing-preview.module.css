@@ -20,7 +20,7 @@
 .experience button:focus-visible, .experience a:focus-visible { outline: 1px solid var(--ice); outline-offset: 7px; }
 .experience button:disabled { cursor: default; opacity: .22; }
 .experience canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
-:global(nextjs-portal) { display: none !important; }
+:global(body):has(.experience) :global(nextjs-portal) { display: none !important; }
 .vignette { position: absolute; z-index: 1; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 57% 38%, transparent 14%, #0000002a 65%, #000000c9 100%), linear-gradient(0deg,#000000b3,transparent 40%); }
 
 .header { position: absolute; z-index: 10; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 18px 34px; }

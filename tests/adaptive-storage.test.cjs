@@ -55,14 +55,14 @@ test('concurrent identical batches reserve one paid observation', async () => {
   assert.equal(documents.get('users/concurrent/profile/adaptation').dailyRuns, 1);
 });
 
-test('pause and clear invalidate a generation already in flight', async () => {
+test('clearing unified memory invalidates a generation already in flight', async () => {
   documents.set('projects/p', { userId: 'controls' });
   const reserved = await api.reserveObservation('controls', 'batch');
-  await api.controlAdaptiveState('controls', { enabled: false, clear: true, projectId: 'p', clearGraph: true });
+  await api.controlAdaptiveState('controls', { clear: true, projectId: 'p', clearGraph: true });
   const saved = await api.saveObservation('controls', 'p', reserved.revision, { patterns: [], topics: [{ key: 'topic', label: 'Topic', summary: 'An old in-flight update', status: 'explored', evidence: ['u'] }], links: [] }, [{ id: 'u', content: 'Explain how this mechanism works.' }]);
   assert.equal(saved, false);
   assert.equal(documents.has('users/controls/knowledgeMaps/p'), false);
-  assert.equal((await api.readAdaptiveState('controls')).enabled, false);
+  assert.equal(await api.reserveObservation('controls', 'new-batch'), null); // Cost cooldown remains.
 });
 
 test('the owner guard rejects another account and missing projects', async () => {
@@ -87,7 +87,7 @@ test('failed optional storage leaves the original chat prompt usable', async () 
   assert.equal(await api.adaptiveContextForChat('broken-user', 'p', 'What is inflation?'), undefined);
 });
 
-test('a slow pre-pause read cannot resurrect observations in later reads', async () => {
+test('a slow pre-clear read cannot resurrect removed observations in later reads', async () => {
   documents.set('users/racing/profile/adaptation', { enabled: true, revision: 0, patterns: [] });
   documents.set('users/racing/knowledgeMaps/p', { nodes: [{ key: 'old', label: 'Old topic', summary: 'Before clear', status: 'explored', support: ['a'], updatedAt: Date.now() }], links: [] });
   const profileDelay = {}, graphDelay = {};
@@ -95,9 +95,18 @@ test('a slow pre-pause read cannot resurrect observations in later reads', async
   delayedReads.set('users/racing/knowledgeMaps/p', graphDelay);
   const oldProfile = api.readAdaptiveState('racing');
   const oldGraph = api.readKnowledgeGraph('racing', 'p');
-  await api.controlAdaptiveState('racing', { enabled: false, clear: true, projectId: 'p', clearGraph: true });
+  await api.controlAdaptiveState('racing', { clear: true, projectId: 'p', clearGraph: true });
   profileDelay.release(); graphDelay.release();
   await Promise.all([oldProfile, oldGraph]);
-  assert.equal((await api.readAdaptiveState('racing')).enabled, false);
+  assert.deepEqual((await api.readAdaptiveState('racing')).patterns, []);
   assert.deepEqual((await api.readKnowledgeGraph('racing', 'p')).nodes, []);
+});
+
+test('a legacy paused record cannot disable the unified memory system', async () => {
+  documents.set('users/legacy-paused/profile/adaptation', { enabled: false, revision: 2, patterns: [{ key: 'example', projectId: 'p', when: 'Explaining mechanisms', observation: 'Uses concrete cases', approach: 'Use a concrete comparison', tasks: ['explain'], support: ['a', 'b'], updatedAt: Date.now() }] });
+  assert.match(await api.adaptiveContextForChat('legacy-paused', 'p', 'Explain this mechanism'), /concrete comparison/);
+  const reservation = await api.reserveObservation('legacy-paused', 'new-batch');
+  assert.ok(reservation);
+  documents.set('projects/p', { userId: 'legacy-paused' });
+  assert.equal(await api.saveObservation('legacy-paused', 'p', reservation.revision, { patterns: [], topics: [], links: [] }, []), true);
 });

@@ -13,13 +13,39 @@ function localKey(userId: string) {
 
 type LocalListener = (text: string) => void;
 const localListeners = new Map<string, Set<LocalListener>>();
+const localProfiles = new Map<string, string>();
+let watchingStorage = false;
 
-export function cachedLearningProfile(userId: string): string {
+function watchProfileStorage() {
+  if (watchingStorage || typeof window === "undefined") return;
+  watchingStorage = true;
+  window.addEventListener("storage", event => {
+    if (event.key === null) {
+      localProfiles.forEach((_text, userId) => localProfiles.set(userId, ""));
+      localListeners.forEach((listeners, userId) => {
+        localProfiles.set(userId, "");
+        listeners.forEach(listener => listener(""));
+      });
+      return;
+    }
+    const prefix = "tobyverse.learning.";
+    if (!event.key.startsWith(prefix)) return;
+    const userId = event.key.slice(prefix.length);
+    const text = sanitizePersonalization(event.newValue);
+    localProfiles.set(userId, text);
+    localListeners.get(userId)?.forEach(listener => listener(text));
+  });
+}
+
+export function cachedLearningProfile(userId: string, fallback = ""): string {
   if (typeof window === "undefined" || !userId) return "";
+  watchProfileStorage();
+  if (localProfiles.has(userId)) return localProfiles.get(userId)!;
   try {
-    return sanitizePersonalization(window.localStorage.getItem(localKey(userId)));
+    const stored = window.localStorage.getItem(localKey(userId));
+    return sanitizePersonalization(stored ?? fallback);
   } catch {
-    return "";
+    return sanitizePersonalization(fallback);
   }
 }
 
@@ -27,6 +53,8 @@ const readLocal = cachedLearningProfile;
 
 function writeLocal(userId: string, text: string) {
   if (typeof window === "undefined" || !userId) return;
+  watchProfileStorage();
+  localProfiles.set(userId, text);
   try {
     if (!text) window.localStorage.removeItem(localKey(userId));
     else window.localStorage.setItem(localKey(userId), text);
@@ -41,17 +69,12 @@ function notifyLocal(userId: string, text: string) {
 }
 
 function watchLocal(userId: string, onChange: LocalListener): () => void {
+  watchProfileStorage();
   const bucket = localListeners.get(userId) ?? new Set<LocalListener>();
   bucket.add(onChange);
   localListeners.set(userId, bucket);
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== localKey(userId)) return;
-    onChange(sanitizePersonalization(event.newValue));
-  };
-  if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
   return () => {
     bucket.delete(onChange);
-    if (typeof window !== "undefined") window.removeEventListener("storage", onStorage);
   };
 }
 

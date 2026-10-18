@@ -53,8 +53,7 @@ import { papersInTurns } from "@/lib/blocks/paper-thread";
 import { artifactFacts, historyTurnsFromMessages, historyWithoutCurrentPrompt, latestArtifact } from "@/lib/composer/memory";
 import { listMemories } from "@/lib/memory/store";
 import { cachedLearningProfile, getLearningProfile } from "@/lib/memory/profile";
-import { syncUserMemories } from "@/lib/memory/client";
-import { observeConversation } from "@/lib/adaptation/client";
+import { createMemorySession } from "@/lib/memory/session";
 import { isExplicitMemoryRequest } from "@/lib/memory/normalize";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { autoNameChat } from "@/lib/workspace/auto-title";
@@ -870,18 +869,19 @@ export function ProjectChat({
           }),
         ]);
     const turnId = streamRef.current?.id;
-    const memory = guest || input.skipMemory
-      ? Promise.resolve(false)
-      : syncUserMemories({
-          userId,
-          prompt: input.prompt,
-          memories,
-          personalization,
-          history: input.history,
-          projectId: project.id,
-          projectMemory: project.projectMemory,
-          onProjectMemory: (lines) => onProjectPatch?.({ projectMemory: lines }),
-        });
+    const memorySession = createMemorySession({
+      skip: guest || input.skipMemory,
+      threadId: chatThreadId,
+      userId,
+      prompt: input.prompt,
+      memories,
+      personalization,
+      history: input.history,
+      projectId: project.id,
+      projectMemory: project.projectMemory,
+      onProjectMemory: (lines) => onProjectPatch?.({ projectMemory: lines }),
+    });
+    const memory = memorySession.updates;
     void memory.then((saved) => {
       if (!saved || !turnId || !isExplicitMemoryRequest(input.prompt)) return;
       setStream((current) =>
@@ -998,9 +998,7 @@ export function ProjectChat({
       if (toolStreamsText(tool.name) && !text && tool.name !== "search_images" && !chunks.raw.trim()) {
         throw new Error("The model returned an empty reply.");
       }
-      if (!guest && !input.skipMemory && turnId) {
-        void observeConversation({ userId, projectId: project.id, threadId: chatThreadId, turnId, prompt: input.prompt, history: input.history, answer: text });
-      }
+      if (turnId) memorySession.observe({ turnId, answer: text });
       return { text, tool, memory, sources, imageSearchResults };
     } catch (err) {
       const partial = chunks.finish();

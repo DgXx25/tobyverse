@@ -41,7 +41,6 @@ export async function adaptiveContextForChat(uid: string, projectId: string, pro
     return await Promise.race([
       (async () => {
         const state = await readAdaptiveState(uid);
-        if (!state.enabled) return undefined;
         // Graphs live under this account, so a client-supplied project ID cannot expose another account's data.
         const graph = projectId && !projectId.includes("/") ? await readKnowledgeGraph(uid, projectId) : emptyGraph();
         return formatAdaptiveContext(state.patterns, graph, prompt, projectId) ?? undefined;
@@ -72,7 +71,7 @@ export async function saveObservation(uid: string, projectId: string, revision: 
     const [pSnap, gSnap, project] = await Promise.all([tx.get(pRef), tx.get(gRef), tx.get(getAdminFirestore().collection("projects").doc(projectId))]);
     const state = asAdaptiveState(pSnap.data());
     const owner = project.data();
-    if (!state.enabled || state.revision !== revision || !owner || (owner.userId !== uid && owner.ownerId !== uid)) return null;
+    if (state.revision !== revision || !owner || (owner.userId !== uid && owner.ownerId !== uid)) return null;
     const now = Date.now();
     const merged = mergeObservations(state.patterns, asKnowledgeGraph(gSnap.data()), patch, sample, projectId, now);
     const next = { ...state, patterns: merged.patterns, updatedAt: now };
@@ -84,11 +83,11 @@ export async function saveObservation(uid: string, projectId: string, revision: 
   return true;
 }
 
-export async function controlAdaptiveState(uid: string, input: { enabled?: boolean; clear?: boolean; removeKey?: string; projectId?: string; clearGraph?: boolean }) {
+export async function controlAdaptiveState(uid: string, input: { clear?: boolean; removeKey?: string; projectId?: string; clearGraph?: boolean }) {
   const next = await getAdminFirestore().runTransaction(async tx => {
     const ref = profileRef(uid), state = asAdaptiveState((await tx.get(ref)).data());
     const next: AdaptiveState = {
-      ...state, enabled: input.enabled ?? state.enabled, revision: state.revision + 1,
+      ...state, revision: state.revision + 1,
       patterns: input.clear ? [] : state.patterns.filter(p => !input.removeKey || `${p.projectId ?? "general"}:${p.key}` !== input.removeKey),
       updatedAt: Date.now(),
     };
@@ -100,5 +99,5 @@ export async function controlAdaptiveState(uid: string, input: { enabled?: boole
 }
 
 export function publicAdaptiveState(state: AdaptiveState) {
-  return { enabled: state.enabled, patterns: state.patterns, updatedAt: state.updatedAt };
+  return { patterns: state.patterns, updatedAt: state.updatedAt };
 }

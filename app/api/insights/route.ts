@@ -5,18 +5,21 @@ import { startAiUsageSession } from "@/lib/billing/server";
 import { parseJsonLoose } from "@/lib/schema/json";
 import { observationSample, observationSchema } from "@/lib/adaptation/model";
 import { OBSERVATION_SYSTEM, observationPrompt } from "@/lib/adaptation/prompt";
+import { PERSONALIZATION_MAX } from "@/lib/memory/constants";
 import { controlAdaptiveState, insightHash, listKnowledgeProjects, publicAdaptiveState, readAdaptiveState, readKnowledgeGraph, requireOwnedProject, reserveObservation, saveObservation } from "@/lib/adaptation/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const controlSchema = z.object({
-  enabled: z.boolean().optional(), clear: z.boolean().optional(), removeKey: z.string().max(220).optional(),
+  clear: z.boolean().optional(), removeKey: z.string().max(220).optional(),
   projectId: z.string().max(150).optional(), clearGraph: z.boolean().optional(),
-});
+}).strict();
 const batchSchema = z.object({
   projectId: z.string().min(1).max(150), threadId: z.string().min(1).max(150),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(1000) })).max(14),
+  memories: z.array(z.object({ id: z.string().max(150), content: z.string().max(200) })).max(4).optional(),
+  personalization: z.string().max(PERSONALIZATION_MAX).optional(),
 });
 
 export async function GET(request: Request) {
@@ -65,7 +68,7 @@ export async function POST(request: Request) {
     const graph = await readKnowledgeGraph(uid, projectId);
     usage = await startAiUsageSession(uid);
     // One bounded call. Optional analysis never invokes a repair loop or the user's expensive model.
-    const result = await generateText(observationPrompt(sample, state.patterns.filter(p => !p.projectId || p.projectId === projectId), graph), {
+    const result = await generateText(observationPrompt(sample, state.patterns.filter(p => !p.projectId || p.projectId === projectId), graph, { memories: parsed.data.memories ?? [], personalization: parsed.data.personalization ?? "" }), {
       json: true, systemInstruction: OBSERVATION_SYSTEM, maxOutputTokens: 3072, usage: usage.report,
     });
     const patch = observationSchema.safeParse(parseJsonLoose(result));

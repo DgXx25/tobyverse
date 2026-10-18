@@ -71,16 +71,19 @@ export function pickMemoriesForAsk(
 export function formatKnownUserBlock(input: {
   memories: ChatMemoryContext[];
   personalization?: string;
+  adaptiveContext?: string;
 }): string | null {
   const lines = [
     ...input.memories.map((item) => item.content.trim()).filter(Boolean),
     input.personalization?.replace(/\s+/g, " ").trim() || "",
   ].filter(Boolean);
-  if (lines.length === 0) return null;
+  const observed = input.adaptiveContext?.trim() || "";
+  if (lines.length === 0 && !observed) return null;
   return [
     "Known about this user:",
     ...lines.map((line) => `- ${line}`),
     "Optional background and preferences. Relevant communication preferences override default presentation choices; the current request takes priority over remembered preferences. Learning preferences do not by themselves request tutoring or a fixed format.",
+    ...(observed ? ["Directly shared preferences take priority over inferred observations. Use these as one evolving understanding of the user, only where relevant.", observed] : []),
   ].join("\n");
 }
 
