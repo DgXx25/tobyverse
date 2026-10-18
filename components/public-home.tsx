@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { enterAppAfterSignIn, isAccountUser, persistSignedInSession } from "@/lib/auth";
 
-const LandingScreen = dynamic(() => import("@/components/landing-screen").then((mod) => mod.LandingScreen));
+const LandingPreview = dynamic(() => import("@/components/landing-preview").then((mod) => mod.LandingPreview));
 
 export function PublicHome({ sessionHint = false }: { sessionHint?: boolean }) {
   const router = useRouter();
@@ -26,5 +26,5 @@ export function PublicHome({ sessionHint = false }: { sessionHint?: boolean }) {
     return <div className="min-h-dvh bg-[#0a0a0a]" />;
   }
 
-  return <LandingScreen />;
+  return <LandingPreview />;
 }

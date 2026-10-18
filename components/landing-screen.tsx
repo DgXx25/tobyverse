@@ -8,7 +8,7 @@ import { HeadlineVerb } from "@/components/workspace/headline-verb";
 
 export function LandingScreen() {
   return (
-    <main className="relative flex min-h-dvh flex-col overflow-hidden bg-background text-foreground">
+    <main className="relative flex min-h-dvh flex-col overflow-hidden bg-black text-foreground">
       <ForceMarketingDark />
       <LandingHeader />
       <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center px-6 pb-16">
