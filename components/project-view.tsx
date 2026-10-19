@@ -26,7 +26,7 @@ import { ProjectLoading } from "@/components/project-loading";
 import { ArtifactPanel, type ArtifactFocus, type ArtifactTabId } from "@/components/workspace/artifact-panel";
 import { ProjectSettingsPane } from "@/components/workspace/project-settings-pane";
 import { SourcesPane } from "@/components/workspace/sources-pane";
-import type { StudioRequest, StudioTile } from "@/lib/workspace/studio";
+import type { StudioJob, StudioRequest, StudioTile } from "@/lib/workspace/studio";
 import { useShell } from "@/components/workspace/shell-context";
 import { QuietIconCluster, type QuietIconAction } from "@/components/workspace/quiet-icon-cluster";
 import { UiIcon } from "@/components/workspace/ui-icon";
@@ -143,6 +143,7 @@ export function ProjectView({
   const [mobilePane, setMobilePane] = useState<"chat" | "sources" | "studio">("chat");
   const [sidePane, setSidePane] = useState<"sources" | "studio">("studio");
   const [studioRequest, setStudioRequest] = useState<StudioRequest | null>(null);
+  const [studioJob, setStudioJob] = useState<StudioJob | null>(null);
   const [readingId, setReadingId] = useState<string | null>(null);
   const studioSeq = useRef(0);
   const sourcesWidthRef = useRef(0);
@@ -552,13 +553,23 @@ export function ProjectView({
 
   function createFromStudio(tile: StudioTile, run?: { prompt: string; tool?: StudioTile["tool"] }) {
     studioSeq.current += 1;
-    setStudioRequest({
+    const request: StudioRequest = {
       id: studioSeq.current,
+      type: tile.id,
       label: tile.label,
       prompt: run?.prompt ?? tile.prompt,
-      tool: run && !run.tool ? undefined : run?.tool ?? tile.tool,
-    });
-    if (!isDesktop()) setPanelOpen(false);
+      tool: run?.tool ?? tile.tool,
+      sourceIds: materials.filter((item) => selectedIds.includes(item.id) && item.status === "ready").map((item) => item.id),
+    };
+    setStudioJob({ request, phase: "pending" });
+    setStudioRequest(request);
+  }
+
+  function retryStudio() {
+    if (!studioJob || studioRequest) return;
+    const request = { ...studioJob.request, id: ++studioSeq.current, retryArtifact: studioJob.artifact };
+    setStudioJob({ request, phase: "pending" });
+    setStudioRequest(request);
   }
 
   function closePanel() {
@@ -855,7 +866,11 @@ export function ProjectView({
           onComposerHeightChange={setComposerHeight}
           chatLayoutWidth={phone ? 0 : singlePanel ? (panelOpen ? artifactWidth : SINGLE_PANEL_COLLAPSED_WIDTH + PANEL_OUTER_GAP) : panelOpen ? artifactWidth : 0}
           studioRequest={studioRequest}
-          onStudioRequestHandled={(id) => setStudioRequest((current) => (current?.id === id ? null : current))}
+          onStudioProgress={(id, status) => setStudioJob((current) => current?.request.id === id ? { ...current, status } : current)}
+          onStudioRequestHandled={(id, result) => {
+            setStudioJob((current) => current?.request.id === id ? { ...current, phase: result.error ? "failed" : "complete", artifact: result.artifact, error: result.error } : current);
+            setStudioRequest((current) => current?.id === id ? null : current);
+          }}
         />
       </div>
       <div
@@ -942,6 +957,9 @@ export function ProjectView({
               listedProject
               onStudioCreate={createFromStudio}
               studioBusy={studioRequest !== null || notesLive != null || pathLive != null}
+              studioJob={studioJob}
+              onStudioRetry={retryStudio}
+              selectedSourceIds={selectedIds}
               generatingLabel={
                 studioRequest?.label ?? (notesLive != null || pathLive != null ? "Studio" : null)
               }

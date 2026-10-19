@@ -75,6 +75,7 @@ export async function generatePracticeSet(input: {
     body: JSON.stringify({
       types: plan.map((item) => item.type),
       projectTitle: input.project.title,
+      instruction: input.prompt,
       sources,
       knowledge: knowledgeItems.map((item) => ({
         id: item.id,

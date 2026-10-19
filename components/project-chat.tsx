@@ -57,7 +57,9 @@ import { createMemorySession } from "@/lib/memory/session";
 import { isExplicitMemoryRequest } from "@/lib/memory/normalize";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
 import { autoNameChat } from "@/lib/workspace/auto-title";
-import { isStudioConfigPrompt, type StudioRequest } from "@/lib/workspace/studio";
+import { isStudioConfigPrompt, type StudioRequest, type StudioResult } from "@/lib/workspace/studio";
+import { executeStudioGeneration } from "@/lib/workspace/studio-generation";
+import { saveStudioArtifact } from "@/lib/workspace/studio-store";
 import { isRealUserPrompt, needsAutoTitle, DEFAULT_FIRST_PROMPT, PLACEHOLDER_CHAT_TITLE } from "@/lib/workspace/title";
 import { loadPracticeProgress } from "@/lib/workspace/practice-progress";
 import { workFinishedPrompt, type SetResult } from "@/lib/exercises/session";
@@ -346,6 +348,7 @@ export function ProjectChat({
   onLoadOlder,
   studioRequest = null,
   onStudioRequestHandled,
+  onStudioProgress,
   onBusyChange,
 }: {
   project: Project;
@@ -369,9 +372,10 @@ export function ProjectChat({
   chatLayoutWidth?: number;
   initialMessages?: ChatMessage[];
   onLoadOlder?: (beforeId: string) => Promise<ChatMessage[]>;
-  /** A Studio tile asked for something. Sent as the user's own turn once the chat is idle. */
+  /** Studio runs its selected generator directly once the chat is idle. */
   studioRequest?: StudioRequest | null;
-  onStudioRequestHandled?: (id: number) => void;
+  onStudioRequestHandled?: (id: number, result: StudioResult) => void;
+  onStudioProgress?: (id: number, status: string) => void;
   onBusyChange?: (busy: boolean) => void;
   onProjectPatch?: (patch: {
     title?: string;
@@ -1775,13 +1779,40 @@ export function ProjectChat({
     if (studioHandledRef.current === studioRequest.id) return;
     studioHandledRef.current = studioRequest.id;
     const request = studioRequest;
-    void sendPrompt(request.prompt, {
-      skipUser: true,
-      studio: true,
-      ...(request.tool
-        ? { acceptedTool: request.tool, openWhenReady: request.tool === "create_sheet" }
-        : {}),
-    }).finally(() => onStudioRequestHandled?.(request.id));
+    const controller = new AbortController();
+    sendingRef.current = true;
+    abortRef.current = controller;
+    setSending(true);
+    setStoppable(true);
+    void executeStudioGeneration({
+      request,
+      signal: controller.signal,
+      generate: async () => {
+        const pool = materials.filter((item) => request.sourceIds.includes(item.id) && item.status === "ready");
+        if (pool.length !== request.sourceIds.length) throw new Error("Some selected sources are not ready. Wait for them or choose another topic.");
+        if (!request.tool) throw new Error("Choose a Studio generator first.");
+        return dispatchChatTool({
+          origin: "studio",
+          tool: { name: request.tool, args: { instruction: request.prompt } },
+          text: "",
+          prompt: request.prompt,
+          project,
+          userId,
+          materials: pool,
+          active: null,
+          signal: controller.signal,
+          onStatus: (status) => onStudioProgress?.(request.id, status),
+        });
+      },
+      save: (artifact) => waitForChatStep("Saving Studio output", () => saveStudioArtifact(project.id, request.type, artifact), { signal: controller.signal, timeoutMs: 15_000 }),
+    }).then((result) => onStudioRequestHandled?.(request.id, result)).finally(() => {
+      controller.abort();
+      if (abortRef.current === controller) abortRef.current = null;
+      sendingRef.current = false;
+      setSending(false);
+      setStoppable(false);
+      markProjectActivityComplete(project.id);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studioRequest, sending, loading]);
 

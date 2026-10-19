@@ -319,7 +319,7 @@ export async function deleteProject(projectId: string, userId: string): Promise<
     ...exercises.map((item) => deleteExercise(projectId, item.id)),
   ]);
   // These project-owned records have no files and must not be orphaned by notebook deletion.
-  const metadata = await Promise.all(["sourceFolders", "artifactTitles"].map(name => getDocs(collection(getFirebaseDb(), COLLECTIONS.projects, projectId, name))));
+  const metadata = await Promise.all(["sourceFolders", "artifactTitles", "studioArtifacts"].map(name => getDocs(collection(getFirebaseDb(), COLLECTIONS.projects, projectId, name))));
   for (const snapshot of metadata) {
     for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
       const batch = writeBatch(getFirebaseDb());

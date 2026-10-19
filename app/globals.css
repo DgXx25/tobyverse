@@ -1082,6 +1082,32 @@ html.ios-standalone.marketing::before {
   mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 0);
 }
 
+.studio-job {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--surface-2);
+}
+
+.studio-job-generating::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(110deg, transparent 5%, color-mix(in srgb, var(--accent) 16%, transparent) 32%, color-mix(in srgb, var(--file-notes) 14%, transparent) 48%, transparent 70%);
+  background-size: 250% 100%;
+  animation: studio-gradient-loop 3s ease-in-out infinite;
+}
+
+@keyframes studio-gradient-loop {
+  0%, 100% { background-position: 100% 0; }
+  50% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-job-generating::before { animation: none; }
+}
+
 @keyframes studio-spin {
   to { transform: rotate(1turn); }
 }

@@ -1,16 +1,32 @@
 import type { AcceptedChatTool } from "@/types/chat";
 import type { UiIconName } from "@/components/workspace/ui-icon";
+import type { ChatArtifact } from "@/types/chat";
 
 export type StudioTool = "practice" | "quiz" | "flashcards" | "table" | "notes" | "path";
 
 export type StudioRequest = {
   /** Changes on every click so the same tile can be used twice in a row. */
   id: number;
+  type: StudioTool;
   label: string;
   prompt: string;
   /** Pins the Studio action to its matching tool instead of relying on model routing. */
   tool?: AcceptedChatTool;
+  sourceIds: string[];
+  /** Retry saving an already generated result without charging for generation again. */
+  retryArtifact?: ChatArtifact;
 };
+
+export type StudioResult = { artifact: ChatArtifact; error?: never } | { artifact?: ChatArtifact; error: string };
+export type StudioJob = {
+  request: StudioRequest;
+  phase: "pending" | "complete" | "failed";
+  status?: string;
+  artifact?: ChatArtifact;
+  error?: string;
+};
+
+export type StudioSavedArtifact = { type: StudioTool; artifact: ChatArtifact; createdAt: string };
 
 /** Hidden instruction for a Studio click. The chat thread does not show it. */
 export const STUDIO_ASK: Record<StudioTool, string> = {

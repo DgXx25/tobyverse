@@ -47,6 +47,7 @@ import type { PathCourse, StudyPath } from "@/types/path";
 import type { VisualBlock } from "@/types/visual";
 
 export type ChatDispatchContext = {
+  origin?: "studio";
   tool: ChatToolCall;
   text: string;
   prompt: string;
@@ -92,6 +93,7 @@ export type ChatToolHandler = {
 };
 
 function generatePrompt(ctx: ChatDispatchContext): string {
+  if (ctx.origin === "studio") return ctx.prompt;
   const explicit = ctx.tool.args.topic?.trim();
   if (explicit) return explicit;
   const current = ctx.path ? findNode(ctx.path, ctx.path.currentNodeId)?.node.title.trim() : "";
@@ -241,17 +243,21 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
   const mode = practiceModeOf(ctx.prompt, ctx.tool.args.mode);
   const ka = promptIsKa(ctx.prompt);
   ctx.onStatus?.(mode === "exam" ? "Generating exam" : "Generating quiz");
-  const title = await reserveArtifactTitle(ctx.project.id, mode === "exam" ? "Exam" : "Quiz", extractTopic(generatePrompt(ctx)) || ctx.materials[0]?.title || ctx.project.title, mode === "exam" ? "Exam" : "Quiz", ctx.signal);
+  const titleContext = ctx.origin === "studio"
+    ? /^Topic: (.+)$/m.exec(ctx.prompt)?.[1] || ctx.materials[0]?.title || ctx.project.title
+    : extractTopic(generatePrompt(ctx)) || ctx.materials[0]?.title || ctx.project.title;
+  const title = await reserveArtifactTitle(ctx.project.id, mode === "exam" ? "Exam" : "Quiz", titleContext, mode === "exam" ? "Exam" : "Quiz", ctx.signal);
+  const studioCount = ctx.origin === "studio" ? Number(/^Number of questions: (\d+)\.$/m.exec(ctx.prompt)?.[1]) : 0;
   const set = await generatePracticeSet({
     project: ctx.project,
     userId: ctx.userId,
     materials: ctx.materials,
     prompt: generatePrompt(ctx),
-    count: ctx.count,
+    count: ctx.count ?? (studioCount > 0 ? studioCount : undefined),
     onStatus: ctx.onStatus,
     signal: ctx.signal,
   });
-  const path = ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
+  const path = ctx.origin === "studio" ? null : ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
   ctx.signal?.throwIfAborted();
   ctx.onStatus?.("Done");
   if (path?.currentNodeId) {
@@ -292,7 +298,7 @@ async function runCreateSheet(ctx: ChatDispatchContext): Promise<ChatDispatchRes
     onEvent: ctx.onNotesEvent,
   });
   if (!sheet.id) throw new Error("Could not save notes.");
-  const path = ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
+  const path = ctx.origin === "studio" ? null : ctx.path ?? (await getLatestPath(ctx.project.id).catch(() => null));
   ctx.signal?.throwIfAborted();
   if (path && pathIsStarted(path) && path.currentNodeId) {
     const next = bindSheet(path, path.currentNodeId, sheet.id);
@@ -670,12 +676,13 @@ export async function dispatchChatTool(ctx: ChatDispatchContext): Promise<ChatDi
     ctx.onStatus?.(toolStatusText({ call: ctx.tool, phase: "complete", response: result }, ka));
     report("complete", result);
     return result;
-  } catch {
+  } catch (error) {
     if (ctx.tool.name === "create_sheet" || ctx.tool.name === "edit_sheet") ctx.onNotesEvent?.(null);
     if (ctx.tool.name === "create_path") ctx.onPathEvent?.(null);
     ctx.signal?.throwIfAborted();
     ctx.onStatus?.(toolStatusText({ call: ctx.tool, phase: "error" }, ka));
     report("error");
+    if (ctx.origin === "studio") throw error;
     return { intent: "ask", content: ctx.tool.name === "create_note" || ctx.tool.name === "edit_note" ? (ka ? "ჩანაწერის შენახვა ვერ მოხერხდა. სცადე ხელახლა." : "I couldn’t save the note. Please try again.") : stripArtifactMarkup(ctx.text).trim() || toolFallbackText(ka) };
   } finally {
     active = false;

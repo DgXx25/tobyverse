@@ -19,7 +19,8 @@ import { ProjectSettingsPane } from "@/components/workspace/project-settings-pan
 import { MaterialText } from "@/components/workspace/material-text";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { StudioPane } from "@/components/workspace/studio-pane";
-import type { StudioTile } from "@/lib/workspace/studio";
+import type { StudioJob, StudioSavedArtifact, StudioTile } from "@/lib/workspace/studio";
+import { subscribeStudioArtifacts } from "@/lib/workspace/studio-store";
 import { useAuth } from "@/components/auth-provider";
 import { isGuestUser } from "@/lib/guest";
 import type { ChatArtifact, ChatMessage } from "@/types/chat";
@@ -54,6 +55,9 @@ export function ArtifactPanel({
   onStudioCreate,
   studioBusy = false,
   generatingLabel = null,
+  studioJob = null,
+  onStudioRetry,
+  selectedSourceIds = [],
 }: {
   projectId: string;
   userId: string;
@@ -75,6 +79,9 @@ export function ArtifactPanel({
   onStudioCreate?: (tile: StudioTile, run?: { prompt: string; tool?: StudioTile["tool"] }) => void;
   studioBusy?: boolean;
   generatingLabel?: string | null;
+  studioJob?: StudioJob | null;
+  onStudioRetry?: () => void;
+  selectedSourceIds?: string[];
 }) {
   const { user } = useAuth();
   const canViewFiles = Boolean(user && !isGuestUser(user));
@@ -82,6 +89,8 @@ export function ArtifactPanel({
   const [sheets, setSheets] = useState<StudySheet[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [paths, setPaths] = useState<StudyPath[]>([]);
+  const [studioArtifacts, setStudioArtifacts] = useState<StudioSavedArtifact[]>([]);
+  const [studioError, setStudioError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("studio");
   const tabRef = useRef(tab);
   const [materialId, setMaterialId] = useState<string | null>(null);
@@ -108,6 +117,11 @@ export function ArtifactPanel({
   }, [projectId]);
 
   useEffect(() => subscribeMaterials(projectId, setMaterials), [projectId]);
+  useEffect(() => {
+    setStudioArtifacts([]);
+    setStudioError(null);
+    return subscribeStudioArtifacts(projectId, (items) => { setStudioArtifacts(items); setStudioError(null); }, (error) => setStudioError(error.message));
+  }, [projectId]);
   useEffect(
     () =>
       subscribeStudySheets(
@@ -146,15 +160,14 @@ export function ArtifactPanel({
   const practiceSets = useMemo(() => {
     const seen = new Set<string>();
     const sets: ChatArtifact[] = [];
-    for (const message of [...messages].reverse()) {
-      const artifact = message.artifact;
+    for (const artifact of [...studioArtifacts.map((item) => item.artifact), ...[...messages].reverse().map((message) => message.artifact)]) {
       if (!artifact || artifact.kind !== "practice") continue;
       if (seen.has(artifact.id)) continue;
       seen.add(artifact.id);
       sets.push(artifact);
     }
     return sets;
-  }, [messages]);
+  }, [messages, studioArtifacts]);
 
   const selectedPath = paths[0] ?? null;
   const counts = {
@@ -307,8 +320,11 @@ export function ArtifactPanel({
                   sheets={sheets}
                   practiceSets={practiceSets}
                   paths={paths}
-                  hasSources={materials.some((item) => item.status !== "failed")}
-                  sourceCount={materials.filter((item) => item.status === "ready").length || materials.length}
+                  studioArtifacts={studioArtifacts}
+                  job={studioJob}
+                  onRetry={onStudioRetry}
+                  error={studioError}
+                  sourceCount={materials.filter((item) => selectedSourceIds.includes(item.id) && item.status === "ready").length}
                   busy={studioBusy}
                   generatingLabel={generatingLabel}
                   onCreate={(tile, run) => onStudioCreate?.(tile, run)}

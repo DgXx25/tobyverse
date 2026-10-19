@@ -4,7 +4,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
 import { shortDate } from "@/lib/format";
-import { STUDIO_ASK, STUDIO_TILES, type StudioTile } from "@/lib/workspace/studio";
+import { STUDIO_TILES, type StudioJob, type StudioSavedArtifact, type StudioTile } from "@/lib/workspace/studio";
 import type { AcceptedChatTool } from "@/types/chat";
 import type { ChatArtifact } from "@/types/chat";
 import type { StudyPath } from "@/types/path";
@@ -27,8 +27,11 @@ export function StudioPane({
   sheets,
   practiceSets,
   paths,
-  hasSources = false,
   sourceCount = 0,
+  studioArtifacts = [],
+  job = null,
+  onRetry,
+  error,
   busy,
   generatingLabel,
   onCreate,
@@ -39,8 +42,11 @@ export function StudioPane({
   sheets: StudySheet[];
   practiceSets: ChatArtifact[];
   paths: StudyPath[];
-  hasSources?: boolean;
   sourceCount?: number;
+  studioArtifacts?: StudioSavedArtifact[];
+  job?: StudioJob | null;
+  onRetry?: () => void;
+  error?: string | null;
   busy: boolean;
   generatingLabel?: string | null;
   onCreate: (tile: StudioTile, run?: { prompt: string; tool?: AcceptedChatTool }) => void;
@@ -51,14 +57,22 @@ export function StudioPane({
   const [config, setConfig] = useState<StudioTile | null>(null);
 
   function openTile(tile: StudioTile) {
-    if (!hasSources) {
-      onCreate(tile, { prompt: STUDIO_ASK[tile.id], tool: tile.tool });
-      return;
-    }
     setConfig(tile);
   }
 
-  const outputs: { key: string; icon: UiIconName; color: string; title: string; meta: string; saved?: boolean; open: () => void }[] = [
+  const registeredKeys = new Set(studioArtifacts.map((item) => `${item.artifact.kind}:${item.artifact.id}`));
+  const registeredOutputs = studioArtifacts.map((item) => {
+    const tile = STUDIO_TILES.find((tile) => tile.id === item.type)!;
+    return {
+      key: `${item.artifact.kind}:${item.artifact.id}`,
+      icon: tile.icon,
+      color: TILE_COLOR[tile.id],
+      title: item.artifact.title,
+      meta: [tile.label, shortDate(item.createdAt)].filter(Boolean).join(" · "),
+      open: () => item.artifact.kind === "practice" ? onOpenPractice(item.artifact.id) : item.artifact.kind === "path" ? onOpenPath() : onOpenSheet(item.artifact.id),
+    };
+  });
+  const legacyOutputs = [
     ...paths.slice(0, 1).map((item) => ({
       key: `path:${item.id}`,
       icon: "plan" as const,
@@ -88,6 +102,11 @@ export function StudioPane({
       };
     }),
   ];
+  const outputs = [...registeredOutputs, ...legacyOutputs.filter((item) => !registeredKeys.has(item.key))];
+  const resultVisible = job?.artifact && outputs.some((item) => item.key === `${job.artifact!.kind}:${job.artifact!.id}`);
+  const showJob = job?.phase === "failed" || job?.phase === "pending" || (job?.phase === "complete" && !resultVisible);
+  const activeJob = showJob ? job : null;
+  const generatingTile = STUDIO_TILES.find((tile) => tile.id === activeJob?.request.type) ?? STUDIO_TILES.find((tile) => tile.label === generatingLabel);
 
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
@@ -110,14 +129,19 @@ export function StudioPane({
         ))}
       </div>
 
-      {busy && generatingLabel ? (
-        <div className="flex h-12 items-center gap-3 rounded-2xl bg-surface-2 px-3">
-          <span className="studio-spin" aria-hidden />
-          <span className="min-w-0">
-            <span className="block truncate text-[14px] text-foreground">Generating {generatingLabel}…</span>
+      {showJob || (busy && generatingLabel) ? (
+        <div role={job?.phase === "failed" ? "alert" : "status"} aria-live="polite" className={`studio-job flex min-h-14 items-center gap-3 rounded-2xl px-3 py-2.5 ${job?.phase === "failed" ? "studio-job-failed" : "studio-job-generating"}`}>
+          <span className="relative inline-flex shrink-0" style={{ color: generatingTile ? TILE_COLOR[generatingTile.id] : TILE_COLOR.notes }}>
+            <UiIcon name={generatingTile?.icon ?? "notes"} size={18} />
           </span>
+          <span className="relative min-w-0 flex-1">
+            <span className="block truncate text-[14px] text-foreground">{activeJob?.phase === "failed" ? `${activeJob.request.label} · Could not finish` : `Generating ${activeJob?.request.label ?? generatingLabel}…`}</span>
+            {job?.error ? <span className="mt-0.5 block text-[12px] text-muted">{job.error}</span> : null}
+          </span>
+          {job?.phase === "failed" ? <button type="button" disabled={busy} onClick={onRetry} className="relative shrink-0 rounded-full px-2 py-1 text-[12px] text-foreground hover:bg-foreground/10 disabled:opacity-50">Retry</button> : <span className="studio-spin relative" aria-hidden />}
         </div>
       ) : null}
+      {error ? <p role="alert" className="text-[12px] text-red-400">Could not load Studio outputs: {error}</p> : null}
 
       {outputs.length > 0 ? (
         <ul className="space-y-1">
@@ -166,7 +190,7 @@ function StudioConfig({
   onClose: () => void;
   onGenerate: (prompt: string) => void;
 }) {
-  const [size, setSize] = useState<"Fewer" | "Standard" | "More">("Standard");
+  const [size, setSize] = useState(tile.id === "quiz" ? "10" : "Standard");
   const [level, setLevel] = useState<"Easy" | "Medium" | "Hard">("Medium");
   const [language, setLanguage] = useState("Georgian");
   const [topic, setTopic] = useState("");
@@ -174,11 +198,11 @@ function StudioConfig({
 
   function generate() {
     const lines = [
-      STUDIO_ASK[tile.id],
-      `Length: ${size}.`,
+      tile.prompt.replace("Write in the language of my sources.", "").trim(),
+      tile.id === "quiz" ? `Number of questions: ${size}.` : `Length: ${size}.`,
       graded ? `Difficulty: ${level}.` : "",
       `Language: ${language}.`,
-      `Use my selected sources (${sourceCount}).`,
+      sourceCount > 0 ? `Use my selected sources (${sourceCount}).` : "Use the topic below.",
       topic.trim() ? `Topic: ${topic.trim()}` : "Use the sources as the topic.",
     ].filter(Boolean);
     onGenerate(lines.join("\n"));
@@ -197,7 +221,7 @@ function StudioConfig({
           </button>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Choice label={tile.id === "quiz" ? "Number of questions" : tile.id === "flashcards" ? "Number of cards" : "Length"} value={size} options={["Fewer", "Standard", "More"]} onChange={setSize} />
+          <Choice label={tile.id === "quiz" ? "Number of questions" : tile.id === "flashcards" ? "Number of cards" : "Length"} value={size} options={tile.id === "quiz" ? ["5", "8", "10"] : ["Fewer", "Standard", "More"]} onChange={setSize} />
           {graded ? <Choice label="Level of difficulty" value={level} options={["Easy", "Medium", "Hard"]} onChange={setLevel} /> : null}
           <label className="block text-[13px] text-muted">
             Language
@@ -211,10 +235,10 @@ function StudioConfig({
         </div>
         <label className="mt-4 block text-[13px] text-muted">
           What should the topic be?
-          <textarea value={topic} onChange={(event) => setTopic(event.target.value)} rows={4} placeholder="Leave empty to use the sources" className="mt-1 w-full resize-none rounded-xl bg-background px-3 py-2 text-[14px] text-foreground outline-none placeholder:text-muted" />
+          <textarea value={topic} onChange={(event) => setTopic(event.target.value)} rows={4} required={sourceCount === 0} placeholder={sourceCount ? "Leave empty to use the selected sources" : "Describe what you want to generate"} className="mt-1 w-full resize-none rounded-xl bg-background px-3 py-2 text-[14px] text-foreground outline-none placeholder:text-muted" />
         </label>
         <div className="mt-4 flex justify-end">
-          <button type="button" disabled={busy} onClick={generate} className="h-9 rounded-full bg-foreground px-4 text-[13px] font-medium text-background disabled:opacity-50">
+          <button type="button" disabled={busy || (sourceCount === 0 && !topic.trim())} onClick={generate} className="h-9 rounded-full bg-foreground px-4 text-[13px] font-medium text-background disabled:opacity-50">
             Generate now
           </button>
         </div>
