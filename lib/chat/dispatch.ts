@@ -2,6 +2,7 @@ import { chatToolDefinition, isArtifactTool, type ChatToolCall, type ChatToolNam
 import { toolFallbackText, toolStatusText, withToolTimeout, type ToolStatusUpdate } from "@/lib/ai/tool-execution";
 import {
   extractAppendCount,
+  extractTopic,
   intentFromTool,
   isMutationIntent,
   practiceModeOf,
@@ -17,8 +18,10 @@ import { searchImagesClient, toImageAttach } from "@/lib/images/client";
 import { IMAGE_SEARCH_DEFAULT } from "@/lib/images/types";
 import { generatePracticeSet } from "@/lib/exercises/generate-set";
 import { appendPracticeItems, rewritePracticeItems } from "@/lib/exercises/mutate-client";
-import { generateStudySheetFromPrompt, rewriteStudySheetFromPrompt } from "@/lib/study-sheets/generate-client";
-import { getStudySheet } from "@/lib/study-sheets/store";
+import { generatePlainNote, generateStudySheetFromPrompt, rewriteStudySheetFromPrompt } from "@/lib/study-sheets/generate-client";
+import { createStudySheet, getStudySheet, updateStudySheet } from "@/lib/study-sheets/store";
+import { reserveArtifactTitle } from "@/lib/artifacts/title-store";
+import { plainNoteHistory, requiresNoteReference } from "@/lib/notes/plain";
 import { activeToChatArtifact } from "@/lib/artifacts/active";
 import { localImageHits } from "@/lib/images/local";
 import { stripArtifactMarkup } from "@/lib/composer/memory";
@@ -53,7 +56,7 @@ export type ChatDispatchContext = {
   active: ActiveArtifact | null;
   path?: StudyPath | null;
   threadId?: string;
-  messages?: Pick<ChatMessage, "artifact">[];
+  messages?: (Pick<ChatMessage, "artifact"> & Partial<Pick<ChatMessage, "role" | "content">>)[];
   count?: number;
   pendingKind?: PendingKind | null;
   attachments?: ChatAttachment[];
@@ -238,6 +241,7 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
   const mode = practiceModeOf(ctx.prompt, ctx.tool.args.mode);
   const ka = promptIsKa(ctx.prompt);
   ctx.onStatus?.(mode === "exam" ? "Generating exam" : "Generating quiz");
+  const title = await reserveArtifactTitle(ctx.project.id, mode === "exam" ? "Exam" : "Quiz", extractTopic(generatePrompt(ctx)) || ctx.materials[0]?.title || ctx.project.title, mode === "exam" ? "Exam" : "Quiz", ctx.signal);
   const set = await generatePracticeSet({
     project: ctx.project,
     userId: ctx.userId,
@@ -267,7 +271,7 @@ async function runCreatePractice(ctx: ChatDispatchContext): Promise<ChatDispatch
     artifact: {
       kind: "practice",
       id: set.ids[0],
-      title: mode === "exam" ? (ka ? "გამოცდა" : "Exam") : ka ? "ქვიზი" : "Quiz",
+      title,
       count: set.count,
       ids: set.ids,
       mode,
@@ -300,6 +304,36 @@ async function runCreateSheet(ctx: ChatDispatchContext): Promise<ChatDispatchRes
     content: "",
     artifact: { kind: "sheet", id: sheet.id, title: sheet.title, count: sheet.blocks.length },
   };
+}
+
+async function runPlainNote(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
+  const editing = ctx.tool.name === "edit_note";
+  const id = ctx.tool.args.id || (editing && ctx.active?.kind === "study_sheet" ? ctx.active.id : undefined);
+  const current = editing && id ? await getStudySheet(ctx.project.id, id) : null;
+  ctx.signal?.throwIfAborted();
+  if (editing && (!current || current.kind !== "note")) throw new Error("Open the plain note to update first.");
+  const history = plainNoteHistory(ctx.messages);
+  if (!editing && requiresNoteReference(ctx.prompt) && history.length === 0) {
+    return { intent: "ask", content: promptIsKa(ctx.prompt) ? "რომელი ტექსტი შევინახო ჩანაწერად?" : "Which text should I save in the note?" };
+  }
+  const generated = !editing && ctx.tool.args.content?.trim()
+    ? { title: ctx.tool.args.title || current?.title || "Note", content: ctx.tool.args.content.trim() }
+    : await generatePlainNote({ projectId: ctx.project.id, projectTitle: ctx.project.title, materials: ctx.materials, prompt: ctx.tool.args.instruction || ctx.prompt, currentTitle: current?.title, currentContent: current?.content, history, signal: ctx.signal });
+  ctx.signal?.throwIfAborted();
+  if (!generated.content.trim()) throw new Error("The note is empty.");
+  const title = current && (!ctx.tool.args.title || ctx.tool.args.title === current.title)
+    ? current.title
+    : await reserveArtifactTitle(ctx.project.id, generated.title, ctx.materials[0]?.title || ctx.project.title, "Note", ctx.signal);
+  ctx.signal?.throwIfAborted();
+  let savedId: string;
+  if (current) {
+    await updateStudySheet(ctx.project.id, current.id, { title, kind: "note", content: generated.content, blocks: [] });
+    savedId = current.id;
+  } else {
+    savedId = await createStudySheet({ projectId: ctx.project.id, userId: ctx.userId, title, kind: "note", content: generated.content, blocks: [], sourceMaterialIds: ctx.materials.map(item => item.id) });
+  }
+  if (!savedId) throw new Error("Could not save note.");
+  return { intent: editing ? "rewrite_sheet" : "study", content: promptIsKa(ctx.prompt) ? (editing ? "ჩანაწერი განახლდა." : "ჩანაწერი შენახულია.") : (editing ? "Updated note." : "Saved note."), artifact: { kind: "sheet", id: savedId, title } };
 }
 
 async function runEditPractice(ctx: ChatDispatchContext): Promise<ChatDispatchResult> {
@@ -534,6 +568,7 @@ async function runEditSheet(ctx: ChatDispatchContext): Promise<ChatDispatchResul
   const sheet = await getStudySheet(ctx.project.id, active.id);
   ctx.signal?.throwIfAborted();
   if (!sheet) throw new Error("Those notes are gone.");
+  if (sheet.kind === "note") return runPlainNote({ ...ctx, tool: { name: "edit_note", args: { ...ctx.tool.args, id: sheet.id } } });
   ctx.onStatus?.("Updating notes…");
   ctx.onNotesEvent?.({ status: "Updating notes…", title: sheet.title });
   const next = await rewriteStudySheetFromPrompt({
@@ -568,6 +603,8 @@ export const CHAT_TOOL_HANDLERS: Partial<Record<ChatToolName, ChatToolHandler>> 
   edit_practice: { run: runEditPractice, artifactKind: "practice" },
   append_practice: { run: runAppendPractice, artifactKind: "practice" },
   create_sheet: { run: runCreateSheet, artifactKind: "sheet" },
+  create_note: { run: runPlainNote, artifactKind: "sheet" },
+  edit_note: { run: runPlainNote, artifactKind: "sheet" },
   edit_sheet: { run: runEditSheet, artifactKind: "sheet" },
   create_path: { run: runCreatePath, artifactKind: "path" },
   advance_path: { run: runAdvancePath, artifactKind: "path" },
@@ -639,7 +676,7 @@ export async function dispatchChatTool(ctx: ChatDispatchContext): Promise<ChatDi
     ctx.signal?.throwIfAborted();
     ctx.onStatus?.(toolStatusText({ call: ctx.tool, phase: "error" }, ka));
     report("error");
-    return { intent: "ask", content: stripArtifactMarkup(ctx.text).trim() || toolFallbackText(ka) };
+    return { intent: "ask", content: ctx.tool.name === "create_note" || ctx.tool.name === "edit_note" ? (ka ? "ჩანაწერის შენახვა ვერ მოხერხდა. სცადე ხელახლა." : "I couldn’t save the note. Please try again.") : stripArtifactMarkup(ctx.text).trim() || toolFallbackText(ka) };
   } finally {
     active = false;
   }

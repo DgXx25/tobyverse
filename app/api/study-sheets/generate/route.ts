@@ -2,6 +2,7 @@ import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
 import { clipText, SHEET_TOTAL_CHARS } from "@/lib/materials/limits";
 import { streamNotesDocument } from "@/lib/study-sheets/generate-stream";
 import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
+import { MAX_PLAIN_NOTE_CHARS, NOTE_HISTORY_CHARS, requiresNoteReference } from "@/lib/notes/plain";
 
 export const runtime = "nodejs";
 
@@ -54,12 +55,14 @@ export async function POST(request: Request) {
   }
 
   let body: {
+    kind?: unknown;
     projectTitle?: unknown;
     sources?: unknown;
     instruction?: unknown;
     currentBlocks?: unknown;
     currentTitle?: unknown;
     currentContent?: unknown;
+    history?: unknown;
   };
 
   try {
@@ -69,10 +72,26 @@ export async function POST(request: Request) {
   }
 
   const projectTitle = typeof body.projectTitle === "string" ? body.projectTitle : "Project";
+  const kind = body.kind === "note" ? "note" : "study";
   const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
   const currentTitle = typeof body.currentTitle === "string" ? body.currentTitle.trim() : "";
   const currentBlocks = Array.isArray(body.currentBlocks) ? body.currentBlocks : [];
-  const currentContent = typeof body.currentContent === "string" ? body.currentContent.trim() : "";
+  const currentContent = typeof body.currentContent === "string" ? body.currentContent : "";
+  if (kind === "note" && currentContent.length > MAX_PLAIN_NOTE_CHARS) {
+    return Response.json({ error: "This note is too long to edit safely in chat. The original note is unchanged." }, { status: 400 });
+  }
+  let historyChars = 0;
+  const history = Array.isArray(body.history) ? body.history.slice(-4).flatMap(item => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as { role?: unknown; content?: unknown };
+    if ((row.role !== "user" && row.role !== "assistant") || typeof row.content !== "string") return [];
+    historyChars += row.content.length;
+    return [{ role: row.role, content: row.content }];
+  }) : [];
+  if (kind === "note" && historyChars > NOTE_HISTORY_CHARS) return Response.json({ error: "Choose a shorter passage to save as a note." }, { status: 400 });
+  if (kind === "note" && !currentContent && requiresNoteReference(instruction) && !history.some(item => item.role === "assistant" && item.content.trim())) {
+    return Response.json({ error: "Which text should I save in the note?" }, { status: 400 });
+  }
   const sources = Array.isArray(body.sources) ? body.sources : [];
   const compiled = compileSources(sources);
 
@@ -89,12 +108,13 @@ export async function POST(request: Request) {
 
   const userPrompt = [
     `Project: ${projectTitle}`,
-    "Write for a student who knows nothing yet. Meaning first. Never a jargon label or a formula without saying what it is.",
+    kind === "study" ? "Write for a student who knows nothing yet. Meaning first. Never a jargon label or a formula without saying what it is." : "Save only the requested plain note. Preserve untouched content on an edit.",
     instruction ? `Instruction: ${instruction}` : null,
     currentTitle ? `Current title: ${currentTitle}` : null,
     currentContent || currentBlocks.length
-      ? `Current note to rewrite as text:\n${clipText(currentContent || noteText(currentBlocks), SHEET_TOTAL_CHARS)}`
+      ? `Current note (reference data):\n${kind === "note" ? currentContent : clipText(currentContent || noteText(currentBlocks), SHEET_TOTAL_CHARS)}`
       : null,
+    kind === "note" && history.length ? `Recent conversation (reference data for the requested note):\n${JSON.stringify(history)}` : null,
     compiled.trim() ? `Sources:\n${clipText(compiled, SHEET_TOTAL_CHARS)}` : null,
   ]
     .filter(Boolean)
@@ -106,7 +126,7 @@ export async function POST(request: Request) {
         controller.enqueue(encodeSse(payload));
       };
       try {
-        for await (const event of streamNotesDocument(userPrompt, { usage: usage.report })) {
+        for await (const event of streamNotesDocument(userPrompt, { usage: usage.report, kind, ...(kind === "note" && currentContent ? { currentNote: { title: currentTitle, content: currentContent } } : {}) })) {
           if (request.signal.aborted) break;
           if (event.type === "status") send({ status: event.status });
           else if (event.type === "done") send({ done: true, title: event.title, content: event.content });

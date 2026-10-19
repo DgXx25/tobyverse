@@ -4,6 +4,7 @@ import {
 } from "@/lib/ai/tools";
 import { isFormWriteTopic } from "@/lib/exercises/plan";
 import { isSimpleChatTask } from "@/lib/blocks/match";
+import { isNoteEditRequest } from "@/lib/notes/plain";
 import type { AcceptedChatTool, PendingKind } from "@/types/chat";
 
 export const COMPOSER_INTENTS = [
@@ -124,7 +125,7 @@ const GENERATE_NOW =
   /რაც გინდა|რაც მოგივა|დააგენერირე|გენერირება|\bსულ\b|just generate|generate (it|now|anyway)|whatever|random\b|any(thing)? (is )?fine|don't care|dont care|up to you|i don't mind/i;
 const ACCEPT_OFFER = /^(დიახ|კი|ხო|კარგი|ოკ|ok|okay|yes|yep|sure)\.?!?$/i;
 
-const DO_IT_NOW = /დამიწერე|გააკეთე|make (?:me )?a note|write (?:me )?a note/i;
+const DO_IT_NOW = /დამიწერე|გააკეთე|make (?:me )?a note|write (?:me )?a note|\b(?:make|write|create|generate) (?:me )?(?:a )?study notes?\b/i;
 
 export function wantsImmediateCreate(prompt: string, confirmed?: boolean): boolean {
   if (confirmed) return true;
@@ -211,7 +212,7 @@ export function assessCreateReady(input: {
 
 export function intentFromTool(name: ChatToolName): ComposerIntent {
   if (name === "create_practice" || name === "suggest_practice") return "practice";
-  if (name === "create_sheet" || name === "suggest_sheet") return "study";
+  if (name === "create_note" || name === "create_sheet" || name === "suggest_sheet") return "study";
   if (
     name === "create_path" ||
     name === "suggest_path" ||
@@ -223,7 +224,7 @@ export function intentFromTool(name: ChatToolName): ComposerIntent {
   }
   if (name === "edit_practice") return "edit";
   if (name === "append_practice") return "append";
-  if (name === "edit_sheet") return "rewrite_sheet";
+  if (name === "edit_note" || name === "edit_sheet") return "rewrite_sheet";
   return "ask";
 }
 
@@ -231,6 +232,12 @@ const EXAM_HINT = /გამომცადე|გამოცდა|\bexam\b|qu
 const PRACTICE_HINT = /დამავარჯიშე|ვივარჯიშო|ვარჯიში|\bpractice\b/i;
 /** One stem covers კონსპექტი / დავაკონსპექტო / დამიკონსპექტე. */
 const SHEET_HINT = /კონსპექტ|შემომაჯამე|შემაჯამე|study sheet|make (?:me )?a note|write (?:me )?a note|\bnotes?\b|summarize/i;
+
+/** Ordinary saved notes are a separate request from the educational generator. */
+export function wantsPlainNote(prompt: string): boolean {
+  if (/study notes?|study sheet|კონსპექტ|flashcards|data table|Generate a report/i.test(prompt)) return false;
+  return /ჩაინიშნე|ჩამინიშნე|ჩამიწერე|ჩანაწერად|ნოუთად|\b(?:jot|note) (?:this|that|it) down\b|\b(?:save|make|create|write|take|update|edit|change|append to)\s+(?:(?:me|this|that|the|a|an|my|plain|short|brief)\s+)*notes?\b|\badd (?:this|that|it) to (?:my |the )?note\b|^(?:please )?save (?:this|that|it)(?: as (?:a )?note)?[.!?\s]*$/i.test(prompt);
+}
 /** Course map — not a notes dump. */
 const PATH_HINT =
   /სილაბუს|syllabus|study path|course path|კურსის გზა|სასწავლო გზა|დაგეგმე კურსი|დამიგეგმე|map this course|map the course|ეს კურსი მასწავლე|მასწავლე ეს კურსი|გზა დამიკეთე/i;
@@ -591,7 +598,7 @@ export function forcedCreateTool(input: {
 /** Tiny keyword fallback if the provider returned no tool. Not the main router. */
 export function fallbackChatTool(input: {
   prompt: string;
-  active?: { kind: string; id: string } | null;
+  active?: { kind: string; id: string; noteKind?: "note" | "study" } | null;
   accepted?: AcceptedChatTool;
   priorClarify?: boolean;
   pendingTopic?: string | null;
@@ -696,7 +703,7 @@ export function gateChatTool(input: {
   priorClarify?: boolean;
   pendingTopic?: string | null;
   pendingKind?: PendingKind | null;
-  active?: { kind: string; id: string } | null;
+  active?: { kind: string; id: string; noteKind?: "note" | "study" } | null;
   accepted?: AcceptedChatTool;
   pathTopic?: string;
   projectTitle?: string;
@@ -710,6 +717,13 @@ export function gateChatTool(input: {
   const active = input.active ?? null;
   const pendingKind = input.pendingKind ?? null;
   let tool = input.tool ?? { name: "answer" as const, args: {} };
+
+  if (input.accepted === "create_note" || wantsPlainNote(prompt)) {
+    const editing = input.accepted !== "create_note" && active?.kind === "study_sheet" && isNoteEditRequest(prompt);
+    const name = editing ? active?.noteKind === "note" ? "edit_note" : "edit_sheet" : "create_note";
+    if (tool.name === name) return tool;
+    return { name, args: { instruction: prompt, ...(editing ? { id: active.id } : {}) } };
+  }
 
   const formWrite = isFormWriteTopic(
     prompt,

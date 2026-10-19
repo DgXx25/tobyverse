@@ -20,7 +20,6 @@ import { FileKindIcon } from "@/components/workspace/file-kind-icon";
 import { MaterialText } from "@/components/workspace/material-text";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { StudioPane } from "@/components/workspace/studio-pane";
-import { createStudySheet } from "@/lib/study-sheets/store";
 import type { StudioTile } from "@/lib/workspace/studio";
 import { useAuth } from "@/components/auth-provider";
 import { isGuestUser } from "@/lib/guest";
@@ -333,18 +332,6 @@ export function ArtifactPanel({
                     if (found) onStartPractice(found);
                   }}
                   onOpenPath={() => setTab("path")}
-                  onAddNote={async ({ title, text }) => {
-                    const id = await createStudySheet({
-                      projectId,
-                      userId,
-                      title: title || "Note",
-                      blocks: [],
-                      content: text,
-                      sourceMaterialIds: [],
-                    });
-                    setTab("sheets");
-                    setSheetId(id);
-                  }}
                 />
               )}
               {tab === "materials" && (

@@ -13,6 +13,11 @@ const PRIMARY_SLIDE_NAME = /^(?:slide|page)-(\d+)\.(png|jpe?g|webp|gif)$/i;
 const ORIGINAL_FILE = /\.(pptx|ppt|pdf|docx|txt|md)$/i;
 
 export function originalStoredName(material: Material): string | null {
+  // Compression can change the extension without changing the original metadata.
+  if (material.type === "image" && !material.originalRemoved) {
+    const storedName = storedObjectName(material.storagePath);
+    if (storedName && storedName !== "extracted.txt") return storedName;
+  }
   const fromField = material.originalName?.trim() || "";
   if (fromField && (fromField !== "extracted.txt" || material.originalRemoved) && !fromField.includes("/") && !fromField.includes("..")) {
     return fromField;

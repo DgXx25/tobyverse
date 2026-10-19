@@ -8,6 +8,7 @@ export const CHAT_MODES = ["auto", "fast", "teacher"] as const;
 export type ChatMode = (typeof CHAT_MODES)[number];
 
 export type AcceptedChatTool =
+  | "create_note"
   | "create_practice"
   | "create_sheet"
   | "create_path"
@@ -175,6 +176,7 @@ export type ChatGenerationContext = {
     count?: number;
     status?: string;
     progress?: string;
+    noteKind?: "note" | "study";
   } | null;
   hasMaterials?: boolean;
   confirmed?: boolean;

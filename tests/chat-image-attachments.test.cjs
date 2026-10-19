@@ -35,6 +35,7 @@ function composerUploads() {
     '@/lib/api/client': { authHeaders: async () => ({ Authorization: 'Bearer alice' }) },
     '@/lib/workspace/draft-notebook': { clearUntouchedNotebook: () => {} },
     '@/lib/materials/ingest-client': { ingestMaterialFile: async ({ file }) => { materialDocs.push(file.name); return 'document-id'; } },
+    '@/lib/materials/store': { getMaterial: async () => ({ storagePath: imagePath, sizeBytes: 250 }) },
     '@/lib/materials/storage': {
       originalStoragePath: (uid, project, id, name) => `users/${uid}/projects/${project}/materials/${id}/${name}`,
       uploadMaterialBytes: async (storagePath, file, _mime, options) => {
@@ -47,15 +48,13 @@ function composerUploads() {
   return { api, materialDocs, blobs };
 }
 
-test('composer photos become durable attachments without creating source materials', async () => {
+test('composer photos refer to the single saved image source with OCR and quota accounting', async () => {
   const { api, materialDocs, blobs } = composerUploads();
   const file = new File(['heic image'], 'problem.heic', { type: 'image/heic' });
   const result = await api.ingestComposerFile({ projectId: 'project', userId: 'ignored-client-id', file });
-  assert.deepEqual(result, photo, 'preserve the normalized server path and actual stored byte count');
-  assert.deepEqual(materialDocs, []);
-  assert.equal(blobs.length, 1);
-  assert.match(blobs[0].storagePath, /^users\/alice\/projects\/project\/materials\/chat-image-[^/]+\/problem\.jpg$/);
-  assert.equal(result.materialId, undefined);
+  assert.deepEqual(result, { ...photo, materialId: 'document-id' }, 'preserve the normalized path and reference the saved source for sharing');
+  assert.deepEqual(materialDocs, ['problem.heic']);
+  assert.equal(blobs.length, 0, 'never upload a duplicate standalone original');
 });
 
 test('composer documents retain normal source ingestion, including files whose names mention photos', async () => {
@@ -109,16 +108,17 @@ test('a later photo question reuses the latest image in this chat; an unrelated 
   assert.deepEqual(figureAttachmentsForTurn('ამოხსენი', [older], messages), [older]);
 });
 
-test('new-chat photo uploads survive the opening handoff without becoming source IDs', async () => {
+test('new-chat photos keep their saved source reference through the opening handoff without duplicate ingestion', async () => {
   const session = new Map();
   const previous = global.window;
   global.window = { sessionStorage: { getItem: (key) => session.get(key) ?? null, setItem: (key, value) => session.set(key, value), removeItem: (key) => session.delete(key) }, setTimeout: () => 0 };
   try {
     const materialDocs = [];
+    const savedPhoto = { ...photo, materialId: 'photo-id' };
     const { startChatInProject, takeProjectStartIngest } = isolated('lib/workspace/start-project.ts', {
       '@/lib/projects': {}, '@/lib/chats': { createChatThread: async () => 'new-thread', allocateChatMessageId: () => 'message' },
       '@/lib/auth': { requireSignedInUser: async () => ({ uid: 'alice' }) },
-      '@/lib/composer/attach-client': { uploadChatImage: async () => photo },
+      '@/lib/composer/attach-client': { uploadChatImage: async () => savedPhoto },
       '@/lib/materials/ingest-client': {
         prepareMaterialIngest: async ({ source }) => { materialDocs.push(source.file.name); return { materialId: 'pdf-id' }; },
         commitMaterialText: async (item) => item.materialId, discardPreparedMaterials: async () => {},
@@ -129,27 +129,28 @@ test('new-chat photo uploads survive the opening handoff without becoming source
       { kind: 'file', file: new File(['pdf'], 'notes.pdf') },
     ] });
     const result = await takeProjectStartIngest(id);
-    assert.deepEqual(result, { materialIds: ['pdf-id'], attachments: [photo] });
+    assert.deepEqual(result, { materialIds: ['pdf-id'], attachments: [savedPhoto] });
     assert.deepEqual(materialDocs, ['notes.pdf']);
     const { peekPendingStart } = require('../lib/workspace/pending-start.ts');
-    assert.deepEqual(peekPendingStart(id).attachments, [photo]);
+    assert.deepEqual(peekPendingStart(id).attachments, [savedPhoto]);
     assert.deepEqual(peekPendingStart(id).materialIds, ['pdf-id']);
   } finally { global.window = previous; }
 });
 
-test('large chat photos are made small enough for vision while source originals stay unchanged', async () => {
+test('both source and chat photos keep a compressed image small enough for vision', async () => {
   const sharp = require('sharp');
   const { randomBytes } = require('node:crypto');
   const { normalizeImageUpload } = require('../lib/materials/image-normalization.ts');
   const buffer = await sharp(randomBytes(1800 * 1800 * 3), { raw: { width: 1800, height: 1800, channels: 3 } }).png().toBuffer();
   assert.ok(buffer.length > 1_500_000);
   const source = await normalizeImageUpload({ filename: 'photo.png', mime: 'image/png', buffer });
-  assert.equal(source.buffer, buffer, 'Add sources keeps its original upload behavior');
+  assert.ok(source.buffer.length <= 1_500_000);
+  assert.equal(source.mime, 'image/webp');
   const chat = await normalizeImageUpload({ filename: 'photo.png', mime: 'image/png', buffer, chatImage: true });
   assert.ok(chat.buffer.length <= 1_500_000, 'an accepted chat photo must not be silently skipped by vision');
-  assert.equal(chat.mime, 'image/jpeg');
-  assert.equal(chat.filename, 'photo.jpg');
-  assert.equal((await sharp(chat.buffer).metadata()).format, 'jpeg');
+  assert.equal(chat.mime, 'image/webp');
+  assert.equal(chat.filename, 'photo.webp');
+  assert.equal((await sharp(chat.buffer).metadata()).format, 'webp');
 
   const stored = new Map();
   const { POST } = isolated('app/api/materials/upload/route.ts', {

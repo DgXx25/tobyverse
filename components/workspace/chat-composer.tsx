@@ -13,7 +13,7 @@ import {
 } from "react";
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
 import { attachFileKey } from "@/lib/composer/attach";
-import { LARGE_PASTE_CHARS, looksLikeUrl } from "@/lib/materials/ingest-client";
+import { shouldAttachPastedText } from "@/lib/composer/paste-policy";
 import { COMPOSER_FILE_ACCEPT } from "@/lib/materials/types";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { ComposerParameters } from "@/components/workspace/composer-parameters";
@@ -406,7 +406,7 @@ export const ChatComposer = forwardRef<
     }
     const text = event.clipboardData.getData("text");
     if (!text) return;
-    if (text.trim().length >= LARGE_PASTE_CHARS && !looksLikeUrl(text.trim())) {
+    if (shouldAttachPastedText(text)) {
       event.preventDefault();
       onPasteText(text);
     }

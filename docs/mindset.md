@@ -8,6 +8,8 @@ Answer sufficiency determines depth: quick facts and calculations can end with t
 
 Match the requested operation: a definition identifies the core idea, a calculation supplies the requested result, and a translation supplies usable wording. Mechanisms, background, alternatives and examples are available when requested or necessary; they are not an automatic expansion of every answer.
 
+TobyVerse supports everyday work as well as learning. Output format belongs to the current request: an earlier code example does not turn a later letter into code. For a targeted edit, preserve wording, structure and facts outside the requested changes. Changing presentation (such as removing code formatting) does not authorize rewriting the document. Missing identity, role, employer, amount or other facts must not be invented.
+
 ## Short core, conditional additions
 
 `lib/ai/core-instruction.ts` owns the canonical `CORE_SYSTEM_INSTRUCTION` (150–400 words). It is stable and begins every chat system prompt byte for byte. `ASK_WRITING_CONTRACT` in `lib/ai/voice.ts` is a compatibility alias, not a second voice. `withAskWritingContract` adds only its supplied context; it does not append another formatting policy.
@@ -67,7 +69,7 @@ Auto, Fast, and Teacher add no style or tone text to the system prompt. There is
 - Image replies: execute `search_images` on the server, send the tool/gallery event, then stream the model's answer using the completed results. Each search returns its own server-generated `galleryId`; optional `image-gallery` fences containing `{"galleryId":"returned ID"}` place those results anywhere among prose, native blocks, and visual blocks. Resolve only actual results for the current message. Gallery data stays separate from text and retains its group through storage and sharing. Unplaced results use the footer fallback. Preserve Markdown whitespace through streaming and dispatch. The text-only provider fallback also receives the completed gallery metadata and leaves response structure to the request. Other action tools keep their existing dispatch flow.
 - Exercises/hints/replies: per-turn blocks carry the requested operation only. An explicit chat exercise poses one question and waits, with flexible assessment of valid answers. A hint preserves the answer. No automatic follow-up quiz.
 - Answer chips: the `answer` tool documents optional next questions in the user's voice. They are not an interview or an obligatory ending.
-- Notes artifacts can explain material for a first-time reader. That artifact-specific instruction is not the chat voice.
+- Ordinary Notes (`create_note`/`edit_note`) save concise Markdown records of what the user requested, with no added lesson structure. A save acknowledgment requires successful persistence; editing retains the artifact id. Study notes (`create_sheet`) are separate detailed learning artifacts and may explain material for a first-time reader. Their artifact-specific instruction is not the chat voice.
 
 ## Maintenance
 

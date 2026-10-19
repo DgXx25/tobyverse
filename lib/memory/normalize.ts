@@ -1,8 +1,9 @@
 import { MEMORY_CONTENT_MAX, MEMORY_OPS_PER_TURN, PERSONALIZATION_MAX } from "@/lib/memory/constants";
 import type { ChatMemoryContext, MemoryOp } from "@/types/memory";
+import { containsSensitiveMemory, isWorkNoteRequest, memorySafeText } from "@/lib/memory/privacy";
 
 export function sanitizeMemoryContent(value: unknown): string {
-  if (typeof value !== "string") return "";
+  if (typeof value !== "string" || !memorySafeText(value)) return "";
   const line = value
     .replace(/\s+/g, " ")
     .trim()
@@ -13,7 +14,7 @@ export function sanitizeMemoryContent(value: unknown): string {
 }
 
 export function sanitizePersonalization(value: unknown): string {
-  if (typeof value !== "string") return "";
+  if (typeof value !== "string" || !memorySafeText(value)) return "";
   const text = value
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
@@ -64,7 +65,7 @@ const DURABLE_FACT =
   /მე მქვია|my name is|ვმუშაობ|i work as|i(?:['’]m| am) an?\b|ფინალ.{0,48}(\d|რიცხვ)|exam.{0,24}(\d|on |date)|always (answer|write|reply) in|წერე? ქართულ|preferred language|B[12]\b|C[12]\b|A[12]\b|დონე|struggles with|მიჭირს|lecturer|ლექტორ|მანქიუ|mankiw|textbook|წიგნი|exam on|გამოცდა/i;
 
 const PREFERENCE_MARKER = /\bi (?:prefer|like)\b|my prefer(?:red|ence)|მირჩევნია|მომწონს/i;
-const COMMUNICATION_STYLE = /answers?|responses?|replies|paragraphs?|concise|detailed|emojis?|tone|format|bold|highlights?|მიპასუხ|პასუხებ|აბზაც|მოკლე|ვრცელი|ემოჯ|გამუქ|სტილ/i;
+const COMMUNICATION_STYLE = /answers?|responses?|replies|paragraphs?|notes?|concise|detailed|emojis?|tone|format|bold|highlights?|მიპასუხ|პასუხებ|აბზაც|ჩანაწერ|მოკლე|ვრცელი|ემოჯ|გამუქ|სტილ/i;
 
 function looksLikeQuestionOnly(prompt: string): boolean {
   const text = prompt.trim();
@@ -72,13 +73,19 @@ function looksLikeQuestionOnly(prompt: string): boolean {
   return /^(რა |როდის |რითი |როგორ |რომელ |why |what |when |how |which )/i.test(text);
 }
 
+function isDocumentTask(prompt: string): boolean {
+  return /^(?:please\s+)?(?:rewrite|translate|edit|proofread|summarize|format)\b|^(?:გადა(?:წერ|თარგმნ)|თარგმნ|შეასწორ|დაარედაქტირ|შეაჯამ)/i.test(prompt.trim());
+}
+
 /** Automatic learning stays quiet; a confirmation belongs only to a deliberate remember request. */
 export function isExplicitMemoryRequest(prompt: string): boolean {
+  if (containsSensitiveMemory(prompt) || isWorkNoteRequest(prompt) || isDocumentTask(prompt)) return false;
   return /\bremember\b|დაიმახსოვრ|დამიმახსოვრ/i.test(prompt);
 }
 
 /** Notes / practice / path requests have no signal — skip extract so they never show Memorized. */
 export function shouldExtractMemory(prompt: string): boolean {
+  if (containsSensitiveMemory(prompt) || isWorkNoteRequest(prompt) || isDocumentTask(prompt)) return false;
   const text = prompt.replace(/\s+/g, " ").trim();
   if (!text) return false;
   if (LEARNING_OR_MEMORY_SIGNAL.test(text)) return true;
@@ -87,7 +94,7 @@ export function shouldExtractMemory(prompt: string): boolean {
   return DURABLE_FACT.test(text);
 }
 
-/** Study-method prefs belong in How you learn, not standing reply instructions. */
+/** Compatibility grouping for descriptive preferences inside unified Memory. */
 export function isStudyMethodMemory(content: string): boolean {
   const t = content.trim();
   if (!t) return false;

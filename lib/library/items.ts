@@ -80,7 +80,7 @@ export async function listLibraryItems(userId: string): Promise<LibraryItem[]> {
             .replace(/\s+/g, " ")
             .trim()
             .slice(0, 160),
-          meta: "Notes",
+          meta: item.kind === "note" ? "Note · Saved" : "Study notes",
           createdAt: item.createdAt,
           artifact: { kind: item.title === "Study plan" ? "plan" : "sheet", id: item.id, title: item.title },
         });

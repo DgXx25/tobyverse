@@ -4,18 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FileKindIcon } from "@/components/workspace/file-kind-icon";
 import { MaterialText } from "@/components/workspace/material-text";
+import { MaterialViewer } from "@/components/workspace/material-viewer";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { newChipId } from "@/lib/composer/attach";
 import { ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl } from "@/lib/materials/ingest-client";
 import { removeMaterial } from "@/lib/materials/save";
 import { renameMaterial } from "@/lib/materials/store";
+import { createSourceFolder, deleteSourceFolder, groupSourcesByFolder, moveSourcesToFolder, renameSourceFolder, SOURCE_DRAG_TYPE, subscribeSourceFolders, type SourceFolder } from "@/lib/materials/folders";
 import { MATERIAL_FILE_ACCEPT } from "@/lib/materials/types";
 import { positionContextMenu } from "@/lib/workspace/context-menu-position";
 import { markProjectActivityComplete } from "@/lib/workspace/project-activity";
 import type { LibraryFileKind } from "@/lib/library/media";
 import type { Material } from "@/types/material";
 
-type Pending = { id: string; name: string; state: "uploading" | "error"; error?: string; file?: File; phase?: "uploading" | "reading"; progress?: number };
+type Pending = { id: string; name: string; state: "uploading" | "error"; error?: string; file?: File; folderId?: string; phase?: "uploading" | "reading"; progress?: number };
 
 const UPLOAD_CONCURRENCY = 2;
 const UPLOAD_PROGRESS_WEIGHT = 0.4;
@@ -139,10 +141,27 @@ export function SourcesPane({
   const [pasteBody, setPasteBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ id: string; top: number; right: number; pointer?: { x: number; y: number } } | null>(null);
+  const [menu, setMenu] = useState<{ id: string; folder?: boolean; top: number; right: number; pointer?: { x: number; y: number } } | null>(null);
   const [renameTarget, setRenameTarget] = useState<Material | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [folders, setFolders] = useState<SourceFolder[]>([]);
+  const [collapsed, setCollapsed] = useState<string[]>([]);
+  const [organizing, setOrganizing] = useState(false);
+  const [managedIds, setManagedIds] = useState<string[]>([]);
+  const [destination, setDestination] = useState("");
+  const [folderDialog, setFolderDialog] = useState<{ id?: string; name: string } | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [dropFolder, setDropFolder] = useState<string | null>(null);
+  const selectionAnchor = useRef<string | null>(null);
+
+  useEffect(() => {
+    setFolders([]);
+    setManagedIds([]);
+    setOrganizing(false);
+    setCollapsed([]);
+    return subscribeSourceFolders(projectId, setFolders, err => setError(err.message));
+  }, [projectId]);
 
   const visiblePending = pending.filter((entry) => !items.some((item) => sameFile(entry.name, item)));
   const reading = items.find((item) => item.id === readingId) ?? null;
@@ -151,6 +170,85 @@ export function SourcesPane({
   const picked = selectedIds.filter((id) => allIds.includes(id));
   const allOn = !none && (selectedIds.length === 0 || picked.length >= allIds.length);
   const isOn = (id: string) => !none && (selectedIds.length === 0 || selectedIds.includes(id));
+  const groups = groupSourcesByFolder(items, folders);
+  const managed = managedIds.filter(id => allIds.includes(id));
+
+  function selectForMove(id: string, range = false) {
+    setOrganizing(true);
+    if (range && selectionAnchor.current) {
+      const ordered = [...groups.root, ...folders.flatMap(folder => groups.folders.get(folder.id) ?? [])].map(item => item.id);
+      const from = ordered.indexOf(selectionAnchor.current), to = ordered.indexOf(id);
+      if (from >= 0 && to >= 0) {
+        setManagedIds(current => [...new Set([...current, ...ordered.slice(Math.min(from, to), Math.max(from, to) + 1)])]);
+        return;
+      }
+    }
+    selectionAnchor.current = id;
+    setManagedIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+  }
+
+  async function move(ids: string[], folderId: string | null) {
+    if (!ids.length || folderBusy) return;
+    setFolderBusy(true);
+    setError(null);
+    try {
+      await moveSourcesToFolder(projectId, ids, folderId);
+      setManagedIds([]);
+      setOrganizing(false);
+      if (folderId) setCollapsed(current => current.filter(id => id !== folderId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not move the sources.");
+    } finally { setFolderBusy(false); }
+  }
+
+  async function saveFolder() {
+    if (!folderDialog || folderBusy || !folderDialog.name.trim()) return;
+    setFolderBusy(true);
+    setError(null);
+    try {
+      if (folderDialog.id) await renameSourceFolder(projectId, folderDialog.id, folderDialog.name);
+      else {
+        const id = await createSourceFolder(projectId, folderDialog.name);
+        if (managed.length) {
+          try { await moveSourcesToFolder(projectId, managed, id); }
+          catch {
+            setDestination(id);
+            setFolderDialog(null);
+            setError("Folder created, but the sources could not be moved. Select Move to try again.");
+            return;
+          }
+          setManagedIds([]);
+          setOrganizing(false);
+        }
+      }
+      setFolderDialog(null);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save the folder."); }
+    finally { setFolderBusy(false); }
+  }
+
+  async function removeFolder(id: string) {
+    setMenu(null);
+    setFolderBusy(true);
+    setError(null);
+    try { await deleteSourceFolder(projectId, id); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not remove the folder."); }
+    finally { setFolderBusy(false); }
+  }
+
+  function dropSources(event: React.DragEvent, folderId: string | null) {
+    if (!event.dataTransfer.types.includes(SOURCE_DRAG_TYPE) && !event.dataTransfer.files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDropFolder(null);
+    setDragging(false);
+    if (event.dataTransfer.files.length) { void uploadFiles([...event.dataTransfer.files], folderId ?? undefined); return; }
+    try {
+      const data = JSON.parse(event.dataTransfer.getData(SOURCE_DRAG_TYPE)) as { projectId?: unknown; ids?: unknown };
+      if (data.projectId !== projectId || !Array.isArray(data.ids)) return;
+      const ids = data.ids.filter((id): id is string => typeof id === "string" && allIds.includes(id));
+      void move(ids, folderId);
+    } catch { /* An unrelated drag is never a source mutation. */ }
+  }
 
   function toggle(id: string) {
     const current = allOn ? allIds : picked;
@@ -169,7 +267,7 @@ export function SourcesPane({
 
   async function uploadOne(entry: Pending, file: File) {
     try {
-      await ingestMaterialFile({
+      const materialId = await ingestMaterialFile({
         projectId,
         userId,
         file,
@@ -185,6 +283,10 @@ export function SourcesPane({
             : item)));
         },
       });
+      if (entry.folderId) {
+        try { await moveSourcesToFolder(projectId, [materialId], entry.folderId); }
+        catch { setError("The source was uploaded, but its folder is no longer available. You can find it in Sources."); }
+      }
       setPending((current) => current.filter((item) => item.id !== entry.id));
     } catch (err) {
       const message = err instanceof Error && err.message.trim() ? err.message : "Upload failed.";
@@ -196,10 +298,10 @@ export function SourcesPane({
     }
   }
 
-  async function uploadFiles(files: File[]) {
+  async function uploadFiles(files: File[], folderId?: string) {
     if (files.length === 0) return;
     setError(null);
-    const entries = files.map((file) => ({ id: newChipId(), name: file.name, state: "uploading" as const, phase: "uploading" as const, progress: 0 }));
+    const entries = files.map((file) => ({ id: newChipId(), name: file.name, folderId, state: "uploading" as const, phase: "uploading" as const, progress: 0 }));
     setPending((current) => [...current, ...entries]);
     let cursor = 0;
     const worker = async () => {
@@ -316,30 +418,75 @@ export function SourcesPane({
     }
   }
 
+  function renderSource(item: Material) {
+    const status = statusOf(item);
+    const on = isOn(item.id);
+    const busy = status?.tone === "busy";
+    const menuOpen = !menu?.folder && menu?.id === item.id;
+    const selected = managed.includes(item.id);
+    return (
+      <li key={item.id} className="group relative list-none" draggable={!busy && !folderBusy}
+        onDragStart={event => {
+          const ids = selected ? managed : [item.id];
+          event.dataTransfer.setData(SOURCE_DRAG_TYPE, JSON.stringify({ projectId, ids }));
+          event.dataTransfer.effectAllowed = "move";
+        }}
+        onContextMenu={event => {
+          if (busy) return;
+          event.preventDefault();
+          setMenu({ id: item.id, top: event.clientY, right: 0, pointer: { x: event.clientX, y: event.clientY } });
+        }}>
+        <div className={`source-item flex min-w-0 items-center overflow-hidden rounded-lg px-1 ${menuOpen || (organizing && selected) ? "source-item-active" : ""}`}>
+          {organizing ? <button type="button" role="checkbox" aria-checked={selected} aria-label={`Select ${item.title} to move`} className="flex h-9 w-7 shrink-0 items-center justify-center" onClick={event => selectForMove(item.id, event.shiftKey)}><Check on={selected} /></button> : null}
+          <button type="button" onClick={event => {
+            if (organizing || event.shiftKey || event.ctrlKey || event.metaKey) selectForMove(item.id, event.shiftKey);
+            else onOpenMaterial(item.id);
+          }} className="flex min-h-9 min-w-0 flex-1 items-center gap-2 py-1 text-left" title={item.title}>
+            <FileKindIcon kind={kindFromName(item.originalName || item.title, item.type)} size={22} />
+            <span className={`min-w-0 flex-1 truncate text-[13px] text-foreground ${!busy && (menuOpen ? "pr-8" : "group-hover:pr-8")}`}>{item.title}</span>
+          </button>
+          {busy ? <span className="flex h-9 w-7 shrink-0 items-center justify-center"><ProgressCircle value={status?.progress} label="Reading" /></span> : <>
+            <span data-source-menu className="contents">
+              <button type="button" aria-label={`Source actions for ${item.title}`} aria-expanded={menuOpen}
+                onClick={event => {
+                  if (menuOpen) { setMenu(null); return; }
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setMenu({ id: item.id, top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
+                }}
+                className={`absolute ${organizing ? "right-1" : "right-8"} top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-muted hover:bg-foreground/10 hover:text-foreground ${menuOpen ? "opacity-100" : "opacity-100 md:pointer-events-none md:opacity-0 md:group-hover:pointer-events-auto md:group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"}`}>
+                <UiIcon name="moreVertical" size={16} />
+              </button>
+            </span>
+            {!organizing ? <button type="button" role="checkbox" aria-checked={on} aria-label={`Use ${item.title}`} onClick={() => toggle(item.id)} className="flex h-9 w-7 shrink-0 items-center justify-center"><Check on={on} /></button> : null}
+          </>}
+        </div>
+        {status?.tone === "error" ? <p className="pl-9 text-[12px] leading-4 text-red-400">{status.text}</p> : null}
+      </li>
+    );
+  }
+
   return (
     <section
       aria-label="Sources"
       className={`sources-pane relative flex min-h-0 w-full min-w-0 max-w-full flex-col overflow-x-hidden ${className}`}
       onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes("Files")) return;
+        if (!event.dataTransfer.types.includes("Files") && !event.dataTransfer.types.includes(SOURCE_DRAG_TYPE)) return;
         event.preventDefault();
         event.stopPropagation();
-        setDragging(true);
+        if (event.dataTransfer.types.includes("Files")) setDragging(true);
       }}
       onDragLeave={(event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node)) return;
         setDragging(false);
       }}
       onDrop={(event) => {
-        if (!event.dataTransfer.files.length) return;
-        event.preventDefault();
-        event.stopPropagation();
-        setDragging(false);
-        void uploadFiles([...event.dataTransfer.files]);
+        dropSources(event, null);
       }}
     >
       {reading ? (
-        <MaterialText material={reading} onBack={() => onCloseReading?.()} />
+        reading.type === "image" && !reading.originalRemoved
+          ? <MaterialViewer material={reading} onBack={() => onCloseReading?.()} onClose={() => onCloseReading?.()} />
+          : <MaterialText material={reading} onBack={() => onCloseReading?.()} />
       ) : <>
       {!hideTopBar ? (
         <header className="flex h-11 shrink-0 items-center justify-end px-2">
@@ -370,11 +517,26 @@ export function SourcesPane({
           Add sources
         </button>
 
+        <div className="mt-2 flex items-center justify-between gap-2 text-[12px] text-muted">
+          <button type="button" disabled={folderBusy} onClick={() => { setError(null); setFolderDialog({ name: "" }); }} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-1 hover:text-foreground disabled:opacity-40"><UiIcon name="projectFolder" size={15} />New folder</button>
+          {items.length ? <button type="button" onClick={() => { setOrganizing(!organizing); setManagedIds([]); }} className="h-8 rounded-lg px-1 hover:text-foreground">{organizing ? "Done" : "Select"}</button> : null}
+        </div>
+        {organizing ? <div className="mb-1 rounded-xl bg-background p-2 text-[12px]">
+          <div className="mb-2 flex items-center justify-between text-muted"><span>{managed.length} selected</span><button type="button" onClick={() => setManagedIds(managed.length === items.length ? [] : allIds)} className="text-foreground">{managed.length === items.length ? "Clear" : "Select all"}</button></div>
+          <div className="flex min-w-0 gap-1.5">
+            <select aria-label="Move selected sources to folder" value={destination} onChange={event => setDestination(event.target.value)} className="h-8 min-w-0 flex-1 rounded-lg bg-surface px-2 text-foreground outline-none">
+              <option value="">Sources (no folder)</option>
+              {folders.filter(folder => !folder.deleting).map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+            </select>
+            <button type="button" disabled={folderBusy || !managed.length} onClick={() => void move(managed, destination || null)} className="h-8 rounded-lg bg-foreground px-3 font-medium text-background disabled:opacity-35">{folderBusy ? "Moving…" : "Move"}</button>
+          </div>
+        </div> : null}
+
         {error ? <p role="alert" className="mt-2 text-[12px] leading-4 text-red-400">{error}</p> : null}
       </div>
 
       <div className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-4 pt-3">
-        {items.length > 0 ? (
+        {items.length > 0 && !organizing ? (
           <div className="mb-1 flex h-8 items-center justify-end gap-2 px-1 text-[12px] text-foreground">
             <span>Select all</span>
             <button type="button" role="checkbox" aria-checked={allOn} aria-label="Select all sources" onClick={toggleAll} className="flex h-8 w-7 items-center justify-center">
@@ -410,74 +572,32 @@ export function SourcesPane({
             </li>
           ))}
 
-          {items.map((item) => {
-            const status = statusOf(item);
-            const on = isOn(item.id);
-            const busy = status?.tone === "busy";
-            const menuOpen = menu?.id === item.id;
-            return (
-              <li
-                key={item.id}
-                className="group relative list-none"
-                onContextMenu={(event) => {
-                  if (busy) return;
-                  event.preventDefault();
-                  setMenu({ id: item.id, top: event.clientY, right: 0, pointer: { x: event.clientX, y: event.clientY } });
+          {folders.map(folder => {
+            const members = groups.folders.get(folder.id) ?? [];
+            const closed = collapsed.includes(folder.id);
+            return <li key={folder.id} className="list-none">
+              <div data-source-folder={folder.id} className={`group relative flex h-9 items-center gap-1 rounded-lg px-1 ${dropFolder === folder.id ? "bg-foreground/10 ring-1 ring-foreground/20" : ""}`}
+                onDragOver={event => {
+                  if (folder.deleting || (!event.dataTransfer.types.includes(SOURCE_DRAG_TYPE) && !event.dataTransfer.types.includes("Files"))) return;
+                  event.preventDefault(); event.stopPropagation(); setDropFolder(folder.id);
                 }}
-              >
-                <div className={`source-item flex min-w-0 items-center overflow-hidden rounded-lg px-1 ${menuOpen ? "source-item-active" : ""}`}>
-                  <button
-                    type="button"
-                    onClick={() => onOpenMaterial(item.id)}
-                    className="flex min-h-9 min-w-0 flex-1 items-center gap-2 py-1 text-left"
-                    title={item.title}
-                  >
-                    <FileKindIcon kind={kindFromName(item.originalName || item.title, item.type)} size={22} />
-                    <span className={`min-w-0 flex-1 truncate text-[13px] text-foreground ${!busy && (menuOpen ? "pr-8" : "group-hover:pr-8")}`}>{item.title}</span>
-                  </button>
-                  {busy ? (
-                    <span className="flex h-9 w-7 shrink-0 items-center justify-center">
-                      <ProgressCircle value={status?.progress} label="Reading" />
-                    </span>
-                  ) : (
-                    <>
-                      <span data-source-menu className="contents">
-                        <button
-                          type="button"
-                          aria-label={`Source actions for ${item.title}`}
-                          aria-expanded={menuOpen}
-                          onClick={(event) => {
-                            if (menuOpen) {
-                              setMenu(null);
-                              return;
-                            }
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            setMenu({ id: item.id, top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
-                          }}
-                          className={`absolute right-8 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-muted hover:bg-foreground/10 hover:text-foreground ${
-                            menuOpen ? "opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
-                          }`}
-                        >
-                          <UiIcon name="moreVertical" size={16} />
-                        </button>
-                      </span>
-                      <button
-                        type="button"
-                        role="checkbox"
-                        aria-checked={on}
-                        aria-label={`Use ${item.title}`}
-                        onClick={() => toggle(item.id)}
-                        className="flex h-9 w-7 shrink-0 items-center justify-center"
-                      >
-                        <Check on={on} />
-                      </button>
-                    </>
-                  )}
-                </div>
-                {status?.tone === "error" ? <p className="pl-9 text-[12px] leading-4 text-red-400">{status.text}</p> : null}
-              </li>
-            );
+                onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropFolder(null); }}
+                onDrop={event => { if (!folder.deleting) dropSources(event, folder.id); }}>
+                <button type="button" disabled={folder.deleting} aria-expanded={!closed} onClick={() => setCollapsed(current => current.includes(folder.id) ? current.filter(id => id !== folder.id) : [...current, folder.id])} className="flex h-9 min-w-0 flex-1 items-center gap-2 text-left text-[13px] text-foreground disabled:opacity-50">
+                  <span className={`flex h-4 w-3 shrink-0 items-center justify-center ${closed ? "-rotate-90" : ""}`}><UiIcon name="chevronDown" size={12} /></span>
+                  <UiIcon name="projectFolder" size={18} />
+                  <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+                  <span className="mr-8 text-[11px] text-muted">{members.length}</span>
+                </button>
+                <button data-source-menu type="button" disabled={folderBusy} aria-label={`Folder actions for ${folder.name}`} className="absolute right-0 flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-foreground/10 hover:text-foreground" onClick={event => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setMenu({ id: folder.id, folder: true, top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
+                }}><UiIcon name="moreVertical" size={16} /></button>
+              </div>
+              {!closed ? <ul aria-label={`${folder.name} sources`} className="ml-4 border-l border-border/40 pl-1">{members.map(item => renderSource(item))}{!members.length ? <li className="list-none px-3 py-2 text-[12px] text-muted">Drop sources here</li> : null}</ul> : null}
+            </li>;
           })}
+          {groups.root.map(item => renderSource(item))}
         </ul>
 
         {items.length === 0 && visiblePending.length === 0 ? (
@@ -524,9 +644,14 @@ export function SourcesPane({
           data-source-menu
           className="fixed z-[70] w-[196px] overflow-hidden rounded-xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-1 shadow-xl"
           style={menu.pointer
-            ? positionContextMenu(menu.pointer.x, menu.pointer.y, 196, 84, window.innerWidth, window.innerHeight)
+            ? positionContextMenu(menu.pointer.x, menu.pointer.y, 196, menu.folder ? 84 : 124, window.innerWidth, window.innerHeight)
             : { top: menu.top, right: menu.right }}
         >
+          {menu.folder ? <>
+            <button type="button" onClick={() => { const folder = folders.find(item => item.id === menu.id); if (folder) setFolderDialog({ id: folder.id, name: folder.name }); setMenu(null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-foreground hover:bg-background"><UiIcon name="edit" size={16} />Rename folder</button>
+            <button type="button" onClick={() => void removeFolder(menu.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-foreground hover:bg-background"><UiIcon name="trash" size={16} />Remove folder</button>
+          </> : <>
+          <button type="button" onClick={() => { setManagedIds(managed.includes(menu.id) ? managed : [menu.id]); setOrganizing(true); setMenu(null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-foreground hover:bg-background"><UiIcon name="projectFolder" size={16} />Move to folder</button>
           <button type="button" onClick={() => { const item = items.find((entry) => entry.id === menu.id); if (item) void remove(item); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] text-foreground hover:bg-background">
             <UiIcon name="trash" size={16} />
             Remove source
@@ -535,8 +660,23 @@ export function SourcesPane({
             <UiIcon name="edit" size={16} />
             Rename source
           </button>
+          </>}
         </div>,
         document.body,
+      ) : null}
+      {folderDialog ? createPortal(
+        <div className="popup-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onMouseDown={event => { if (event.target === event.currentTarget && !folderBusy) setFolderDialog(null); }}>
+          <form role="dialog" aria-modal="true" aria-labelledby="source-folder-title" className="popup-surface w-full max-w-[400px] rounded-2xl bg-surface p-5 text-foreground shadow-2xl" onSubmit={event => { event.preventDefault(); void saveFolder(); }}>
+            <h2 id="source-folder-title" className="text-[16px] font-medium">{folderDialog.id ? "Rename folder" : "New folder"}</h2>
+            <input autoFocus maxLength={120} aria-label="Folder name" placeholder="Folder name" value={folderDialog.name} onChange={event => setFolderDialog({ ...folderDialog, name: event.target.value })} className="mt-4 h-10 w-full rounded-xl bg-background px-3 text-[14px] outline-none" />
+            {!folderDialog.id && managed.length ? <p className="mt-2 text-[12px] text-muted">Move {managed.length} selected sources into this folder.</p> : null}
+            {error ? <p role="alert" className="mt-2 text-[12px] text-red-400">{error}</p> : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" disabled={folderBusy} onClick={() => setFolderDialog(null)} className="h-9 rounded-full px-4 text-[13px] hover:bg-background">Cancel</button>
+              <button type="submit" disabled={folderBusy || !folderDialog.name.trim()} className="h-9 rounded-full bg-foreground px-4 text-[13px] font-medium text-background disabled:opacity-40">{folderBusy ? "Saving…" : folderDialog.id ? "Save" : "Create"}</button>
+            </div>
+          </form>
+        </div>, document.body,
       ) : null}
       {renameTarget ? createPortal(
         <div className="popup-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setRenameTarget(null); }}>

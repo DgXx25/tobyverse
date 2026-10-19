@@ -1,14 +1,16 @@
 import { syncUserMemories } from "@/lib/memory/client";
 import { cachedLearningProfile } from "@/lib/memory/profile";
 import { observeConversation } from "@/lib/adaptation/client";
+import { containsSensitiveMemory, isWorkNoteRequest } from "@/lib/memory/privacy";
 
 /** One memory lifecycle: direct instructions update promptly; ordinary behavior updates in bounded batches. */
 export function createMemorySession(input: Parameters<typeof syncUserMemories>[0] & { threadId: string; skip?: boolean }) {
-  const updates = input.skip ? Promise.resolve(false) : syncUserMemories(input);
+  const skip = input.skip || containsSensitiveMemory(input.prompt) || isWorkNoteRequest(input.prompt);
+  const updates = skip ? Promise.resolve(false) : syncUserMemories(input);
   return {
     updates,
     observe(turn: { turnId: string; answer: string }) {
-      if (input.skip || !input.projectId) return;
+      if (skip || !input.projectId) return;
       const projectId = input.projectId;
       // Keep this off the response path and let newly shared preferences inform the observer too.
       let timer: ReturnType<typeof setTimeout> | undefined;

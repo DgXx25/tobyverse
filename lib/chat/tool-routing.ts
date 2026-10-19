@@ -1,4 +1,5 @@
 import type { ChatToolCall } from "@/lib/ai/tools";
+import { isNoteEditRequest } from "@/lib/notes/plain";
 import {
   extractTopic,
   fallbackChatTool,
@@ -8,6 +9,7 @@ import {
   pathClarifyQuestion,
   practiceClarifyQuestion,
   sheetClarifyQuestion,
+  wantsPlainNote,
 } from "@/lib/composer/intent";
 import type { AcceptedChatTool, ChatMode, PendingKind } from "@/types/chat";
 
@@ -19,21 +21,28 @@ export type ToolRoutingInput = {
   priorClarify?: boolean;
   pendingTopic?: string | null;
   pendingKind?: PendingKind | null;
-  active?: { kind: string; id: string } | null;
+  active?: { kind: string; id: string; noteKind?: "note" | "study" } | null;
   pathTopic?: string;
   projectTitle?: string;
   hasPath?: boolean;
   pathStarted?: boolean;
 };
 
-/** Explicit slash/chip selection is the only route that bypasses automatic tool choice. */
+/** Explicit actions pin the native tool so a save request cannot become a prose claim. */
 export function forcedToolForRequest(input: ToolRoutingInput): ChatToolCall | null {
   const accepted = input.accepted;
+  if (!accepted && wantsPlainNote(input.prompt)) {
+    const editing = input.active?.kind === "study_sheet" && isNoteEditRequest(input.prompt);
+    return { name: editing ? input.active?.noteKind === "note" ? "edit_note" : "edit_sheet" : "create_note", args: { instruction: input.prompt, ...(editing ? { id: input.active!.id } : {}) } };
+  }
   if (!accepted) return null;
   if (accepted === "create_path" && input.mode !== "teacher") return null;
   if (accepted === "start_path" && input.mode !== "teacher") return null;
 
   const prompt = input.prompt.trim();
+  if (accepted === "create_note") return prompt
+    ? { name: "create_note", args: { instruction: prompt } }
+    : { name: "clarify", args: { question: "What should I save in the note?" } };
   const topic = extractTopic(prompt) ?? input.pendingTopic ?? input.pathTopic ?? undefined;
   const hasSubject = Boolean(topic || input.hasMaterials);
   if (!hasSubject) {

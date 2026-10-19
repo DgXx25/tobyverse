@@ -130,7 +130,14 @@ export function SharedChatView({ shareId }: { shareId: string }) {
                 >
                   {message.role === "user" ? (
                     <div className="flex w-fit max-w-[min(100%,36rem)] flex-col items-end gap-2">
-                      <MessageAttachments items={message.attachments} onOpenMaterial={(id) => open({ kind: "material", id })} />
+                      <MessageAttachments
+                        items={message.attachments.map(attachment => {
+                          const material = snapshot.materials.find(item => item.id === attachment.materialId);
+                          return material?.type === "image" ? { ...attachment, storagePath: material.storagePath } : attachment;
+                        })}
+                        fileAccess={{ shareId }}
+                        onOpenMaterial={(id) => open({ kind: "material", id })}
+                      />
                       {message.content.trim() ? (
                         <div className="chat-body rounded-2xl bg-surface px-4 py-2.5 text-foreground">
                           <p className="whitespace-pre-wrap">{message.content}</p>

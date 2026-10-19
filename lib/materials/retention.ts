@@ -9,7 +9,7 @@ import { deleteGcsObject, downloadGcsObject } from "@/lib/storage-gcs";
 
 const bytes = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 
-/** The persisted text is the source of truth. Never remove a binary before verifying its replacement. */
+/** Documents keep verified text; photographs keep one compressed image and their OCR sidecar. */
 export async function retainMaterialText(input: { uid: string; projectId: string; materialId: string; ref: DocumentReference }): Promise<void> {
   const material = (await input.ref.get()).data();
   if (!material || material.userId !== input.uid) throw new AuthError("Material not found.", 404);
@@ -24,6 +24,34 @@ export async function retainMaterialText(input: { uid: string; projectId: string
   }
   if (storedObjectName(textPath) !== "extracted.txt") throw new AuthError("Invalid extracted text path.", 400);
   const { buffer } = await downloadGcsObject(textPath);
+  if (material.type === "image") {
+    // Empty OCR is valid. Verify the image and count the two actual objects.
+    if (originalPath === textPath) throw new AuthError("This photo has no retained image.", 422);
+    const image = await downloadGcsObject(originalPath);
+    if (!image.buffer.byteLength || !image.contentType.startsWith("image/")) throw new AuthError("Invalid retained image.", 422);
+    const retainedBytes = image.buffer.byteLength + buffer.byteLength;
+    const db = getAdminFirestore();
+    const userRef = db.collection(COLLECTIONS.users).doc(input.uid);
+    await db.runTransaction(async transaction => {
+      const [snapshot, user] = await Promise.all([transaction.get(input.ref), transaction.get(userRef)]);
+      const current = snapshot.data();
+      if (!current || current.userId !== input.uid) throw new AuthError("Material not found.", 404);
+      if (current.storagePath !== originalPath || current.textPath !== textPath) throw new Error("Material changed. Retry processing.");
+      const usage = user.data()?.usage ?? {};
+      transaction.set(input.ref, {
+        extractedPath: textPath,
+        sizeBytes: retainedBytes,
+        storedMime: image.contentType,
+        images: [{ page: 1, path: originalPath, mime: image.contentType }],
+        hasImages: true,
+      }, { merge: true });
+      transaction.set(userRef, {
+        usage: { ...usage, storageBytes: Math.max(0, bytes(usage.storageBytes) - bytes(current.sizeBytes)) + retainedBytes },
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+    return;
+  }
   if (!buffer.toString("utf8").trim() || !bytes(material.textChars)) {
     throw new AuthError("No text was extracted. The original file has been kept.", 422);
   }

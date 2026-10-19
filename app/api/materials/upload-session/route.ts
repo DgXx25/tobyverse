@@ -135,7 +135,7 @@ async function handleSession(request: Request, action: "write" | "status" | "can
         // Large HEIC files use the same bounded transport, then convert on the
         // server where the original bytes no longer cross the hosting proxy.
         const chatImage = parseMaterialStoragePath(session.path)?.materialId.startsWith("chat-image-") === true;
-        if (!session.normalized && (chatImage || /\.(heic|heif)$/i.test(session.originalName) || /image\/hei[cf]/i.test(session.contentType))) {
+        if (!session.normalized && (chatImage || /^image\//i.test(session.contentType) || /\.(png|jpe?g|webp|heic|heif)$/i.test(session.originalName))) {
           const original = await downloadGcsObject(session.path);
           const normalized = await normalizeImageUpload({ filename: session.originalName, mime: session.contentType, buffer: original.buffer, chatImage });
           if (normalized.buffer.byteLength > MAX_UPLOAD_BYTES) {

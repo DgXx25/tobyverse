@@ -32,13 +32,10 @@ export type ExtractResult = {
 
 export async function extractImageText(buffer: Buffer, mime: string, usage?: AiUsageReporter): Promise<string> {
   const text = (await generateText(
-    "Extract all readable text from this image. If it is a diagram, describe it briefly. Plain text only.",
+    "Extract all readable text from this image. If it is a diagram, describe it briefly. Plain text only. If there is no readable text or diagram, return exactly [NO_READABLE_TEXT].",
     { images: [{ mimeType: mime || "image/jpeg", data: buffer.toString("base64") }], usage },
   )).trim();
-  if (!text) {
-    throw new MaterialExtractError("Could not read that image.");
-  }
-  return clipText(text, EXTRACT_MAX_CHARS);
+  return text === "[NO_READABLE_TEXT]" ? "" : clipText(text, EXTRACT_MAX_CHARS);
 }
 
 export async function extractPlainText(input: {

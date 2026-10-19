@@ -59,6 +59,7 @@ function asHistory(value: unknown): ChatTurn[] {
 
 function asAcceptedTool(value: unknown): ChatGenerationContext["acceptedTool"] {
   return value === "create_practice" ||
+    value === "create_note" ||
     value === "create_sheet" ||
     value === "create_path" ||
     value === "start_path" ||
@@ -182,6 +183,7 @@ function asActive(value: unknown): ChatGenerationContext["activeArtifact"] {
     count: typeof row.count === "number" ? row.count : undefined,
     status: typeof row.status === "string" ? row.status : undefined,
     progress: typeof row.progress === "string" ? row.progress : undefined,
+    noteKind: row.noteKind === "note" ? "note" : row.noteKind === "study" ? "study" : undefined,
   };
 }
 
@@ -442,7 +444,7 @@ export async function POST(request: Request) {
             signal: request.signal,
           })) {
             if (part.tool && !raw) {
-              raw = part.tool;
+              raw = explicit && (explicit.name === "create_note" || explicit.name === "edit_note" || explicit.name === "edit_sheet") && part.tool.name !== explicit.name ? explicit : part.tool;
               const preview = raw;
               if (preview.name === "search_images" && !guestContext.examAsk && !guestContext.hintAsk) {
                 await sendImageTool(preview);

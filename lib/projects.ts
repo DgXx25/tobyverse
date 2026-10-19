@@ -10,6 +10,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   type Unsubscribe,
 } from "firebase/firestore";
 import { deleteAllChatThreads, ensureChatThread } from "@/lib/chats";
@@ -317,6 +318,15 @@ export async function deleteProject(projectId: string, userId: string): Promise<
     ...sheets.map((item) => deleteStudySheet(projectId, item.id)),
     ...exercises.map((item) => deleteExercise(projectId, item.id)),
   ]);
+  // These project-owned records have no files and must not be orphaned by notebook deletion.
+  const metadata = await Promise.all(["sourceFolders", "artifactTitles"].map(name => getDocs(collection(getFirebaseDb(), COLLECTIONS.projects, projectId, name))));
+  for (const snapshot of metadata) {
+    for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
+      const batch = writeBatch(getFirebaseDb());
+      snapshot.docs.slice(offset, offset + 400).forEach(item => batch.delete(item.ref));
+      await batch.commit();
+    }
+  }
   await deleteDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId));
   clearUntouchedNotebook(projectId);
 }

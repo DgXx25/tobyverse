@@ -87,9 +87,7 @@ export function ArtifactCard({
   bare?: boolean;
 }) {
   const exam = artifact.kind === "practice" && artifact.mode === "exam";
-  const title = artifact.kind === "practice"
-    ? exam ? "Exam" : "Quiz"
-    : artifact.title.trim() || (artifact.kind === "path" || artifact.kind === "plan" ? "Path" : "Notes");
+  const title = artifact.title.trim() || (artifact.kind === "practice" ? exam ? "Exam" : "Quiz" : artifact.kind === "path" || artifact.kind === "plan" ? "Path" : "Notes");
   const step = artifact.kind === "path" ? resolvePathStep(artifact, path, showAdvance) : undefined;
   const subtitle = subtitleFor(artifact, step, result);
   const label = [title, step?.from, step?.to, subtitle].filter(Boolean).join(" ");

@@ -44,6 +44,13 @@ function wantsFigure(query: string): boolean {
   return /\b(figure|diagram|image|photo|picture)s?\b|სურათ|ფოტო|ფიგურ/i.test(query);
 }
 
+function refersToVisualSource(query: string): boolean {
+  const shortVisualAsk = /\bwhat\s+(?:(?:can|do)\s+you\s+see\b|(?:is|are)\s+(?:this|that|these|those)(?=\s*[?!.]|\s*$))|\b(?:describe|identify|explain|analy[sz]e|summari[sz]e|read|compare|interpret)\s+(?:this|that|these|those|it|them)(?=\s*[?!.]|\s*$)/i;
+  const sourceReference = /\b(?:this|that|these|those|selected|attached|uploaded|my|our)\s+(?:(?:selected|attached|uploaded)\s+)?(?:source|file|material|document)s?\b/i;
+  const georgianReference = /(?:აღწერე|ამიხსენი|გააანალიზე|შეაჯამე|წაიკითხე|გამოიცანი|შეადარე)\s+(?:ეს|ის|ამას|იმას)(?=\s*[?!.]|\s*$)|(?:ეს|ის)\s+რა\s+არის|რას\s+ხედავ|(?:მონიშნულ|ატვირთულ|მიმაგრებულ|ამ|იმ)\s+(?:წყარო|ფაილ|მასალ)/iu;
+  return shortVisualAsk.test(query) || sourceReference.test(query) || georgianReference.test(query);
+}
+
 function imageLabel(material: Pick<Material, "title">, image: MaterialImage): string {
   return `${material.title} · slide ${image.page}`;
 }
@@ -96,7 +103,7 @@ export function shouldAttachChatFigures(
 ): boolean {
   if (promptAsksForVisual(query)) return true;
   const attachedImages = attachments.filter((item) => isImageAttachment(item.type, item.title));
-  return attachedImages.length > 0;
+  return attachedImages.length > 0 || (refersToVisualSource(query) && materials.some(item => item.type === "image" && !item.textChars && existingMaterialImages(item).length > 0));
 }
 
 export function pickFigureTargets(
@@ -133,6 +140,12 @@ export function pickFigureTargets(
     const material = ranked.find((item) => existingMaterialImages(item).length > 0);
     const image = material ? existingMaterialImages(material)[0] : undefined;
     if (material && image) picks.push({ material, image });
+  } else {
+    // A referenced photo without OCR has no text representation to ground the turn.
+    for (const material of ranked.filter(item => item.type === "image" && !item.textChars)) {
+      const image = existingMaterialImages(material)[0];
+      if (image) picks.push({ material, image });
+    }
   }
 
   const unique: { material: Pick<Material, "title">; image: MaterialImage }[] = [];

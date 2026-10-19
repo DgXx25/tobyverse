@@ -2,10 +2,14 @@ import { MEMORY_CONTENT_MAX, MEMORY_HISTORY_TURNS, MEMORY_OPS_PER_TURN, MEMORY_T
 import { clipText } from "@/lib/materials/limits";
 import type { ChatMemoryContext } from "@/types/memory";
 import type { ChatTurn } from "@/types/chat";
+import { sanitizeMemoryContent, sanitizePersonalization } from "@/lib/memory/normalize";
+import { memorySafeText, memorySafeTurns } from "@/lib/memory/privacy";
 
 export const ASK_MEMORY_CAP = 4;
 
 export const MEMORY_EXTRACT_SYSTEM = `You maintain three stores for a workspace assistant. Return JSON only. Default is no change.
+
+Privacy: never retain contact details, addresses, personal/financial identifiers, account/card details, financial amounts, credentials or confidential information in any store. Never reconstruct filtered context. Excluded turns cannot support a preference or an observation. Names alone may be retained when the user explicitly shares their own name or asks to remember it. Never infer personal facts from a pasted document, quotation, work note, third party record or an editing task. A request to save a note is a work artifact request, not consent to personal memory.
 
 User memory = durable facts about the person: name, role/job, preferred language.
 Save when they state such a fact, or clearly asked to remember / from now on / always / never.
@@ -42,7 +46,10 @@ export function pickMemoriesForAsk(
   prompt: string,
   cap = ASK_MEMORY_CAP,
 ): ChatMemoryContext[] {
-  const items = memories.filter((item) => item.content.trim());
+  const items = memories.flatMap(item => {
+    const content = sanitizeMemoryContent(item.content);
+    return content ? [{ ...item, content }] : [];
+  });
   if (items.length === 0 || cap <= 0) return [];
   const words = new Set(tokens(prompt));
   const scored = items.map((item, index) => {
@@ -74,10 +81,10 @@ export function formatKnownUserBlock(input: {
   adaptiveContext?: string;
 }): string | null {
   const lines = [
-    ...input.memories.map((item) => item.content.trim()).filter(Boolean),
-    input.personalization?.replace(/\s+/g, " ").trim() || "",
+    ...input.memories.map((item) => sanitizeMemoryContent(item.content)).filter(Boolean),
+    sanitizePersonalization(input.personalization).replace(/\s+/g, " "),
   ].filter(Boolean);
-  const observed = input.adaptiveContext?.trim() || "";
+  const observed = memorySafeText(input.adaptiveContext).trim();
   if (lines.length === 0 && !observed) return null;
   return [
     "Known about this user:",
@@ -102,19 +109,24 @@ export function memoryExtractPrompt(input: {
   history?: ChatTurn[];
   projectMemory?: string[];
 }): string {
+  const safeMemories = input.memories.flatMap(item => {
+    const content = sanitizeMemoryContent(item.content);
+    return content ? [{ ...item, content }] : [];
+  });
   const existing =
-    input.memories.length > 0
-      ? input.memories.map((item) => `${item.id} | ${item.content}`).join("\n")
+    safeMemories.length > 0
+      ? safeMemories.map((item) => `${item.id} | ${item.content}`).join("\n")
       : "(none)";
-  const recent = (input.history ?? [])
+  const recent = memorySafeTurns(input.history ?? [])
     .filter((turn) => turn.content.trim())
     .slice(-MEMORY_HISTORY_TURNS)
     .map((turn) => `${turn.role}: ${clipText(turn.content, MEMORY_TURN_CHARS)}`)
     .join("\n");
-  const profile = input.personalization?.trim() || "(none)";
+  const profile = sanitizePersonalization(input.personalization) || "(none)";
+  const projectMemory = (input.projectMemory ?? []).map(line => sanitizeMemoryContent(line)).filter(Boolean);
   const subject =
-    (input.projectMemory ?? []).length > 0
-      ? input.projectMemory!.map((line) => `- ${line}`).join("\n")
+    projectMemory.length > 0
+      ? projectMemory.map((line) => `- ${line}`).join("\n")
       : "(none)";
 
   return [
@@ -122,7 +134,7 @@ export function memoryExtractPrompt(input: {
     `Existing personalization:\n${profile}`,
     `Existing project memory (subject facts only):\n${subject}`,
     recent ? `Recent chat (resolve "remember that"; do not store the transcript):\n${recent}` : null,
-    `Latest user message:\n${clipText(input.prompt, 1500)}`,
+    `Latest user message:\n${clipText(memorySafeText(input.prompt), 1500)}`,
   ]
     .filter(Boolean)
     .join("\n\n");

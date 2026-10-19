@@ -13,6 +13,7 @@ import {
 import { inferMaterialType, materialFileName, mimeFromName } from "@/lib/materials/types";
 import type { MaterialImage, MaterialType } from "@/types/material";
 import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
+import { compressImageForUpload } from "@/lib/materials/compress-image";
 
 export type MaterialIngestFailurePhase = "storage" | "extract" | "network";
 
@@ -66,11 +67,12 @@ export type PreparedMaterial = {
   title: string;
   originalMime: string;
   originalName: string;
+  originalSizeBytes: number;
+  storedMime: string;
   sizeBytes: number;
   storagePath: string;
   textPath: string;
   data: ExtractResponse;
-  sourceFile?: File;
   /** True until a material doc exists (delete then owns the bytes). */
   storageHeld: boolean;
 };
@@ -192,7 +194,7 @@ function sourcePayload(source: IngestSource): {
 }
 
 /**
- * Upload original + read TEXT only (no slide or page images are kept). PDFs are indexed on the
+ * Upload a compressed photo or a document, then extract text. PDFs are indexed on the
  * server while they are read. Other types return text that is indexed after the doc is committed.
  */
 export async function prepareMaterialIngest(input: {
@@ -207,10 +209,20 @@ export async function prepareMaterialIngest(input: {
   const { projectId, source } = input;
   const ref = newMaterialRef(projectId);
   const payload = sourcePayload(source);
+  const originalSizeBytes = payload.sizeBytes;
+  if (source.kind === "file" && payload.type === "image") {
+    const compressed = await compressImageForUpload(source.file);
+    payload.originalBytes = compressed.blob;
+    payload.originalName = compressed.name;
+    payload.sizeBytes = compressed.blob.size;
+    // Original identity is persisted separately from the stored representation.
+    payload.originalMime = compressed.mime;
+  }
   let storagePath = originalStoragePath(userId, projectId, ref.id, payload.originalName);
   const textPath = extractedTextPath(userId, projectId, ref.id);
   let sizeBytes = payload.sizeBytes;
-  let originalMime = payload.originalMime;
+  let storedMime = payload.originalMime;
+  const originalMime = source.kind === "file" ? source.file.type || mimeFromName(source.file.name) : payload.originalMime;
   let storageHeld = false;
   let storageUploaded = false;
   let pdfStarted = false;
@@ -220,12 +232,12 @@ export async function prepareMaterialIngest(input: {
     input.onProgress?.({ phase: "uploading", percent: 0 });
     const uploaded = await uploadMaterialBytes(storagePath, payload.originalBytes, payload.originalMime, {
       reservePool: true,
-      originalName: source.kind === "file" ? source.file.name : payload.originalName,
+      originalName: payload.originalName,
       onProgress: (fraction) => input.onProgress?.({ phase: "uploading", percent: Math.round(fraction * 100) }),
     });
     storagePath = uploaded.path;
     sizeBytes = uploaded.sizeBytes;
-    originalMime = uploaded.contentType;
+    storedMime = uploaded.contentType;
     storageHeld = uploaded.reservedBytes > 0;
     storageUploaded = true;
 
@@ -283,7 +295,7 @@ export async function prepareMaterialIngest(input: {
         ? await deriveFromStorage({ path: storagePath, textPath })
         : await deriveFromApi(source);
     }
-    if ((!data.text && !data.textStored && !data.indexed) || !data.type) {
+    if ((!data.text && !data.textStored && !data.indexed && payload.type !== "image") || !data.type) {
       throw new Error(data.error ?? "Extraction failed.");
     }
     return {
@@ -293,12 +305,13 @@ export async function prepareMaterialIngest(input: {
       type: payload.type,
       title: payload.title,
       originalMime,
+      storedMime,
+      originalSizeBytes,
       originalName: source.kind === "file" ? source.file.name : payload.originalName,
       sizeBytes,
       storagePath,
       textPath,
       data,
-      sourceFile: source.kind === "file" ? source.file : undefined,
       storageHeld,
     };
   } catch (error) {
@@ -326,6 +339,10 @@ export async function prepareMaterialIngest(input: {
           type: payload.type,
           storagePath,
           textPath,
+          originalName: source.kind === "file" ? source.file.name : payload.originalName,
+          originalMime,
+          originalSizeBytes,
+          storedMime,
           extractedTextPreview: "",
           sizeBytes,
           status: "processing",
@@ -336,6 +353,10 @@ export async function prepareMaterialIngest(input: {
           type: payload.type,
           storagePath,
           textPath,
+          originalName: source.kind === "file" ? source.file.name : payload.originalName,
+          originalMime,
+          originalSizeBytes,
+          storedMime,
           extractedTextPreview: "",
           sizeBytes,
           status: "failed",
@@ -373,6 +394,7 @@ export async function discardPreparedMaterials(prepared: PreparedMaterial[]): Pr
   await Promise.all(
     prepared.map(async (item) => {
       await deleteStoragePath(item.storagePath);
+      if (item.textPath !== item.storagePath) await deleteStoragePath(item.textPath);
       await releasePreparedStorage(item);
     }),
   );
@@ -410,7 +432,7 @@ async function indexMaterialText(projectId: string, materialId: string): Promise
   throw new MaterialIngestError("This file is too large to index in one go.", { phase: "extract", storageSaved: true });
 }
 
-/** Text + preview on the material doc, then the vector index. Only text is kept, never page or slide images. */
+/** Save text and index it; photographs also keep their single compressed image. */
 export async function commitMaterialText(prepared: PreparedMaterial): Promise<string> {
   const { projectId, userId, materialId, storagePath, data } = prepared;
   let { textPath } = prepared;
@@ -424,6 +446,10 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
       type: prepared.type,
       storagePath,
       textPath,
+      originalName: prepared.originalName,
+      originalMime: prepared.originalMime,
+      originalSizeBytes: prepared.originalSizeBytes,
+      storedMime: prepared.storedMime,
       extractedTextPreview: "",
       sizeBytes: prepared.sizeBytes,
       status: "processing",
@@ -432,13 +458,13 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
   prepared.storageHeld = false;
 
   try {
-    if (!data.type || (!data.text && !data.textStored && !data.indexed)) {
+    if (!data.type || (!data.text && !data.textStored && !data.indexed && type !== "image")) {
       throw new Error(data.error ?? "Extraction failed.");
     }
 
     if (type !== "pdf" && !data.textStored) {
-      if (!data.text) throw new Error("Extraction failed.");
-      textPath = await uploadExtractedText(textPath, data.text);
+      if (!data.text && type !== "image") throw new Error("Extraction failed.");
+      textPath = await uploadExtractedText(textPath, data.text ?? "");
       prepared.textPath = textPath;
     }
 
@@ -449,7 +475,7 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
 
     // An uploaded image is its own preview; nothing else is rasterised or stored.
     const images: MaterialImage[] =
-      type === "image" ? [{ page: 1, path: storagePath, mime: prepared.originalMime || "image/jpeg" }] : [];
+      type === "image" ? [{ page: 1, path: storagePath, mime: prepared.storedMime || "image/jpeg" }] : [];
 
     await writeMaterialDoc(projectId, materialId, {
       userId,
@@ -461,7 +487,8 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
       sizeBytes: prepared.sizeBytes,
       originalName: prepared.originalName,
       originalMime: prepared.originalMime,
-      originalSizeBytes: prepared.sizeBytes,
+      storedMime: prepared.storedMime,
+      originalSizeBytes: prepared.originalSizeBytes,
       pageCount: data.pageCount ?? 1,
       hasImages: images.length > 0,
       textChars: data.textChars ?? data.text?.length ?? 0,
@@ -492,7 +519,7 @@ export async function finalizeMaterialIngest(prepared: PreparedMaterial): Promis
   return commitMaterialText(prepared);
 }
 
-/** Original file goes to Storage first. Then read text and index it. Never keep a File for chat. */
+/** Compress photographs before Storage, then save extracted text and index it. */
 export async function ingestMaterial(input: {
   projectId: string;
   userId: string;
@@ -567,4 +594,4 @@ export function urlsInText(text: string): string[] {
   return out;
 }
 
-export const LARGE_PASTE_CHARS = 500;
+export { LARGE_PASTE_CHARS } from "@/lib/composer/paste-policy";

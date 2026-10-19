@@ -122,8 +122,10 @@ function mapMaterial(id: string, projectId: string, data: Record<string, unknown
     userId,
     title: asString(data.title) || asString(data.name, "Untitled"),
     type: asType(data.type),
+    folderId: asString(data.folderId) || undefined,
     originalName: originalName || pathName || undefined,
     originalMime: asString(data.originalMime) || undefined,
+    storedMime: asString(data.storedMime) || undefined,
     originalSizeBytes: typeof data.originalSizeBytes === "number" ? data.originalSizeBytes : undefined,
     originalRemoved,
     storagePath,
@@ -161,6 +163,7 @@ export type MaterialDocInput = {
   images?: MaterialImage[];
   originalName?: string;
   originalMime?: string;
+  storedMime?: string;
   originalSizeBytes?: number;
   status?: MaterialStatus;
 };
@@ -177,6 +180,7 @@ export async function writeMaterialDoc(
     type: data.type,
     ...(data.originalName ? { originalName: data.originalName } : {}),
     ...(data.originalMime ? { originalMime: data.originalMime } : {}),
+    ...(data.storedMime ? { storedMime: data.storedMime } : {}),
     ...(typeof data.originalSizeBytes === "number" ? { originalSizeBytes: data.originalSizeBytes } : {}),
     storagePath: data.storagePath,
     ...(data.type === "pdf" && !data.textPath ? {} : { textPath: data.textPath ?? extractedTextPath(data.userId, projectId, materialId) }),
@@ -248,7 +252,7 @@ export async function waitForMaterialPreviews(
     }
     const ready = ids.every((id) => {
       const item = latest.find((row) => row.id === id);
-      return Boolean(item?.extractedTextPreview.trim());
+      return Boolean(item?.extractedTextPreview.trim() || (item?.type === "image" && item.status === "ready" && item.hasImages));
     });
     if (ready) return latest;
     if (Date.now() >= deadline) {

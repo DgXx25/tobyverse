@@ -36,8 +36,8 @@ export function parseProjectFacts(value: unknown): string[] {
 }
 
 export function mergeProjectMemory(current: string[], additions: string[]): string[] {
-  const seen = new Set(current.map((line) => memoryKey(line)));
-  const next = [...current];
+  const next = asProjectMemory(current);
+  const seen = new Set(next.map((line) => memoryKey(line)));
   for (const raw of additions) {
     const line = sanitizeProjectMemoryLine(raw);
     if (!line) continue;

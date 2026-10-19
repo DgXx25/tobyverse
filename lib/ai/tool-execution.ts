@@ -62,6 +62,8 @@ const labels: Record<ChatToolName, [string, string, string, string]> = {
   edit_practice: ["Updating practice…", "Practice updated", "სავარჯიშოს ვაახლებ…", "სავარჯიშო განახლდა"],
   append_practice: ["Adding practice items…", "Practice items added", "სავარჯიშოებს ვამატებ…", "სავარჯიშოები დაემატა"],
   create_sheet: ["Creating sheet…", "Sheet ready", "ნოუთს ვქმნი…", "ნოუთი მზადაა"],
+  create_note: ["Saving note…", "Note saved", "ჩანაწერს ვინახავ…", "ჩანაწერი შენახულია"],
+  edit_note: ["Updating note…", "Note updated", "ჩანაწერს ვაახლებ…", "ჩანაწერი განახლდა"],
   edit_sheet: ["Updating sheet…", "Sheet updated", "ნოუთს ვაახლებ…", "ნოუთი განახლდა"],
   create_path: ["Creating path…", "Path ready", "გზას ვქმნი…", "გზა მზადაა"],
   advance_path: ["Moving to next topic…", "Topic updated", "შემდეგ თემაზე გადავდივარ…", "თემა განახლდა"],

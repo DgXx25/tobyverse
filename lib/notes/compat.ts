@@ -70,12 +70,14 @@ export function mapNoteRecord(
   extras: Pick<StudySheet, "userId" | "title" | "sourceMaterialIds" | "createdAt">,
 ): StudySheet {
   const rawBlocks = Array.isArray(data.blocks) ? data.blocks : data.visuals;
-  const { content, sections, prose } = collectNoteProse(data);
+  const kind = data.kind === "note" ? "note" : "study";
+  const { content, sections, prose } = collectNoteProse(kind === "note" ? { content: data.content } : data);
   const blocks = readNoteBlocks(rawBlocks);
   return {
     id,
     projectId,
     ...extras,
+    kind,
     schemaVersion: readNoteSchemaVersion(data.schemaVersion, blocks.length > 0),
     blocks,
     content,

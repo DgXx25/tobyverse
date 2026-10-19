@@ -21,6 +21,7 @@ function load(relative, dependencies) {
 }
 const input = { userId: 'u', projectId: 'p', threadId: 't', prompt: 'Explain this idea.', memories: [], personalization: 'Use concrete examples.' };
 const settle = () => new Promise(resolve => setImmediate(resolve));
+const privacy = { containsSensitiveMemory: () => false, isWorkNoteRequest: () => false };
 
 test('observation proceeds when direct memory storage stalls', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -29,6 +30,7 @@ test('observation proceeds when direct memory storage stalls', async t => {
     '@/lib/memory/client': { syncUserMemories: () => new Promise(() => {}) },
     '@/lib/memory/profile': { cachedLearningProfile: () => '' },
     '@/lib/adaptation/client': { observeConversation: async value => observed.push(value) },
+    '@/lib/memory/privacy': privacy,
   });
   const session = createMemorySession(input);
   session.observe({ turnId: 'turn', answer: 'Answer' });
@@ -44,6 +46,7 @@ test('guest sessions skip both memory paths', async () => {
     '@/lib/memory/client': { syncUserMemories: () => assert.fail('guest memory update') },
     '@/lib/memory/profile': { cachedLearningProfile: () => assert.fail('guest cache') },
     '@/lib/adaptation/client': { observeConversation: () => assert.fail('guest observation') },
+    '@/lib/memory/privacy': privacy,
   });
   const session = createMemorySession({ ...input, skip: true });
   assert.equal(await session.updates, false);

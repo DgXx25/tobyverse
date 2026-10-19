@@ -3,7 +3,7 @@ import { generateJson } from "@/lib/ai/json";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { FREE_CAPS } from "@/lib/account/plan";
 import { PERSONALIZATION_MAX } from "@/lib/memory/constants";
-import { asMemoryFacts, parseMemoryOps, parsePersonalizationPatch, sanitizePersonalization } from "@/lib/memory/normalize";
+import { asMemoryFacts, parseMemoryOps, parsePersonalizationPatch, sanitizePersonalization, shouldExtractMemory } from "@/lib/memory/normalize";
 import { parseProjectFacts } from "@/lib/memory/project";
 import { MEMORY_EXTRACT_SYSTEM, memoryExtractPrompt } from "@/lib/memory/prompt";
 import type { ChatTurn } from "@/types/chat";
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
   }
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-  if (!prompt) {
+  if (!prompt || !shouldExtractMemory(prompt)) {
     return Response.json({ operations: [], personalization: null, projectMemory: [] });
   }
 

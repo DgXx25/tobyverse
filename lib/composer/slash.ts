@@ -27,7 +27,7 @@ export const SLASH_MODES: SlashItem[] = [
 
 export const SLASH_SKILLS: SlashItem[] = [
   { kind: "skill", id: "practice", command: "practice", label: "Quiz", hint: "Make a quiz", icon: "check" },
-  { kind: "skill", id: "notes", command: "note", label: "Note", hint: "Write study notes", icon: "notes" },
+  { kind: "skill", id: "notes", command: "note", label: "Note", hint: "Save a plain note", icon: "notes" },
   { kind: "skill", id: "path", command: "path", label: "Path", hint: "Map a course", icon: "plan" },
   { kind: "skill", id: "photos", command: "photos", label: "Photos", hint: "Find photos", icon: "search" },
 ];
@@ -48,7 +48,7 @@ export function isComposerSkill(value: unknown): value is ComposerSkill {
 
 export function acceptedToolFromSkill(skill?: ComposerSkill | null): AcceptedChatTool | undefined {
   if (skill === "practice") return "create_practice";
-  if (skill === "notes") return "create_sheet";
+  if (skill === "notes") return "create_note";
   if (skill === "path") return "create_path";
   if (skill === "photos") return "search_images";
   return undefined;

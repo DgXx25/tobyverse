@@ -69,18 +69,18 @@ test("HEIC and HEIF are photo inputs and receive JPEG object names", () => {
   assert.equal(materialFileName("image", "camera.heif"), "camera.jpg");
 });
 
-test("server image normalization returns JPEG bytes and rejects an undecodable HEIC clearly", async () => {
+test("server image normalization returns compressed WEBP bytes and rejects an undecodable HEIC clearly", async () => {
   assert.equal(typeof normalizeImageUpload, "function");
   if (typeof normalizeImageUpload !== "function") return;
   const sharp = require("sharp");
   const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: "white" } }).png().toBuffer();
   const normalized = await normalizeImageUpload({ filename: "camera.heic", mime: "image/heic", buffer: png });
-  assert.equal(normalized.filename, "camera.jpg");
-  assert.equal(normalized.mime, "image/jpeg");
-  assert.equal((await sharp(normalized.buffer).metadata()).format, "jpeg");
+  assert.equal(normalized.filename, "camera.webp");
+  assert.equal(normalized.mime, "image/webp");
+  assert.equal((await sharp(normalized.buffer).metadata()).format, "webp");
   await assert.rejects(
     normalizeImageUpload({ filename: "broken.heif", mime: "image/heif", buffer: Buffer.from("broken") }),
-    /could not convert.*jpeg|unsupported.*heic/i,
+    /could not prepare this photo/i,
   );
 });
 

@@ -32,8 +32,12 @@ export type Material = {
   userId: EntityId;
   title: string;
   type: MaterialType;
+  /** Optional project Sources folder; unrelated to AI source selection. */
+  folderId?: string;
   originalName?: string;
   originalMime?: string;
+  /** MIME of the retained compressed image; originalMime remains the uploaded identity. */
+  storedMime?: string;
   originalSizeBytes?: number;
   /** The binary was replaced in Storage by its extracted plain text. */
   originalRemoved?: boolean;

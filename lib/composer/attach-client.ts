@@ -1,29 +1,27 @@
 import { requireSignedInUser } from "@/lib/auth";
 import { authHeaders } from "@/lib/api/client";
-import { newChipId, isImageAttachment } from "@/lib/composer/attach";
+import { isImageAttachment } from "@/lib/composer/attach";
 import { ingestMaterialFile } from "@/lib/materials/ingest-client";
-import { originalStoragePath, uploadMaterialBytes } from "@/lib/materials/storage";
+import { getMaterial } from "@/lib/materials/store";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
-import { inferMaterialType, materialFileName, mimeFromName } from "@/lib/materials/types";
+import { inferMaterialType } from "@/lib/materials/types";
 import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
 import type { ChatAttachment } from "@/types/chat";
 
 type FileInput = { projectId: string; userId: string; file: File };
 
-/** Uses the existing private blob/quota infrastructure without creating a material or index. */
-export async function uploadChatImage({ projectId, file }: FileInput): Promise<ChatAttachment> {
+/** Composer photos share the compressed image + OCR lifecycle with Sources. */
+export async function uploadChatImage(input: FileInput): Promise<ChatAttachment> {
+  const { projectId, file } = input;
   if (inferMaterialType(file.name, file.type) !== "image") throw new Error("Expected an image.");
-  const user = await requireSignedInUser();
   clearUntouchedNotebook(projectId);
-  const storagePath = originalStoragePath(user.uid, projectId, `chat-image-${newChipId()}`, materialFileName("image", file.name));
-  const uploaded = await uploadMaterialBytes(storagePath, file, file.type || mimeFromName(file.name), {
-    reservePool: true,
-    originalName: file.name,
-  });
-  return { title: file.name, type: "image", storagePath: uploaded.path, sizeBytes: uploaded.sizeBytes };
+  const materialId = await ingestMaterialFile(input);
+  const material = await getMaterial(projectId, materialId);
+  if (!material) throw new Error("Could not load the saved photo.");
+  return { title: file.name, type: "image", materialId, storagePath: material.storagePath, sizeBytes: material.sizeBytes };
 }
 
-/** Only composer photos bypass material ingestion. Add sources keeps using ingestMaterialFile. */
+/** Photos return an attachment referring to the same saved source. */
 export async function ingestComposerFile(input: FileInput): Promise<string | ChatAttachment> {
   return inferMaterialType(input.file.name, input.file.type) === "image"
     ? uploadChatImage(input)

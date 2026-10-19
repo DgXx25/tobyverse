@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 import { fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
 import { looksLikeUrl } from "@/lib/materials/ingest-client";
 import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
+import { getMaterialFile, type MaterialFileAccess } from "@/lib/materials/file-client";
+import { storedObjectName } from "@/lib/materials/storage-path";
 import type { ChatAttachment } from "@/types/chat";
 
 export function MessageAttachments({
   items,
   onOpenMaterial,
+  fileAccess,
 }: {
   items: ChatAttachment[];
   onOpenMaterial?: (id: string) => void;
+  fileAccess?: MaterialFileAccess;
 }) {
   if (!items.length) return null;
   return (
@@ -21,18 +25,21 @@ export function MessageAttachments({
           key={`${item.materialId || item.title}-${index}`}
           item={item}
           onOpenMaterial={onOpenMaterial}
+          fileAccess={fileAccess}
         />
       ))}
     </div>
   );
 }
 
-function AttachmentChip({ item, onOpenMaterial }: { item: ChatAttachment; onOpenMaterial?: (id: string) => void }) {
+function AttachmentChip({ item, onOpenMaterial, fileAccess }: { item: ChatAttachment; onOpenMaterial?: (id: string) => void; fileAccess?: MaterialFileAccess }) {
   if (isImageAttachment(item.type, item.title) && item.storagePath && !item.storagePath.endsWith("/extracted.txt")) {
     return (
       <ImageThumb
         path={item.storagePath}
         title={item.title}
+        materialId={item.materialId}
+        fileAccess={fileAccess}
         onClick={item.materialId && onOpenMaterial ? () => onOpenMaterial(item.materialId!) : undefined}
       />
     );
@@ -66,13 +73,21 @@ function AttachmentChip({ item, onOpenMaterial }: { item: ChatAttachment; onOpen
   return <span className={className}>{content}</span>;
 }
 
-function ImageThumb({ path, title, onClick }: { path: string; title: string; onClick?: () => void }) {
+function ImageThumb({ path, title, onClick, materialId, fileAccess }: { path: string; title: string; onClick?: () => void; materialId?: string; fileAccess?: MaterialFileAccess }) {
   const [url, setUrl] = useState<string | null>(null);
+  const shareId = fileAccess?.shareId;
   useEffect(() => {
-    if (!path.startsWith("users/") || isMissingMaterialFile(path)) return;
+    if (!shareId && (!path.startsWith("users/") || isMissingMaterialFile(path))) return;
     let objectUrl: string | null = null;
     let cancelled = false;
-    storageDownloadUrl(path)
+    setUrl(null);
+    const load = shareId && materialId
+      ? getMaterialFile("", materialId, storedObjectName(path) || "", { shareId }).then(file => {
+        if (!file.ok) throw new Error(file.message);
+        return URL.createObjectURL(new Blob([new Uint8Array(file.bytes)], { type: file.contentType }));
+      })
+      : storageDownloadUrl(path);
+    load
       .then((next) => {
         if (cancelled) {
           URL.revokeObjectURL(next);
@@ -88,7 +103,7 @@ function ImageThumb({ path, title, onClick }: { path: string; title: string; onC
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [path]);
+  }, [path, shareId, materialId]);
 
   if (!url) {
     const content = (

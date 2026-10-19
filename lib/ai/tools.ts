@@ -1,6 +1,8 @@
 import { formatRuntimeSkillCatalog, RUNTIME_SKILL_CATALOG } from "@/lib/skills/catalog";
 
 export type ChatToolArgs = {
+  title?: string;
+  content?: string;
   topic?: string;
   question?: string;
   options?: string[];
@@ -187,7 +189,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "suggest_sheet",
     description:
-      "Offer a note chip when the user expresses interest in notes without directly asking you to create them. Teacher may also offer it after a substantial explanation. Do not use on Fast or for a one-line fact. Use create_sheet for a slash, accepted chip, or direct creation request.",
+      "Offer a Study notes chip when the user expresses interest in educational notes without directly asking you to create them. Teacher may also offer it after a substantial explanation. Do not use on Fast or for a one-line fact. Use create_sheet for an accepted Study notes chip or an explicit educational notes request; use create_note for ordinary jot/save requests and /note.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Topic for the chip." } },
@@ -243,9 +245,36 @@ export const CHAT_TOOL_DEFINITIONS = [
     card: true,
   }),
   defineTool({
+    name: "create_note",
+    description: "Save a plain note in Studio when the user asks to jot something down, save a note, or ჩაინიშნე, including /note. Supply a short contextual title and the requested Markdown content, preserving their information and language. Bold and lists are fine; add no lesson, expanded summary, or unsolicited details. The client persists the note before confirming success. For detailed educational Study notes use create_sheet instead.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short title describing this note." },
+        content: { type: "string", description: "Complete plain Markdown note, only the information requested." },
+      },
+      required: ["title", "content"],
+    },
+    card: true,
+  }),
+  defineTool({
+    name: "edit_note",
+    description: "Update an existing plain note when asked. Supply the edit instruction and keep its id; the client loads the complete saved note and applies exact changes while preserving untouched text. Use the active plain note or an existing plain note id from context. Use edit_sheet for educational Study notes.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Existing plain note id, or omit for the active note." },
+        title: { type: "string", description: "Only supply when the user asks to rename the note." },
+        instruction: { type: "string", description: "The exact requested changes. The client loads the complete note before editing." },
+      },
+      required: ["instruction"],
+    },
+    card: true,
+  }),
+  defineTool({
     name: "create_sheet",
     description:
-      "Create a study sheet when the user used /note, accepted a note chip, or directly asked for notes or a კონსპექტი. Call it immediately when a topic or material exists; do not ask for confirmation again. Return a card and never write the sheet body as chat text. Do not create one for a one-line definition.",
+      "Create detailed educational Study notes when the user selected the Study notes generator, accepted a study-note chip, or explicitly asked for study notes or a კონსპექტი. Call it immediately when a topic or material exists. Return a card, never the sheet body as chat text. Use create_note for ordinary jot/save note requests and /note.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Specific sheet topic." } },
@@ -368,6 +397,8 @@ export function parseToolArgs(value: unknown): ChatToolArgs {
   const row = value as Record<string, unknown>;
   const count = typeof row.count === "number" ? row.count : typeof row.count === "string" ? Number(row.count) : NaN;
   return {
+    title: typeof row.title === "string" ? row.title.trim() || undefined : undefined,
+    content: typeof row.content === "string" ? row.content.trim() || undefined : undefined,
     topic: typeof row.topic === "string" ? row.topic.trim() || undefined : undefined,
     question: typeof row.question === "string" ? row.question.trim() || undefined : undefined,
     options: parseClarifyOptions(row.options),

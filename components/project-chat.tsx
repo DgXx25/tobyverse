@@ -123,8 +123,10 @@ function processForTool(tool: ChatToolCall, ka: boolean): { activity: string; st
     case "search_images":
       return { activity: ka ? `ფოტოები მოვძებნე${detail ? `: „${detail}“` : ""}` : `Searched photos${detail ? ` for “${detail}”` : ""}` };
     case "create_sheet":
+    case "create_note":
       return { activity: ka ? `ნოუთს ვქმნი${suffix}` : `Creating note${suffix}` };
     case "edit_sheet":
+    case "edit_note":
       return { activity: ka ? `ნოუთს ვაახლებ${suffix}` : `Updating note${suffix}` };
     case "create_practice":
       return { activity: ka ? `სავარჯიშოს ვქმნი${suffix}` : `Creating practice${suffix}` };
@@ -851,6 +853,9 @@ export function ProjectChat({
     const facts = artifactFacts(messages);
     const latest = latestArtifact(messages);
     const active = resolveActive();
+    const activeNote = !guest && active?.kind === "study_sheet"
+      ? await waitForChatStep("Loading active note", () => getStudySheet(project.id, active.id), { signal: input.signal, timeoutMs: 2_000 }).catch(() => null)
+      : null;
     const pending = pendingCreateFromMessages(messages);
     const pendingKind = input.pendingKind ?? resolvePendingKind(input.prompt, pending);
     const [memories, personalization] = guest
@@ -921,7 +926,7 @@ export function ProjectChat({
           personalization: personalization || undefined,
           artifacts: facts,
           latestArtifact: latest,
-          activeArtifact: activeContext(active),
+          activeArtifact: active ? { ...activeContext(active), ...(activeNote ? { noteKind: activeNote.kind ?? "study" } : {}) } : null,
           hasMaterials: poolFrom().length > 0,
           confirmed: input.confirmed,
           acceptedTool: input.acceptedTool,
@@ -1539,7 +1544,7 @@ export function ProjectChat({
       if (!options?.studio && responseFollowups.length > 0) {
         setSuggestedFollowups({ messageId: id, prompts: responseFollowups });
       }
-      if (!options?.studio && !guest && dispatched.artifact?.kind === "sheet") {
+      if (!options?.studio && !guest && dispatched.artifact?.kind === "sheet" && tool.name !== "create_note" && tool.name !== "edit_note") {
         setFollowup({ kind: "sheet", ka: promptIsKa(modelPrompt), since: Date.now() });
       }
       if (dispatched.openThreadId && pathRef.current) {

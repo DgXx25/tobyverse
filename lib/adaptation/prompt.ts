@@ -1,7 +1,12 @@
 import type { AdaptivePattern, KnowledgeGraph, ObservationTurn } from "@/lib/adaptation/model";
 import type { ChatMemoryContext } from "@/types/memory";
+import { asAdaptiveState, asKnowledgeGraph } from "@/lib/adaptation/model";
+import { asMemoryFacts, sanitizePersonalization } from "@/lib/memory/normalize";
+import { isWorkNoteRequest, memorySafeTurns } from "@/lib/memory/privacy";
 
 export const OBSERVATION_SYSTEM = `Observe how this person reasons and works across normal conversation, and maintain their project's evolving topic map. Return compact JSON only. This is useful adaptation for their benefit, across studying, writing, teaching, planning and decisions. They need not state preferences or correct the assistant.
+
+Privacy: never retain contact details, addresses, personal/financial identifiers, account/card details, financial amounts, credentials or confidential material. Never reconstruct filtered context. Excluded turns are not evidence. A request to save a work note is an artifact task, not personal memory consent. Never infer personal names, roles or biography from a pasted document, quotation, third party record or editing request.
 
 This is one continuously evolving user-memory system: directly shared response instructions, working/learning preferences, observed reasoning and topic connections inform each other. sharedContext contains existing instructions/preferences. Treat them as explicit evidence, not as permission to override the current request or core rules. An inferred pattern must not contradict a directly shared preference. Do not duplicate an explicit preference as a guessed pattern; discover the additional situations or mechanisms that help this user. If behavior varies by task, keep the condition rather than imposing one global style.
 
@@ -16,9 +21,12 @@ Use displayLanguage for every visible observation, approach, situation, topic la
 Use exactly from, to, label for links, and only keys belonging to returned or existing topics. Empty arrays are valid and preferred to weak evidence. No Markdown.`;
 
 export function observationPrompt(sample: ObservationTurn[], patterns: AdaptivePattern[], graph: KnowledgeGraph, sharedContext: { memories: ChatMemoryContext[]; personalization?: string } = { memories: [] }): string {
+  sample = memorySafeTurns(sample).filter(turn => !isWorkNoteRequest(turn.content));
+  patterns = asAdaptiveState({ patterns }).patterns;
+  graph = asKnowledgeGraph(graph);
   return JSON.stringify({
     displayLanguage: sample.filter(t => t.role === "user" && /[\u10A0-\u10FF]/.test(t.content)).length > sample.filter(t => t.role === "user").length / 2 ? "Georgian (ka)" : "Match the user's current conversation language",
-    sharedContext,
+    sharedContext: { memories: asMemoryFacts(sharedContext.memories, 4), personalization: sanitizePersonalization(sharedContext.personalization) },
     existingPatterns: patterns.map(p => ({ key: p.key, scope: p.projectId ? "project" : "general", when: p.when, observation: p.observation, approach: p.approach, tasks: p.tasks ?? [] })),
     existingTopics: graph.nodes.map(n => ({ key: n.key, label: n.label, status: n.status, summary: n.summary })),
     existingLinks: graph.links,

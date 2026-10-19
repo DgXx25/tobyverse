@@ -15,6 +15,10 @@ export type NotesLiveState = {
 };
 
 export type StudySheet = {
+  /** Missing on legacy records: those remain educational study notes. */
+  kind?: "note" | "study";
+  /** Client snapshot metadata; never stored in the document. */
+  pendingSave?: boolean;
   id: EntityId;
   projectId: EntityId;
   userId: EntityId;

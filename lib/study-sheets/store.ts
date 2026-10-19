@@ -58,6 +58,7 @@ export async function createStudySheet(input: {
   blocks: VisualBlock[];
   sourceMaterialIds: string[];
   content?: string;
+  kind?: "note" | "study";
 }): Promise<string> {
   const saved = noteFields(input.blocks, input.content ?? "");
   const ref = await addDoc(
@@ -66,6 +67,7 @@ export async function createStudySheet(input: {
       projectId: input.projectId,
       userId: input.userId,
       title: input.title.trim() || "Notes",
+      kind: input.kind ?? "study",
       schemaVersion: NOTES_SCHEMA_VERSION,
       blocks: saved.blocks,
       content: saved.content,
@@ -83,9 +85,10 @@ export function subscribeStudySheets(
 ): Unsubscribe {
   return onSnapshot(
     sheetsRef(projectId),
+    { includeMetadataChanges: true },
     (snapshot) => {
       const items = snapshot.docs
-        .map((item) => mapSheet(item.id, projectId, item.data()))
+        .map((item) => ({ ...mapSheet(item.id, projectId, item.data()), pendingSave: item.metadata.hasPendingWrites }))
         .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
       onChange(items);
     },
@@ -107,9 +110,10 @@ export async function getStudySheet(projectId: string, sheetId: string): Promise
 export async function updateStudySheet(
   projectId: string,
   sheetId: string,
-  patch: Partial<Pick<StudySheet, "title" | "blocks" | "content" | "sourceMaterialIds" | "schemaVersion">>,
+  patch: Partial<Pick<StudySheet, "title" | "blocks" | "content" | "sourceMaterialIds" | "schemaVersion" | "kind">>,
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
+  if (patch.kind !== undefined) payload.kind = patch.kind;
   if (patch.title !== undefined) payload.title = patch.title;
   if (patch.sourceMaterialIds !== undefined) payload.sourceMaterialIds = patch.sourceMaterialIds;
   if (patch.blocks !== undefined || patch.content !== undefined) {

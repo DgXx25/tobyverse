@@ -3,6 +3,7 @@ import { clipText, PATH_EXCERPT_CHARS, PATH_SOURCE_LIMIT, PATH_TOTAL_CHARS } fro
 import { loadMaterialText } from "@/lib/materials/storage";
 import { excerptForPath } from "@/lib/paths/excerpt";
 import { saveStudyPath } from "@/lib/paths/store";
+import { reserveArtifactTitle } from "@/lib/artifacts/title-store";
 import type { Material } from "@/types/material";
 import type { PathCourse, PathKind } from "@/types/path";
 
@@ -69,7 +70,7 @@ export async function generatePathFromPrompt(input: {
 
   const generated = await readPathSse(response, input.onEvent);
   input.signal?.throwIfAborted();
-  const title = generated.title.trim() || "Path";
+  const title = await reserveArtifactTitle(input.projectId, generated.title.trim() || "Path", input.materials[0]?.title || input.projectTitle, "Course path", input.signal);
   const id = await saveStudyPath({
     projectId: input.projectId,
     userId: input.userId,

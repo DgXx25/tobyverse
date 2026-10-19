@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { stripArtifactMarkup } from "@/lib/composer/memory";
 import type { ChatTurn } from "@/types/chat";
+import { containsSensitiveMemory, isWorkNoteRequest, memorySafeTurns } from "@/lib/memory/privacy";
 
 export const PATTERN_CAP = 6;
 export const TOPIC_CAP = 20;
@@ -65,6 +66,7 @@ export function asAdaptiveState(value: unknown): AdaptiveState {
     revision: number(row.revision), updatedAt: number(row.updatedAt),
     lastRunAt: number(row.lastRunAt), day: bounded(row.day, 10), dailyRuns: number(row.dailyRuns), lastBatch: bounded(row.lastBatch, 64),
     patterns: rows(row.patterns).flatMap(p => {
+      if ([p.key, p.when, p.observation, p.approach].some(v => typeof v === "string" && containsSensitiveMemory(v))) return [];
       const key = bounded(p.key, 64), when = bounded(p.when, 120), observation = bounded(p.observation, 180), approach = bounded(p.approach, 180);
       if (!key || !when || !observation || !approach) return [];
       const tasks = Array.isArray(p.tasks) ? p.tasks.filter((v): v is TaskKind => taskKinds.includes(v as TaskKind)).slice(0, 3) : [];
@@ -76,6 +78,7 @@ export function asAdaptiveState(value: unknown): AdaptiveState {
 export function asKnowledgeGraph(value: unknown): KnowledgeGraph {
   const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const nodes: KnowledgeNode[] = rows(row.nodes).flatMap(n => {
+    if ([n.key, n.label, n.summary, n.nextQuestion, n.whatIf].some(v => typeof v === "string" && containsSensitiveMemory(v))) return [];
     const key = bounded(n.key, 64), label = bounded(n.label, 80), summary = bounded(n.summary, 200);
     if (!key || !label || !summary) return [];
     const status: KnowledgeNode["status"] = n.status === "developing" || n.status === "revisit" || n.status === "applied" ? n.status : "explored";
@@ -83,6 +86,7 @@ export function asKnowledgeGraph(value: unknown): KnowledgeGraph {
   }).slice(0, TOPIC_CAP);
   const keys = new Set(nodes.map(n => n.key));
   const links = rows(row.links).flatMap(l => {
+    if ([l.from, l.to, l.label].some(v => typeof v === "string" && containsSensitiveMemory(v))) return [];
     const from = bounded(l.from, 64), to = bounded(l.to, 64), label = bounded(l.label, 80);
     return from !== to && keys.has(from) && keys.has(to) && label ? [{ from, to, label }] : [];
   }).slice(0, LINK_CAP);
@@ -93,7 +97,7 @@ export function asKnowledgeGraph(value: unknown): KnowledgeGraph {
 export function observationSample(history: ChatTurn[], prompt: string): ChatTurn[] {
   const turns = [...history];
   if (prompt.trim() && !(turns.at(-1)?.role === "user" && turns.at(-1)?.content.trim() === prompt.trim())) turns.push({ role: "user", content: prompt });
-  return turns.filter(t => t.role === "user" || t.role === "assistant").slice(-14).flatMap(t => {
+  return memorySafeTurns(turns).filter(t => t.role === "user" || t.role === "assistant").slice(-14).flatMap(t => {
     const content = stripArtifactMarkup(t.content).trim().slice(0, t.role === "user" ? 800 : 400);
     if (t.role === "user" && ((!isSubstantivePrompt(content) && !(/[?؟]/.test(content) && /\p{L}/u.test(content))) || /^(?:Tutor-lead|Move-on|Current exercise|Generate a (?:practice|set|course|data|report))/i.test(content))) return [];
     return content ? [{ role: t.role, content }] : [];
@@ -101,7 +105,7 @@ export function observationSample(history: ChatTurn[], prompt: string): ChatTurn
 }
 
 export function isSubstantivePrompt(prompt: string): boolean {
-  return prompt.trim().length >= 18 && /\p{L}/u.test(prompt);
+  return !containsSensitiveMemory(prompt) && !isWorkNoteRequest(prompt) && prompt.trim().length >= 18 && /\p{L}/u.test(prompt);
 }
 
 export type ObservationSchedule = { lastTurn: string; pending: number; started: boolean };
@@ -122,10 +126,13 @@ function questionOnly(value: string): boolean {
 }
 
 export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeGraph, patch: ObservationPatch, sample: ObservationTurn[], projectId: string, now = Date.now()) {
-  const userTurns = new Map(sample.filter(t => t.role !== "assistant").map(t => [t.id, t.content]));
+  patterns = asAdaptiveState({ patterns }).patterns;
+  graph = asKnowledgeGraph(graph);
+  const userTurns = new Map(memorySafeTurns(sample).filter(t => t.role !== "assistant" && !isWorkNoteRequest(t.content)).map(t => [t.id, t.content]));
   const support = (ids: string[]) => [...new Set(ids.filter(id => userTurns.has(id)))];
   const nextPatterns = patterns.filter(p => now - p.updatedAt < PATTERN_TTL);
   for (const p of patch.patterns) {
+    if ([p.key, p.when, p.observation, p.approach].some(containsSensitiveMemory)) continue;
     const ids = support(p.evidence);
     if (!ids.length) continue;
     const scope = p.scope === "project" ? projectId : null;
@@ -139,6 +146,7 @@ export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeG
   }
   const nodes = [...graph.nodes];
   for (const n of patch.topics) {
+    if ([n.key, n.label, n.summary, n.nextQuestion ?? "", n.whatIf ?? ""].some(containsSensitiveMemory)) continue;
     const ids = support(n.evidence);
     if (!ids.length) continue;
     const index = nodes.findIndex(old => old.key === n.key);
@@ -155,7 +163,7 @@ export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeG
   const kept = nodes.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, TOPIC_CAP);
   const keys = new Set(kept.map(n => n.key));
   const links = new Map(graph.links.map(l => [`${l.from}:${l.to}`, l]));
-  for (const link of patch.links) if (link.from !== link.to && keys.has(link.from) && keys.has(link.to)) links.set(`${link.from}:${link.to}`, link);
+  for (const link of patch.links) if (![link.from, link.to, link.label].some(containsSensitiveMemory) && link.from !== link.to && keys.has(link.from) && keys.has(link.to)) links.set(`${link.from}:${link.to}`, link);
   return {
     patterns: nextPatterns.sort((a, b) => b.support.length - a.support.length || b.updatedAt - a.updatedAt).slice(0, PATTERN_CAP),
     graph: { nodes: kept, links: [...links.values()].filter(l => keys.has(l.from) && keys.has(l.to)).slice(-LINK_CAP) },
@@ -178,6 +186,8 @@ function currentTasks(prompt: string): TaskKind[] {
 }
 
 export function formatAdaptiveContext(patterns: AdaptivePattern[], graph: KnowledgeGraph, prompt: string, projectId: string, now = Date.now()): string | null {
+  patterns = asAdaptiveState({ patterns }).patterns;
+  graph = asKnowledgeGraph(graph);
   if (/^[\d\s+*/=().,?−–-]+$/.test(prompt.trim())) return null;
   const tasks = currentTasks(prompt);
   const active = patterns.filter(p => p.support.length >= 2 && now - p.updatedAt < PATTERN_TTL && (!p.projectId || p.projectId === projectId))

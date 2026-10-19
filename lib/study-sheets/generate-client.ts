@@ -2,7 +2,9 @@ import { authHeaders } from "@/lib/api/client";
 import { createStudySheet, updateStudySheet } from "@/lib/study-sheets/store";
 import { collectProjectSources } from "@/lib/composer/sources";
 import type { Material } from "@/types/material";
+import type { ChatTurn } from "@/types/chat";
 import { NOTES_SCHEMA_VERSION } from "@/types/study-sheet";
+import { reserveArtifactTitle } from "@/lib/artifacts/title-store";
 import type { VisualBlock } from "@/types/visual";
 
 export type NotesGenerateEvent = {
@@ -26,7 +28,7 @@ export async function generateStudySheetFromPrompt(input: {
 }): Promise<{ id: string; title: string; blocks: VisualBlock[] }> {
   const generated = await requestNotes(input);
   input.signal?.throwIfAborted();
-  const title = input.title?.trim() || generated.title || "Notes";
+  const title = await reserveArtifactTitle(input.projectId, input.title?.trim() || generated.title || "Notes", input.materials[0]?.title || input.projectTitle, "Study notes", input.signal);
   const id = await createStudySheet({
     projectId: input.projectId,
     userId: input.userId,
@@ -75,6 +77,8 @@ export async function rewriteStudySheetFromPrompt(input: {
 }
 
 async function requestNotes(input: {
+  history?: ChatTurn[];
+  kind?: "note" | "study";
   projectId: string;
   projectTitle: string;
   materials: Material[];
@@ -99,11 +103,13 @@ async function requestNotes(input: {
     headers: await authHeaders(),
     body: JSON.stringify({
       projectTitle: input.projectTitle,
+      kind: input.kind,
       sources,
       instruction: input.prompt,
       currentBlocks: input.currentBlocks,
       currentTitle: input.currentTitle,
       currentContent: input.currentContent,
+      history: input.history,
     }),
     signal: input.signal,
   });
@@ -124,6 +130,20 @@ async function requestNotes(input: {
   }
 
   return readNotesSse(response, input.onEvent);
+}
+
+/** Plain notes have a dedicated prompt and never enter the Study notes workflow. */
+export async function generatePlainNote(input: {
+  history?: ChatTurn[];
+  projectId: string;
+  projectTitle: string;
+  materials: Material[];
+  prompt: string;
+  currentTitle?: string;
+  currentContent?: string;
+  signal?: AbortSignal;
+}): Promise<{ title: string; content: string }> {
+  return requestNotes({ ...input, kind: "note" });
 }
 
 async function readNotesSse(

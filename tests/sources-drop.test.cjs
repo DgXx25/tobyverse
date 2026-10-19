@@ -7,10 +7,12 @@ const Module = require('node:module');
 const ts = require('typescript');
 const React = require('react');
 
-function renderSources() {
+function renderSources(options = {}) {
   let stateIndex = 0;
   let id = 0;
   const uploads = [];
+  const moves = [];
+  const sourceSelections = [];
   const filename = path.resolve(__dirname, '../components/workspace/sources-pane.tsx');
   const loaded = new Module(filename, module);
   const mocks = {
@@ -18,20 +20,32 @@ function renderSources() {
       ...React,
       useEffect: () => {},
       useRef: (current) => ({ current }),
-      useState: (initial) => [stateIndex++ === 2 ? true : initial, () => {}],
+      useState: (initial) => {
+        const index = stateIndex++;
+        const overrides = { 2: true, 13: options.folders ?? [], 15: options.organizing ?? false, 16: options.managed ?? [] };
+        return [Object.hasOwn(overrides, index) ? overrides[index] : initial, () => {}];
+      },
     },
     'react-dom': { createPortal: (children) => ({ type: 'portal', props: { children } }) },
     '@/lib/composer/attach': { newChipId: () => String(++id) },
     '@/lib/materials/ingest-client': { ingestMaterialFile: async (input) => { uploads.push(input); return 'material'; } },
     '@/lib/materials/save': {}, '@/lib/materials/store': {}, '@/lib/materials/types': {},
+    '@/lib/workspace/context-menu-position': {},
+    '@/lib/workspace/project-activity': { markProjectActivityComplete: () => {} },
+    '@/lib/materials/folders': {
+      SOURCE_DRAG_TYPE: 'application/x-tobyverse-sources',
+      moveSourcesToFolder: async (...args) => { moves.push(args); },
+      groupSourcesByFolder: (items, folders) => ({ root: items.filter(item => !folders.some(folder => folder.id === item.folderId)), folders: new Map(folders.map(folder => [folder.id, items.filter(item => item.folderId === folder.id)])) }),
+    },
     '@/components/workspace/file-kind-icon': {}, '@/components/workspace/material-text': {}, '@/components/workspace/ui-icon': {},
+    '@/components/workspace/material-viewer': {},
   };
   loaded.require = (name) => Object.hasOwn(mocks, name) ? mocks[name] : require(name);
   loaded._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
   }).outputText, filename);
-  const pane = loaded.exports.SourcesPane({ projectId: 'p', userId: 'u', items: [], selectedIds: [], onSelectedIds: () => {}, onOpenMaterial: () => {} });
-  return { pane, uploads };
+  const pane = loaded.exports.SourcesPane({ projectId: 'p', userId: 'u', items: options.items ?? [], selectedIds: [], onSelectedIds: ids => sourceSelections.push(ids), onOpenMaterial: () => {} });
+  return { pane, uploads, moves, sourceSelections };
 }
 
 function find(node, predicate) {
@@ -90,4 +104,24 @@ test('source pane consumes its own file drop, leaving unrelated text drops alone
   pane.props.onDrop(textDrop);
   assert.equal(textDrop.stopped, false);
   assert.equal(textDrop.prevented, false);
+});
+
+test('dropping a selected group into a folder moves sources without changing AI selection', async () => {
+  const oldDocument = global.document;
+  global.document = { body: {} };
+  try {
+    const { pane, moves, sourceSelections } = renderSources({ items: [{ id: 'a', title: 'Image', type: 'image' }, { id: 'b', title: 'Brief', type: 'txt' }], folders: [{ id: 'f', name: 'Shoot' }], organizing: true, managed: ['a', 'b'] });
+    const folder = find(pane, node => node.props?.['data-source-folder'] === 'f');
+    const event = dropEvent([]);
+    event.dataTransfer.types = ['application/x-tobyverse-sources'];
+    event.dataTransfer.getData = () => JSON.stringify({ projectId: 'p', ids: ['a', 'b'] });
+    folder.props.onDrop(event);
+    await Promise.resolve();
+    assert.deepEqual(moves, [['p', ['a', 'b'], 'f']]);
+    assert.deepEqual(sourceSelections, []);
+    assert.equal(event.stopped, true);
+    event.dataTransfer.getData = () => JSON.stringify({ projectId: 'foreign', ids: ['a'] });
+    folder.props.onDrop(event);
+    assert.equal(moves.length, 1);
+  } finally { global.document = oldDocument; }
 });

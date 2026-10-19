@@ -66,14 +66,14 @@ test("Georgian note requests are sheets and never paths", () => {
   assert.equal(tool.name, "create_sheet");
 });
 
-test("make a note is a confirmed sheet creation", () => {
+test("make a note is a confirmed plain note creation", () => {
   const tool = gateChatTool({
     tool: { name: "answer", args: {} },
     prompt: "Make a note about marginal cost",
     mode: "teacher",
     keywordFallback: true,
   });
-  assert.equal(tool.name, "create_sheet");
+  assert.equal(tool.name, "create_note");
 });
 
 test("path creation requires Teacher mode and explicit path language", () => {

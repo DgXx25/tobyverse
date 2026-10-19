@@ -35,7 +35,6 @@ export function StudioPane({
   onOpenSheet,
   onOpenPractice,
   onOpenPath,
-  onAddNote,
 }: {
   sheets: StudySheet[];
   practiceSets: ChatArtifact[];
@@ -48,13 +47,7 @@ export function StudioPane({
   onOpenSheet: (id: string) => void;
   onOpenPractice: (id: string) => void;
   onOpenPath: () => void;
-  onAddNote: (input: { title: string; text: string }) => Promise<void>;
 }) {
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [text, setText] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [config, setConfig] = useState<StudioTile | null>(null);
 
   function openTile(tile: StudioTile) {
@@ -65,23 +58,7 @@ export function StudioPane({
     setConfig(tile);
   }
 
-  async function saveNote() {
-    if (!text.trim() || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await onAddNote({ title: title.trim(), text: text.trim() });
-      setTitle("");
-      setText("");
-      setNoteOpen(false);
-    } catch (err) {
-      setError(err instanceof Error && err.message.trim() ? err.message : "Could not save the note.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const outputs: { key: string; icon: UiIconName; color: string; title: string; meta: string; open: () => void }[] = [
+  const outputs: { key: string; icon: UiIconName; color: string; title: string; meta: string; saved?: boolean; open: () => void }[] = [
     ...paths.slice(0, 1).map((item) => ({
       key: `path:${item.id}`,
       icon: "plan" as const,
@@ -95,7 +72,8 @@ export function StudioPane({
       icon: "notes" as const,
       color: TILE_COLOR.notes,
       title: item.title || "Notes",
-      meta: ["Notes", shortDate(item.createdAt)].filter(Boolean).join(" · "),
+      meta: [item.kind === "note" ? item.pendingSave ? "Note · Saving…" : "Note · Saved" : "Study notes", shortDate(item.createdAt)].filter(Boolean).join(" · "),
+      saved: item.kind === "note" && !item.pendingSave,
       open: () => onOpenSheet(item.id),
     })),
     ...practiceSets.map((item) => {
@@ -105,8 +83,8 @@ export function StudioPane({
         key: `practice:${item.id}`,
         icon: (exam ? "check" : "practice") as UiIconName,
         color: TILE_COLOR.quiz,
-        title: `${exam ? "Exam" : "Quiz"} · ${count}`,
-        meta: exam ? "Exam" : "Quiz",
+        title: item.title || `${exam ? "Exam" : "Quiz"} · ${count}`,
+        meta: `${exam ? "Exam" : "Quiz"} · ${count}`,
         open: () => onOpenPractice(item.id),
       };
     }),
@@ -150,6 +128,7 @@ export function StudioPane({
                 <span className="inline-flex shrink-0" style={{ color: item.color }}>
                   <UiIcon name={item.icon} size={18} />
                 </span>
+                {item.saved ? <span aria-label="Saved" title="Saved" className="text-muted"><UiIcon name="check" size={16} /></span> : null}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] text-foreground">{item.title}</span>
                   <span className="block truncate text-[12px] text-muted">{item.meta}</span>
@@ -160,43 +139,6 @@ export function StudioPane({
         </ul>
       ) : null}
 
-      {noteOpen ? (
-        <form
-          className="rounded-2xl bg-surface-2 p-2.5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void saveNote();
-          }}
-        >
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Title"
-            aria-label="Note title"
-            maxLength={80}
-            className="h-8 w-full bg-transparent px-1 text-[14px] font-medium text-foreground outline-none placeholder:text-muted"
-          />
-          <textarea
-            autoFocus
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            rows={4}
-            placeholder="Write a note"
-            aria-label="Note"
-            className="w-full resize-none bg-transparent px-1 py-1 text-[13px] leading-5 text-foreground outline-none placeholder:text-muted"
-          />
-          {error ? <p role="alert" className="px-1 text-[12px] text-red-400">{error}</p> : null}
-          <div className="mt-1 flex justify-end gap-1.5">
-            <button type="button" onClick={() => setNoteOpen(false)} className="h-7 rounded-full px-3 text-[12px] text-muted hover:text-foreground">Cancel</button>
-            <button type="submit" disabled={saving || !text.trim()} className="h-7 rounded-full bg-foreground px-3 text-[12px] font-medium text-background disabled:opacity-40">{saving ? "Saving…" : "Save"}</button>
-          </div>
-        </form>
-      ) : (
-        <button type="button" onClick={() => setNoteOpen(true)} className="panel-selectable flex h-11 items-center gap-2 rounded-full px-3 text-[14px] font-medium text-foreground">
-          <UiIcon name="plus" size={16} />
-          Add note
-        </button>
-      )}
       {config ? (
         <StudioConfig
           tile={config}

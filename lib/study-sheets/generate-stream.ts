@@ -1,5 +1,6 @@
 import { generateTextStream } from "@/lib/ai/gemini";
-import { studySheetSystemPrompt } from "@/lib/study-sheets/prompt";
+import { plainNoteEditSystemPrompt, plainNoteSystemPrompt, studySheetSystemPrompt } from "@/lib/study-sheets/prompt";
+import { applyPlainNoteEdits } from "@/lib/notes/plain";
 import type { AiUsageReporter } from "@/types/billing";
 
 export type NotesStreamEvent =
@@ -21,13 +22,13 @@ function splitTitle(raw: string): { title: string; content: string } {
 
 export async function* streamNotesDocument(
   userPrompt: string,
-  options: { usage?: AiUsageReporter } = {},
+  options: { usage?: AiUsageReporter; kind?: "note" | "study"; currentNote?: { title: string; content: string } } = {},
 ): AsyncGenerator<NotesStreamEvent> {
   yield { type: "status", status: "Creating notes…" };
   let raw = "";
   try {
     for await (const chunk of generateTextStream(userPrompt, {
-      systemInstruction: studySheetSystemPrompt(),
+      systemInstruction: options.currentNote ? plainNoteEditSystemPrompt() : options.kind === "note" ? plainNoteSystemPrompt() : studySheetSystemPrompt(),
       usage: options.usage,
     })) {
       raw += chunk;
@@ -42,6 +43,16 @@ export async function* streamNotesDocument(
   const text = raw.trim();
   if (!text) {
     yield { type: "error", error: "Could not write notes." };
+    return;
+  }
+  if (options.currentNote) {
+    try {
+      const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")) as { changes?: unknown };
+      const content = applyPlainNoteEdits(options.currentNote.content, parsed.changes);
+      yield { type: "done", title: options.currentNote.title, content };
+    } catch {
+      yield { type: "error", error: "Could not apply the requested note changes safely. The original note is unchanged." };
+    }
     return;
   }
   const note = splitTitle(text);

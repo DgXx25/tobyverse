@@ -110,6 +110,9 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     sections.push(
       `Active artifact (edit this one; facts only, no item text): kind=${active.kind} id=${active.id} title="${active.title.replace(/"/g, "")}" count=${active.count ?? "unknown"} status=${active.status ?? "ready"}.${progress} If the user asks what set or sheet they have, name this one.`,
     );
+    if (active.noteKind === "note") {
+      sections.push(`Active plain note (use edit_note with the requested instruction; the tool loads the complete saved note and preserves untouched wording):\n${JSON.stringify({ id: active.id, title: active.title })}`);
+    }
   }
 
   if (context.priorClarify && context.pendingKind === "sheet") {

@@ -3,6 +3,7 @@ import { advanceObservationSchedule, observationSample, type AdaptivePattern, ty
 import type { ChatTurn } from "@/types/chat";
 import type { ChatMemoryContext } from "@/types/memory";
 import { pickMemoriesForAsk } from "@/lib/memory/prompt";
+import { containsSensitiveMemory, isWorkNoteRequest } from "@/lib/memory/privacy";
 
 export type InsightsView = { patterns: AdaptivePattern[]; updatedAt: number; graph?: KnowledgeGraph; projects?: { id: string; title: string }[] };
 export const INSIGHTS_CHANGED = "tobyverse:insights-changed";
@@ -28,6 +29,7 @@ export async function changeInsights(input: { clear?: boolean; removeKey?: strin
 
 /** Runs after a complete response, outside the stream and existing explicit-memory path. */
 export async function observeConversation(input: { userId: string; projectId: string; threadId: string; turnId: string; prompt: string; history: ChatTurn[]; answer: string; memories?: ChatMemoryContext[]; personalization?: string }): Promise<void> {
+  if (containsSensitiveMemory(input.prompt) || isWorkNoteRequest(input.prompt)) return;
   const key = `tobyverse.observation-schedule.${input.userId}.${input.projectId}.${input.threadId}`;
   let previous = schedules.get(key);
   if (!previous && typeof window !== "undefined") {
@@ -41,7 +43,7 @@ export async function observeConversation(input: { userId: string; projectId: st
   try { window.localStorage.setItem(key, JSON.stringify(state)); } catch { /* optional */ }
   if (!due || running.has(input.userId)) return;
   const history = observationSample(input.history, input.prompt);
-  history.push({ role: "assistant", content: input.answer.slice(0, 400) });
+  if (!containsSensitiveMemory(input.answer)) history.push({ role: "assistant", content: input.answer.slice(0, 400) });
   if (history.filter(t => t.role === "user").length < 4) return;
   running.add(input.userId);
   try {

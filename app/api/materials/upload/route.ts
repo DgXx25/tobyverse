@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     if (file && typeof file === "object" && typeof (file as Blob).size === "number") {
       observedBytes = (file as Blob).size;
       observedMime = (file as Blob).type || contentType;
-    } else if (text) {
+    } else if (form.has("text")) {
       observedBytes = Buffer.byteLength(text, "utf8");
       observedMime = contentType;
     }
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
       buffer = normalized.buffer;
       if (normalized.converted) storedName = normalized.filename;
       storedType = normalized.mime;
-    } else if (text) {
+    } else if (form.has("text")) {
       buffer = Buffer.from(text, "utf8");
     } else {
       return respond({ error: "Missing file." }, 400);
@@ -143,7 +143,7 @@ export async function POST(request: Request) {
     if (error instanceof StorageWriteError) {
       return respond({ error: error.message }, error.status);
     }
-    const conversionFailure = error instanceof Error && /could not convert this heic\/heif/i.test(error.message);
+    const conversionFailure = error instanceof Error && /could not prepare this photo|could not convert this heic\/heif/i.test(error.message);
     const status = conversionFailure ? 400 : error instanceof Error && "status" in error && typeof error.status === "number" ? error.status : 500;
     const message = error instanceof Error ? error.message : "Request failed.";
     return respond({ error: message }, status);

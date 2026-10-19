@@ -59,6 +59,8 @@ export function gateGuestChatTool(tool: ChatToolCall): ChatToolCall {
     tool.name === "edit_practice" ||
     tool.name === "append_practice" ||
     tool.name === "create_sheet" ||
+    tool.name === "create_note" ||
+    tool.name === "edit_note" ||
     tool.name === "edit_sheet" ||
     tool.name === "create_path" ||
     tool.name === "advance_path" ||

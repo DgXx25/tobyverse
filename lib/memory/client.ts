@@ -10,6 +10,7 @@ import {
 } from "@/lib/memory/normalize";
 import { parseProjectFacts } from "@/lib/memory/project";
 import { setLearningProfile } from "@/lib/memory/profile";
+import { containsSensitiveMemory, isWorkNoteRequest, memorySafeTurns } from "@/lib/memory/privacy";
 import type { ChatTurn } from "@/types/chat";
 import type { ChatMemoryContext, MemoryOp } from "@/types/memory";
 
@@ -24,6 +25,7 @@ export function syncUserMemories(input: {
   onProjectMemory?: (lines: string[]) => void;
 }): Promise<boolean> {
   if (!input.userId || !input.prompt.trim()) return Promise.resolve(false);
+  if (containsSensitiveMemory(input.prompt) || isWorkNoteRequest(input.prompt)) return Promise.resolve(false);
   if (!shouldExtractMemory(input.prompt)) {
     return migrateStudyMethodMemories(input).then(() => false);
   }
@@ -76,7 +78,7 @@ async function runMemorySync(input: {
         prompt: input.prompt,
         memories: input.memories,
         personalization: input.personalization ?? "",
-        history: input.history,
+        history: memorySafeTurns(input.history ?? []),
         projectMemory: input.projectMemory ?? [],
       }),
     });

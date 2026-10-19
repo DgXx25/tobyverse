@@ -36,7 +36,7 @@ async function extractStoredFile(input: {
   let textStored = false;
   if (input.textPath && input.phase !== "images") {
     const textParsed = parseMaterialStoragePath(input.textPath);
-    if (textParsed && textParsed.userId === input.uid && textParsed.materialId === parsed.materialId) {
+    if (textParsed && textParsed.userId === input.uid && textParsed.projectId === parsed.projectId && textParsed.materialId === parsed.materialId && textParsed.name === "extracted.txt") {
       await uploadGcsObject(input.textPath, Buffer.from(extracted.text, "utf8"), "text/plain; charset=utf-8");
       textStored = true;
     }
