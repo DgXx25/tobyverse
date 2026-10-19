@@ -81,10 +81,6 @@ export async function GET(request: Request) {
       return Response.json({ error: "Invalid file request." }, { status: 400 });
     }
     const filename = storedObjectName(filenameRaw) || name;
-    if (download && (filename === "extracted.txt" || name === "extracted.txt")) {
-      return Response.json({ error: "Invalid file request." }, { status: 400 });
-    }
-
     const objectPath = `${prefix}${name}`;
     const parsed = parseMaterialStoragePath(objectPath);
     if (!parsed || parsed.userId !== session.uid) {

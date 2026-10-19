@@ -28,7 +28,7 @@ export function MessageAttachments({
 }
 
 function AttachmentChip({ item, onOpenMaterial }: { item: ChatAttachment; onOpenMaterial?: (id: string) => void }) {
-  if (isImageAttachment(item.type, item.title) && item.storagePath) {
+  if (isImageAttachment(item.type, item.title) && item.storagePath && !item.storagePath.endsWith("/extracted.txt")) {
     return (
       <ImageThumb
         path={item.storagePath}

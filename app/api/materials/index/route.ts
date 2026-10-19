@@ -3,6 +3,7 @@ import { COLLECTIONS } from "@/lib/firestore";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
 import { indexTextStep } from "@/lib/rag/ingest";
 import { getAdminFirestore } from "@/lib/server/firestore-admin";
+import { retainMaterialText } from "@/lib/materials/retention";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -30,10 +31,11 @@ export async function POST(request: Request) {
     }
     const textPath = typeof material.textPath === "string" ? material.textPath : "";
     const parsed = parseMaterialStoragePath(textPath);
-    if (!parsed || parsed.userId !== uid || parsed.materialId !== materialId) {
+    if (!parsed || parsed.userId !== uid || parsed.projectId !== projectId || parsed.materialId !== materialId) {
       return Response.json({ error: "This material has no readable text." }, { status: 400 });
     }
 
+    await retainMaterialText({ uid, projectId, materialId, ref });
     const progress = await indexTextStep({ uid, projectId, materialId, textPath, ref, budgetMs: BUDGET_MS });
     return Response.json(progress);
   } catch (error) {

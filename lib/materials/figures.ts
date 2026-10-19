@@ -55,6 +55,7 @@ function originalObjectName(material: Material): string | null {
 
 /** Paths actually stored on the material. Never invents slide-N.png from pageCount. */
 export function existingMaterialImages(material: Material): MaterialImage[] {
+  if (material.originalRemoved) return [];
   const original = originalObjectName(material);
   const seen = new Set<string>();
   const next: MaterialImage[] = [];
@@ -113,6 +114,7 @@ export function pickFigureTargets(
   if (attachedImages.length > 0) {
     for (const attached of attachedImages) {
       const material = materials.find((item) => item.id === attached.materialId);
+      if (material?.originalRemoved) continue;
       const path = attached.storagePath || material?.storagePath;
       const name = storedObjectName(path);
       if (path && name && name !== "extracted.txt" && !isMissingMaterialFile(path)) {

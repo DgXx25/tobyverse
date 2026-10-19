@@ -157,10 +157,10 @@ export async function downloadMaterialFile(
   downloadAs?: string,
   access?: MaterialFileAccess,
 ): Promise<MaterialFileErr | null> {
-  if (!name || name === "extracted.txt") {
+  if (!name) {
     return { ok: false, status: 400, message: "File not found." };
   }
-  const saveAs = (downloadAs && downloadAs !== "extracted.txt" ? downloadAs : name) || name;
+  const saveAs = downloadAs || name;
   const key = cacheKey(projectId, materialId, name, access);
   if (isMissingMaterialName(projectId, materialId, name, access)) {
     return { ok: false, status: 404, message: "File not found." };

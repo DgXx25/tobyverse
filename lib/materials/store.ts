@@ -111,9 +111,10 @@ function mapMaterial(id: string, projectId: string, data: Record<string, unknown
   const storagePath = asString(data.storagePath);
   const extractedPath =
     asString(data.extractedPath) || asString(data.textPath) || extractedTextPath(userId, projectId, id);
+  const originalRemoved = data.originalRemoved === true;
   const fromField = asString(data.originalName);
   const fromPath = storedObjectName(storagePath) || "";
-  const originalName = fromField !== "extracted.txt" ? fromField : "";
+  const originalName = fromField !== "extracted.txt" || originalRemoved ? fromField : "";
   const pathName = fromPath && fromPath !== "extracted.txt" ? fromPath : "";
   return {
     id,
@@ -122,6 +123,9 @@ function mapMaterial(id: string, projectId: string, data: Record<string, unknown
     title: asString(data.title) || asString(data.name, "Untitled"),
     type: asType(data.type),
     originalName: originalName || pathName || undefined,
+    originalMime: asString(data.originalMime) || undefined,
+    originalSizeBytes: typeof data.originalSizeBytes === "number" ? data.originalSizeBytes : undefined,
+    originalRemoved,
     storagePath,
     textPath: extractedPath,
     extractedPath,
@@ -155,6 +159,9 @@ export type MaterialDocInput = {
   hasImages?: boolean;
   textChars?: number;
   images?: MaterialImage[];
+  originalName?: string;
+  originalMime?: string;
+  originalSizeBytes?: number;
   status?: MaterialStatus;
 };
 
@@ -168,6 +175,9 @@ export async function writeMaterialDoc(
     userId: data.userId,
     title: data.title,
     type: data.type,
+    ...(data.originalName ? { originalName: data.originalName } : {}),
+    ...(data.originalMime ? { originalMime: data.originalMime } : {}),
+    ...(typeof data.originalSizeBytes === "number" ? { originalSizeBytes: data.originalSizeBytes } : {}),
     storagePath: data.storagePath,
     ...(data.type === "pdf" && !data.textPath ? {} : { textPath: data.textPath ?? extractedTextPath(data.userId, projectId, materialId) }),
     extractedTextPreview: data.extractedTextPreview.slice(0, 300),
@@ -267,4 +277,8 @@ export async function renameMaterial(projectId: string, materialId: string, titl
 
 export async function deleteMaterialDoc(projectId: string, materialId: string): Promise<void> {
   await deleteDoc(doc(materialsRef(projectId), materialId));
+}
+
+export async function patchMaterialStatus(projectId: string, materialId: string, status: MaterialStatus): Promise<void> {
+  await updateDoc(doc(materialsRef(projectId), materialId), { status });
 }

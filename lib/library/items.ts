@@ -27,6 +27,7 @@ export type LibraryItem = {
   hasImages?: boolean;
   images?: MaterialImage[];
   storagePath?: string;
+  originalRemoved?: boolean;
   previewPagePath?: string;
 };
 
@@ -58,6 +59,7 @@ export async function listLibraryItems(userId: string): Promise<LibraryItem[]> {
           hasImages: item.hasImages,
           images: item.images,
           storagePath: item.storagePath,
+          originalRemoved: item.originalRemoved,
           previewPagePath: item.previewPagePath,
         });
       }

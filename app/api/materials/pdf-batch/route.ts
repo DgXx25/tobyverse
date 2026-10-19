@@ -4,6 +4,7 @@ import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
 import { indexPdfStep } from "@/lib/rag/ingest";
 import { getAdminFirestore } from "@/lib/server/firestore-admin";
 import { aiUsageErrorResponse, startAiUsageSession } from "@/lib/billing/server";
+import { retainMaterialText } from "@/lib/materials/retention";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,7 +15,7 @@ const BUDGET_MS = 38_000;
 /**
  * Reads a PDF once per call, extracts text (OCR only for scanned pages), chunks, embeds and stores
  * as many pages as the budget allows, then returns a cursor. The client repeats until `done`.
- * No page images or per-page files are stored.
+ * Plain text is persisted while reading. The original is removed only once all pages finish.
  */
 export async function POST(request: Request) {
   let uid = "";
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
       .doc(materialId);
     const snapshot = await ref.get();
     const material = snapshot.data();
-    if (!snapshot.exists || material?.userId !== uid || material?.storagePath !== path) {
+    if (!snapshot.exists || material?.userId !== uid || (material?.storagePath !== path && !(material?.originalRemoved === true && material?.originalStoragePath === path))) {
       return Response.json({ error: "Material not found." }, { status: 404 });
     }
 
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
       budgetMs: BUDGET_MS,
       usage: usage.report,
     });
+    if (progress.done) await retainMaterialText({ uid, projectId, materialId, ref });
     return Response.json(progress);
   } catch (error) {
     if (error instanceof SyntaxError) return Response.json({ error: "Invalid request." }, { status: 400 });

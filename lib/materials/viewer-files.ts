@@ -14,7 +14,7 @@ const ORIGINAL_FILE = /\.(pptx|ppt|pdf|docx|txt|md)$/i;
 
 export function originalStoredName(material: Material): string | null {
   const fromField = material.originalName?.trim() || "";
-  if (fromField && fromField !== "extracted.txt" && !fromField.includes("/") && !fromField.includes("..")) {
+  if (fromField && (fromField !== "extracted.txt" || material.originalRemoved) && !fromField.includes("/") && !fromField.includes("..")) {
     return fromField;
   }
   const name = storedObjectName(material.storagePath);

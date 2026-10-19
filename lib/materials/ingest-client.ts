@@ -1,7 +1,7 @@
 import { requireSignedInUser } from "@/lib/auth";
 import { authHeaders } from "@/lib/api/client";
 import { previewText } from "@/lib/materials/limits";
-import { newMaterialRef, writeMaterialDoc } from "@/lib/materials/store";
+import { newMaterialRef, patchMaterialStatus, writeMaterialDoc } from "@/lib/materials/store";
 import {
   deleteStoragePath,
   extractedTextPath,
@@ -65,6 +65,7 @@ export type PreparedMaterial = {
   type: MaterialType;
   title: string;
   originalMime: string;
+  originalName: string;
   sizeBytes: number;
   storagePath: string;
   textPath: string;
@@ -237,6 +238,9 @@ export async function prepareMaterialIngest(input: {
         title: payload.title,
         type: "pdf",
         storagePath,
+        originalName: source.kind === "file" ? source.file.name : payload.originalName,
+        originalMime,
+        originalSizeBytes: sizeBytes,
         extractedTextPreview: "",
         sizeBytes,
         pageCount: 0,
@@ -289,6 +293,7 @@ export async function prepareMaterialIngest(input: {
       type: payload.type,
       title: payload.title,
       originalMime,
+      originalName: source.kind === "file" ? source.file.name : payload.originalName,
       sizeBytes,
       storagePath,
       textPath,
@@ -454,6 +459,9 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
       textPath,
       extractedTextPreview: previewFromPrepared(prepared),
       sizeBytes: prepared.sizeBytes,
+      originalName: prepared.originalName,
+      originalMime: prepared.originalMime,
+      originalSizeBytes: prepared.sizeBytes,
       pageCount: data.pageCount ?? 1,
       hasImages: images.length > 0,
       textChars: data.textChars ?? data.text?.length ?? 0,
@@ -461,20 +469,7 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
       status: "processing",
     });
     await indexMaterialText(projectId, materialId);
-    await writeMaterialDoc(projectId, materialId, {
-      userId,
-      title,
-      type,
-      storagePath,
-      textPath,
-      extractedTextPreview: previewFromPrepared(prepared),
-      sizeBytes: prepared.sizeBytes,
-      pageCount: data.pageCount ?? 1,
-      hasImages: images.length > 0,
-      textChars: data.textChars ?? data.text?.length ?? 0,
-      images,
-      status: "ready",
-    });
+    await patchMaterialStatus(projectId, materialId, "ready");
 
     return materialId;
   } catch (error) {
@@ -483,16 +478,7 @@ export async function commitMaterialText(prepared: PreparedMaterial): Promise<st
         ? error
         : new MaterialIngestError("PDF pages are saved; indexing can resume.", { phase: "extract", storageSaved: true });
     }
-    await writeMaterialDoc(projectId, materialId, {
-      userId,
-      title: prepared.title,
-      type: prepared.type,
-      storagePath,
-      textPath,
-      extractedTextPreview: "",
-      sizeBytes: prepared.sizeBytes,
-      status: "failed",
-    });
+    await patchMaterialStatus(projectId, materialId, "failed");
     if (error instanceof MaterialIngestError) throw error;
     throw new MaterialIngestError("Saved, but text could not be read", {
       phase: "extract",

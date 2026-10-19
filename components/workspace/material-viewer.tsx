@@ -139,10 +139,14 @@ export function MaterialViewer({
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   async function onDownload() {
-    if (!originalName || originalName === "extracted.txt" || downloading) return;
+    if ((!originalName && !material.originalRemoved) || downloading) return;
     setDownloading(true);
     try {
-      const error = await downloadMaterialFile(material.projectId, material.id, originalName, originalName, fileAccess);
+      const name = material.originalRemoved ? (extractedStoredName(material) || "extracted.txt") : (originalName || "");
+      const fileName = material.originalRemoved
+        ? `${(material.title || "Material").replace(/[\\/:*?"<>|]+/g, "_").slice(0, 120) || "Material"}.txt`
+        : originalName!;
+      const error = await downloadMaterialFile(material.projectId, material.id, name, fileName, fileAccess);
       setDownloadError(error?.message ?? null);
     } catch {
       setDownloadError("Could not download file.");
@@ -192,7 +196,9 @@ export function MaterialViewer({
       {downloadError ? <p role="alert" className="bg-surface p-2 text-center text-xs text-foreground">{downloadError}</p> : null}
       <div className={`min-h-0 flex-1 overflow-hidden ${overlay ? "pb-14" : ""}`}>
         <ViewerBoundary key={material.id}>
-          {material.type === "pdf" ? (
+          {material.originalRemoved ? (
+            <TextStage material={material} onChrome={onChrome} />
+          ) : material.type === "pdf" ? (
             <PdfStage material={material} originalName={originalName} onChrome={onChrome} />
           ) : material.type === "pptx" ? (
             <PptxStage material={material} onChrome={onChrome} />

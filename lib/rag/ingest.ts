@@ -5,7 +5,7 @@ import { chunkPages, chunkText, pagesFromMarkedText, type RagChunk, type SourceP
 import { indexChunks, INDEX_VERSION } from "@/lib/rag/server";
 import { openPdf } from "@/lib/materials/pdf";
 import { previewText } from "@/lib/materials/limits";
-import { downloadGcsObject } from "@/lib/storage-gcs";
+import { downloadGcsObject, uploadGcsObject } from "@/lib/storage-gcs";
 
 /**
  * Resumable, idempotent indexing. Every call does as much as its time budget allows, then
@@ -33,6 +33,8 @@ type IndexState = {
   chunks?: number;
   total?: number;
   textChars?: number;
+  /** UTF-8 bytes committed with the cursor; discards an uncommitted tail after a retry. */
+  textBytes?: number;
   ocrPages?: number;
   version?: number;
 };
@@ -79,7 +81,9 @@ export async function indexPdfStep(input: {
   const started = Date.now();
   const snapshot = await input.ref.get();
   const data = snapshot.data() ?? {};
-  const state = asState(data.index);
+  const previousState = asState(data.index);
+  // Older PDF indexes did not retain their full text. Re-read those pages before removing a binary.
+  const state = typeof previousState.textBytes === "number" || data.originalRemoved === true ? previousState : {};
   const preview = typeof data.extractedTextPreview === "string" ? data.extractedTextPreview : "";
   const pageCountBefore = typeof data.pageCount === "number" ? data.pageCount : 0;
 
@@ -94,6 +98,13 @@ export async function indexPdfStep(input: {
     };
   }
 
+  const textPath = `${input.path.slice(0, input.path.lastIndexOf("/") + 1)}extracted.txt`;
+  let committedText = Buffer.alloc(0);
+  if ((state.textBytes ?? 0) > 0) {
+    const saved = await downloadGcsObject(textPath);
+    if (saved.buffer.byteLength < state.textBytes!) throw new Error("Saved PDF text is incomplete. The original has been kept.");
+    committedText = Buffer.from(saved.buffer.subarray(0, state.textBytes));
+  }
   const { buffer } = await downloadGcsObject(input.path);
   const pdf = await openPdf(new Uint8Array(buffer));
   try {
@@ -119,6 +130,10 @@ export async function indexPdfStep(input: {
         .filter((item) => item.text.trim().length > 0);
 
       const windowChunks = chunkPages(pages, page);
+      const windowText = pages.map(item => `Page ${item.page}\n${item.text}`).join("\n\n");
+      const nextText = windowText ? Buffer.concat([committedText, Buffer.from(`${committedText.length ? "\n\n" : ""}${windowText}`, "utf8")]) : committedText;
+      // Persist before advancing the cursor. A retry starts at the last committed byte offset.
+      await uploadGcsObject(textPath, nextText, "text/plain; charset=utf-8");
       await indexChunks({ uid: input.uid, projectId: input.projectId, materialId: input.materialId, chunks: windowChunks });
       chunks += windowChunks.length;
       textChars += pages.reduce((sum, item) => sum + item.text.length, 0);
@@ -130,6 +145,8 @@ export async function indexPdfStep(input: {
         {
           pageCount: pdf.pageCount,
           textChars,
+          textPath,
+          extractedPath: textPath,
           extractedTextPreview: firstPreview,
           images: [],
           hasImages: false,
@@ -138,6 +155,7 @@ export async function indexPdfStep(input: {
             nextPage: page,
             chunks,
             textChars,
+            textBytes: nextText.byteLength,
             ocrPages,
             version: INDEX_VERSION,
           },
@@ -146,6 +164,7 @@ export async function indexPdfStep(input: {
         },
         { merge: true },
       );
+      committedText = Buffer.from(nextText);
     }
 
     return {

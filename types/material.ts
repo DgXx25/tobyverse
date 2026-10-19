@@ -33,6 +33,10 @@ export type Material = {
   title: string;
   type: MaterialType;
   originalName?: string;
+  originalMime?: string;
+  originalSizeBytes?: number;
+  /** The binary was replaced in Storage by its extracted plain text. */
+  originalRemoved?: boolean;
   storagePath: string;
   textPath: string;
   extractedPath?: string;

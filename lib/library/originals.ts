@@ -11,6 +11,7 @@ export function originalLibraryMaterials(materials: Material[]): Material[] {
   }
   return materials.filter((material) => {
     if (material.type === "paste" || material.type === "url") return false;
+    if (material.originalRemoved) return Boolean(material.originalName);
     const name = storedObjectName(material.storagePath);
     if (!name || name.toLowerCase() === "extracted.txt" || derived.has(material.storagePath)) return false;
     const owner = parseMaterialStoragePath(material.storagePath);

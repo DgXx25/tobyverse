@@ -55,12 +55,13 @@ function usablePaths(paths: string[]): string[] {
 }
 
 export function libraryThumbPaths(item: LibraryItem): string[] {
-  if (!isLibraryImage(item)) return [];
+  if (!isLibraryImage(item) || item.originalRemoved) return [];
   const fromImages = sortedImagePaths(item);
   return usablePaths([...fromImages, item.storagePath ?? ""]);
 }
 
 export function librarySlidePaths(item: LibraryItem): string[] {
+  if (item.originalRemoved) return [];
   return usablePaths(sortedImagePaths(item));
 }
 
@@ -68,7 +69,7 @@ const RASTER = /\.(png|jpe?g|webp|gif)$/i;
 
 /** First real page to paint on a tile. Icon stays until this file is ready. */
 export function libraryThumbTarget(item: LibraryItem): { name: string; mode: "image" | "pdf" } | null {
-  if (item.kind !== "material") return null;
+  if (item.kind !== "material" || item.originalRemoved) return null;
   const preview = storedObjectName(item.previewPagePath);
   if (preview && RASTER.test(preview)) return { name: preview, mode: "image" };
   const slide = slidesFromImages(item.images ?? [], item.pageCount)[0];
