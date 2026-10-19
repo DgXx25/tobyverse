@@ -13,6 +13,7 @@ import BookOpen01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/e
 import Brain01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Brain01Icon.js";
 import Bug01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Bug01Icon.js";
 import Cancel01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Cancel01Icon.js";
+import CheckmarkSquare02Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/CheckmarkSquare02Icon.js";
 import ChartColumnIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/ChartColumnIcon.js";
 import Copy01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Copy01Icon.js";
 import CreditCardIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/CreditCardIcon.js";
@@ -144,6 +145,7 @@ const ICONS = {
   bug: Bug01Icon,
   cell: Hexagon01Icon,
   check: Tick01Icon,
+  checkmarkSquare02: CheckmarkSquare02Icon,
   copy: Copy01Icon,
   lock: SquareLock01Icon,
   dna: Dna01Icon,

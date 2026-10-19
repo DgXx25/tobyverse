@@ -69,11 +69,10 @@ export function StudioPane({
     })),
     ...sheets.map((item) => ({
       key: `sheet:${item.id}`,
-      icon: "notes" as const,
+      icon: (item.kind === "note" ? "checkmarkSquare02" : "notes") as UiIconName,
       color: TILE_COLOR.notes,
       title: item.title || "Notes",
       meta: [item.kind === "note" ? item.pendingSave ? "Note · Saving…" : "Note · Saved" : "Study notes", shortDate(item.createdAt)].filter(Boolean).join(" · "),
-      saved: item.kind === "note" && !item.pendingSave,
       open: () => onOpenSheet(item.id),
     })),
     ...practiceSets.map((item) => {
@@ -128,7 +127,6 @@ export function StudioPane({
                 <span className="inline-flex shrink-0" style={{ color: item.color }}>
                   <UiIcon name={item.icon} size={18} />
                 </span>
-                {item.saved ? <span aria-label="Saved" title="Saved" className="text-muted"><UiIcon name="check" size={16} /></span> : null}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] text-foreground">{item.title}</span>
                   <span className="block truncate text-[12px] text-muted">{item.meta}</span>

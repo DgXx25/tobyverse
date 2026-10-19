@@ -573,7 +573,7 @@ function SheetsView({
       {items.map((item) => (
         <li key={item.id} className="list-none">
           <button type="button" onClick={() => onSelect(item.id)} className="panel-selectable flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left">
-            <span className="inline-flex shrink-0 text-[var(--file-notes)]"><UiIcon name="notes" size={18} /></span>
+            <span className="inline-flex shrink-0 text-[var(--file-notes)]"><UiIcon name={item.kind === "note" ? "checkmarkSquare02" : "notes"} size={18} /></span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[14px] text-foreground">{item.title}</span>
               <span className="block truncate text-[12px] text-muted">{formatDateTime(item.createdAt) || "Notes"}</span>
