@@ -30,11 +30,13 @@ export function MaterialText({ material, onBack }: { material: Material; onBack:
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-11 shrink-0 items-center gap-1 px-2 md:pl-16">
-        <button type="button" onClick={onBack} aria-label="Back to sources" className="flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:text-foreground">
+      <div className="flex h-11 shrink-0 items-center px-2">
+        <button type="button" onClick={onBack} aria-label={`Back to sources: ${material.title}`} className="flex min-w-0 max-w-full items-center gap-1 rounded-lg pr-3 text-left text-muted hover:bg-surface-2 hover:text-foreground">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center">
           <UiIcon name="back" size={16} />
+          </span>
+          <span className="min-w-0 truncate text-[13px] text-foreground">{material.title}</span>
         </button>
-        <p className="min-w-0 flex-1 truncate text-[13px] text-foreground">{material.title}</p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {failed ? <p className="text-[13px] text-red-400">Could not read this file.</p> : null}

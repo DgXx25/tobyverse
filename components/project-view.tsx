@@ -442,7 +442,7 @@ export function ProjectView({
         ensureMinWidth(MIN_NOTES);
         return;
       }
-      setFocus({ kind: "sheet", id: "", title: "Notes" });
+      setFocus(null);
       revealStudio();
       ensureMinWidth(MIN_NOTES);
       return;
@@ -461,11 +461,7 @@ export function ProjectView({
     ensureMinWidth(MIN_NOTES);
     if (event.sheetId) {
       if (keepPathPanel()) return;
-      setFocus({
-        kind: "sheet",
-        id: event.sheetId,
-        title: event.title || "Notes",
-      });
+      setFocus(null);
     }
   }
 

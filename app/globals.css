@@ -358,7 +358,13 @@ html.dark .prompt-bubble {
 html.light .prompt-bubble,
 html.marketing.light .prompt-bubble,
 html.marketing:not(.dark) .prompt-bubble {
+  background: #fff;
   border: 1px solid var(--input-border);
+}
+
+html.light .single-panel-toggle:hover,
+html.marketing.light .single-panel-toggle:hover {
+  background: #fff;
 }
 
 .composer-shell {

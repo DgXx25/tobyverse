@@ -67,6 +67,7 @@ export function Topbar() {
   const [openIdsLoaded, setOpenIdsLoaded] = useState(false);
   const [activityNotifications, setActivityNotifications] = useState<string[]>([]);
   const [editorId, setEditorId] = useState<string | null>(null);
+  const [identityMenuOpen, setIdentityMenuOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"rename" | "icon">("rename");
   const [titleDraft, setTitleDraft] = useState("");
   const [iconDraft, setIconDraft] = useState("");
@@ -161,12 +162,18 @@ export function Topbar() {
   }, [tabMenu]);
 
   useEffect(() => {
-    if (!editorId) return;
+    if (!editorId && !identityMenuOpen) return;
     function closeEditor(event: PointerEvent) {
-      if (!identityRef.current?.contains(event.target as Node)) setEditorId(null);
+      if (!identityRef.current?.contains(event.target as Node)) {
+        setEditorId(null);
+        setIdentityMenuOpen(false);
+      }
     }
     function closeKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setEditorId(null);
+      if (event.key === "Escape") {
+        setEditorId(null);
+        setIdentityMenuOpen(false);
+      }
     }
     document.addEventListener("pointerdown", closeEditor);
     document.addEventListener("keydown", closeKey);
@@ -174,7 +181,7 @@ export function Topbar() {
       document.removeEventListener("pointerdown", closeEditor);
       document.removeEventListener("keydown", closeKey);
     };
-  }, [editorId]);
+  }, [editorId, identityMenuOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -319,14 +326,23 @@ export function Topbar() {
           <div ref={identityRef} className="relative mr-1 min-w-0 max-w-[250px] flex-1 md:flex-none">
             <button
               type="button"
-              aria-label={`Edit project ${notebookTitle(activeProject.title)}`}
-              aria-expanded={editorId === activeId}
-              onClick={() => editorId === activeId ? setEditorId(null) : openEditor(activeProject.id, "rename")}
+              aria-label={`Project options for ${notebookTitle(activeProject.title)}`}
+              aria-expanded={identityMenuOpen || editorId === activeId}
+              onClick={() => {
+                setEditorId(null);
+                setIdentityMenuOpen((open) => !open);
+              }}
               className="sidebar-item-rest flex h-9 max-w-full items-center gap-2 rounded-xl px-2 text-[14px] font-medium text-foreground hover:bg-foreground/5"
             >
               <ProjectSymbol name={projectIconFor(activeProject)} size={18} color={activeProject.iconColor} className="shrink-0" />
               <span className="truncate">{notebookTitle(activeProject.title)}</span>
             </button>
+            {identityMenuOpen ? (
+              <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-44 rounded-xl border border-border bg-surface-2 p-1 text-[13px] text-foreground shadow-xl">
+                <button type="button" role="menuitem" onClick={() => { setIdentityMenuOpen(false); openEditor(activeProject.id, "rename"); }} className="flex w-full items-center rounded-lg px-2.5 py-2 text-left hover:bg-foreground/10">Rename</button>
+                <button type="button" role="menuitem" onClick={() => { setIdentityMenuOpen(false); openEditor(activeProject.id, "icon"); }} className="flex w-full items-center rounded-lg px-2.5 py-2 text-left hover:bg-foreground/10">Change symbol</button>
+              </div>
+            ) : null}
             {editorId && editedProject ? (
               <div className="absolute right-0 top-full z-50 mt-1 w-[288px] rounded-xl border border-border bg-surface-2 p-2 text-foreground shadow-xl" onPointerDown={(event) => event.stopPropagation()}>
                 <form onSubmit={(event) => void saveProjectIdentity(event)}>

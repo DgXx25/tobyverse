@@ -16,7 +16,6 @@ import { NoteDocument, NoteTitle } from "@/components/visuals/note-document";
 import { VisualList } from "@/components/visuals/visual-block";
 import { QuietIconCluster } from "@/components/workspace/quiet-icon-cluster";
 import { ProjectSettingsPane } from "@/components/workspace/project-settings-pane";
-import { FileKindIcon } from "@/components/workspace/file-kind-icon";
 import { MaterialText } from "@/components/workspace/material-text";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { StudioPane } from "@/components/workspace/studio-pane";
@@ -169,7 +168,6 @@ export function ArtifactPanel({
     if (session || !focus) return;
     if (liveNote) {
       if (tabRef.current === "path") return;
-      setTab("sheets");
       setSheetError(null);
       if (liveNote.sheetId) setSheetId(liveNote.sheetId);
       else if (liveNote.status) setSheetId(null);
@@ -375,6 +373,7 @@ export function ArtifactPanel({
                   }}
                   onBack={() => {
                     setSheetId(null);
+                    setTab("studio");
                     onLiveSettled?.();
                   }}
                 />
@@ -569,25 +568,20 @@ function SheetsView({
   }
 
   return (
-    <div className="artifact-grid-container">
-      {error ? <p className="pb-2 text-xs text-red-400">{error}</p> : null}
-      <div className="artifact-tile-grid">
+    <ul className="space-y-1 px-3 py-3">
+      {error ? <li className="list-none pb-2 text-xs text-red-400">{error}</li> : null}
       {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          onClick={() => onSelect(item.id)}
-          className="group min-w-0 text-left"
-        >
-          <div className="artifact-panel-block flex aspect-[4/3] items-center justify-center overflow-hidden rounded-2xl">
-            <FileKindIcon kind="notes" size={52} />
-          </div>
-          <p className="truncate text-[13px] text-foreground">{item.title}</p>
-          <p className="mt-0.5 truncate text-[12px] text-muted">{formatDateTime(item.createdAt) || "Notes"}</p>
-        </button>
+        <li key={item.id} className="list-none">
+          <button type="button" onClick={() => onSelect(item.id)} className="panel-selectable flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left">
+            <span className="inline-flex shrink-0 text-[var(--file-notes)]"><UiIcon name="notes" size={18} /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[14px] text-foreground">{item.title}</span>
+              <span className="block truncate text-[12px] text-muted">{formatDateTime(item.createdAt) || "Notes"}</span>
+            </span>
+          </button>
+        </li>
       ))}
-      </div>
-    </div>
+    </ul>
   );
 }
 
