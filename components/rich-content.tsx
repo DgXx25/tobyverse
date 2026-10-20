@@ -314,7 +314,7 @@ export const RichContent = memo(function RichContent({
         }
         if (segment.kind === "toby") {
           if (!allowNativeBlocks) return <ChatBlock key={key} copyText={JSON.stringify(segment.block.data, null, 2)} label={`toby ${segment.block.type}`} kind="code"><code>{JSON.stringify(segment.block.data, null, 2)}</code></ChatBlock>;
-          const node = <ChatBlockStateScope scope={key}><TobyBlockView block={segment.block} streaming={live && streaming} /></ChatBlockStateScope>;
+          const node = <ChatBlockStateScope scope={key}><TobyBlockView block={segment.block} streaming={live && streaming} images={images} /></ChatBlockStateScope>;
           return (
             <div key={key} className={wrap}>
               {live && streaming ? (

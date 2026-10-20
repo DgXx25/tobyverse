@@ -1,4 +1,5 @@
 import type { ChatImageHit } from "@/types/chat";
+import { imageListFromFence, resolveImageListItems } from "./image-list";
 
 type ContentPart = { kind: "md"; text: string } | { kind: "fence"; lang: string; text: string };
 export type ImageGalleryPart = { kind: "gallery"; galleryId: string; images: ChatImageHit[] };
@@ -41,8 +42,15 @@ export function layoutImageGalleries(text: string, images: ChatImageHit[] = []):
   segments: Array<ContentPart | ImageGalleryPart>;
   remaining: ChatImageHit[];
 } {
-  const used = new Set<string>();
+  const used = new Set<ChatImageHit>();
   const segments = contentFences(text).flatMap((part): Array<ContentPart | ImageGalleryPart> => {
+    if (part.kind === "fence") {
+      const list = imageListFromFence(part.lang, part.text);
+      if (list) {
+        for (const item of resolveImageListItems(list, images)) if (item.image) used.add(item.image);
+        return [part];
+      }
+    }
     if (part.kind !== "fence" || part.lang !== "image-gallery") return [part];
     let galleryId: string | undefined;
     try {
@@ -50,11 +58,11 @@ export function layoutImageGalleries(text: string, images: ChatImageHit[] = []):
     } catch {
       // A partial streaming fence becomes visible once its reference is complete.
     }
-    if (!galleryId || used.has(galleryId)) return [];
-    const matches = images.filter((image) => image.galleryId === galleryId);
+    if (!galleryId) return [];
+    const matches = images.filter((image) => image.galleryId === galleryId && !used.has(image));
     if (!matches.length) return [];
-    used.add(galleryId);
+    matches.forEach((image) => used.add(image));
     return [{ kind: "gallery", galleryId, images: matches }];
   });
-  return { segments, remaining: images.filter((image) => !image.galleryId || !used.has(image.galleryId)) };
+  return { segments, remaining: images.filter((image) => !used.has(image)) };
 }

@@ -70,7 +70,7 @@ function partSignature(part: object): string | undefined {
 /**
  * Gemini 3 requires the original thoughtSignature on the first functionCall of
  * each tool step. The installed SDK drops that field while merging a stream,
- * so tool turns use the raw response and this replay keeps the signature.
+ * so tool turns retain the raw streamed parts and this replay keeps the signature.
  */
 export function partsForReplay(parts: readonly object[]): SignedPart[] {
   const copied: SignedPart[] = parts.map((part) => {
@@ -208,7 +208,7 @@ export class GeminiProvider implements AIProvider {
     const model = options.model ?? DEFAULT_GEMINI_MODEL;
     const result = await this.getModel(options).generateContent({
       contents: [...toHistory(prompt, options.history), { role: "user", parts: toPromptParts(prompt, options.images) }],
-    });
+    }, { signal: options.signal });
     reportGeminiResponse(options, model, result.response);
     const text = result.response.text();
 
@@ -223,7 +223,7 @@ export class GeminiProvider implements AIProvider {
     const model = options.model ?? DEFAULT_GEMINI_MODEL;
     const result = await this.getModel(options).generateContentStream({
       contents: [...toHistory(prompt, options.history), { role: "user", parts: toPromptParts(prompt, options.images) }],
-    });
+    }, { signal: options.signal });
 
     for await (const chunk of result.stream) {
       const text = chunk.text();
@@ -239,7 +239,12 @@ export class GeminiProvider implements AIProvider {
     const generative = this.getModel(options);
     const contents: Content[] = [...toHistory(prompt, options.history)];
     const firstParts = toPromptParts(prompt, options.images);
-    const result = await runToolLoop({
+    // The loop needs a completed signed turn to execute tools. Relay visible chunks
+    // separately so that waiting for that turn never buffers an ordinary answer.
+    const live: ChatStreamPart[] = [];
+    let wake: (() => void) | undefined;
+    let complete = false;
+    const pending = runToolLoop({
       maxRounds: options.toolChoice ? 1 : 4,
       stopAfterTool: (call) => isArtifactTool(call.name),
       signal: options.signal,
@@ -259,11 +264,30 @@ export class GeminiProvider implements AIProvider {
                   },
                 })),
               };
-        const turn = await generative.generateContent({ contents: [...contents, message] });
-        const replay = partsForReplay(turn.response.candidates?.[0]?.content?.parts ?? []);
+        let rawParts: SignedPart[];
+        if (options.toolChoice) {
+          // A forced structured selection has no visible answer to stream.
+          const turn = await generative.generateContent({ contents: [...contents, message] }, { signal: options.signal });
+          rawParts = turn.response.candidates?.[0]?.content?.parts ?? [];
+          reportGeminiResponse(options, model, turn.response);
+        } else {
+          const turn = await generative.generateContentStream({ contents: [...contents, message] }, { signal: options.signal });
+          rawParts = [];
+          for await (const chunk of turn.stream) {
+            options.signal?.throwIfAborted();
+            const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+            rawParts.push(...parts);
+            const text = loopParts(parts).map((part) => part.text ?? "").join("");
+            if (text) {
+              live.push({ text });
+              wake?.();
+            }
+          }
+          reportGeminiResponse(options, model, await turn.response);
+        }
+        const replay = partsForReplay(rawParts);
         contents.push(message);
         if (replay.length) contents.push({ role: "model", parts: replay });
-        reportGeminiResponse(options, model, turn.response);
         return { parts: loopParts(replay) };
       },
       execute: async (call, { signal }) =>
@@ -274,6 +298,13 @@ export class GeminiProvider implements AIProvider {
             : { ok: true, tool: current.name },
         }),
     });
+    // Both outcomes wake the consumer; await pending below rethrows failures.
+    void pending.then(() => { complete = true; wake?.(); }, () => { complete = true; wake?.(); });
+    while (!complete || live.length) {
+      if (live.length) yield live.shift()!;
+      else await new Promise<void>((resolve) => { wake = resolve; });
+    }
+    const result = await pending;
     if (result.failed) yield { tool: { name: "answer", args: {} } };
     else if (result.tool) yield { tool: result.tool };
     if (!result.text && result.functionResponses.length && (!result.tool || !isArtifactTool(result.tool.name))) {
@@ -295,7 +326,7 @@ export class GeminiProvider implements AIProvider {
             },
           ],
           toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.NONE } },
-        });
+        }, { signal: options.signal });
         for await (const chunk of answer.stream) {
           const text = loopParts(chunk.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("");
           if (text) {
@@ -311,7 +342,7 @@ export class GeminiProvider implements AIProvider {
       if (!wrote) yield { text: toolFallbackText(/[\u10A0-\u10FF]/.test(prompt)) };
       return;
     }
-    if (result.text) yield { text: result.text };
+    if (result.text && options.toolChoice) yield { text: result.text };
   }
 }
 

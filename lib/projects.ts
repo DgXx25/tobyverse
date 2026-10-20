@@ -83,6 +83,7 @@ export function mapProject(id: string, data: Record<string, unknown>): Project {
   return {
     id,
     title: asString(data.title) || asString(data.name, "Untitled"),
+    manualTitle: data.manualTitle === true,
     description: asString(data.description),
     userId: asString(data.userId) || asString(data.ownerId),
     goal,
@@ -206,6 +207,7 @@ export async function updateProjectTitle(
   if (!next) return;
   await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), {
     title: next,
+    manualTitle: true,
     updatedAt: serverTimestamp(),
   });
   clearUntouchedNotebook(projectId);

@@ -1,0 +1,13 @@
+.toby-image-list { margin: 1.25rem 0; }
+.toby-image-list-title { margin: 0 0 1rem; font-size: inherit; font-weight: 600; }
+.toby-image-list-row { display: grid; grid-template-columns: clamp(76px, 14vw, 116px) minmax(0, 1fr); gap: 1.1rem; padding: 1.2rem 0; border-bottom: 1px solid var(--panel-border); align-items: start; }
+.toby-image-list-row:first-child { padding-top: 0; }
+.toby-image-list-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.toby-image-list-media { display: block; overflow: hidden; border-radius: 14px; width: 100%; aspect-ratio: 3 / 4; background: var(--surface-2); }
+.toby-image-list[data-shape="square"] .toby-image-list-media { aspect-ratio: 1; }
+.toby-image-list-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.toby-image-list-copy { min-width: 0; }
+.toby-image-list-copy h4 { margin: 0 0 .4rem; font: inherit; font-weight: 600; line-height: 1.5; }
+.toby-image-list-copy .rich-content { margin: 0; }
+.toby-image-list-no-image { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 480px) { .toby-image-list-row { grid-template-columns: 72px minmax(0, 1fr); gap: .8rem; } .toby-image-list-no-image { grid-template-columns: minmax(0, 1fr); } }

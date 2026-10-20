@@ -12,15 +12,24 @@ import type { SceneBlock } from "@/lib/blocks/kinds/scene";
 import { SceneView } from "@/components/blocks/scenes/scene-view";
 import { SectionsView } from "@/components/blocks/sections";
 import type { SectionsBlock } from "@/lib/blocks/kinds/sections";
+import { ImageListView } from "@/components/blocks/image-list";
+import type { ImageListBlock } from "@/lib/blocks/kinds/image-list";
+import { FormView } from "@/components/blocks/form";
+import type { FormBlock } from "@/lib/blocks/kinds/form";
+import type { ChatImageHit } from "@/types/chat";
 
 export function TobyBlockView({
   block,
   streaming = false,
+  images,
 }: {
   block: ParsedChatBlock;
   streaming?: boolean;
+  images?: ChatImageHit[];
 }) {
-  const { priorPapers, interactive } = useChatExercise();
+  const { priorPapers, interactive, onReply, images: messageImages } = useChatExercise();
+  if (block.type === "image-list") return <ImageListView block={block.data as ImageListBlock} images={images ?? messageImages ?? []} />;
+  if (block.type === "form") return <FormView block={block.data as FormBlock} streaming={streaming} skipped={!interactive} onReply={onReply} />;
   if (block.type === "scene") return <SceneView block={block.data as SceneBlock} />;
   if (block.type === "sections") return <SectionsView block={block.data as SectionsBlock} />;
   if (block.type === "dialogue") {

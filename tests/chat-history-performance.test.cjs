@@ -92,3 +92,27 @@ test('offscreen block values survive unmounts, scopes stay isolated, and subscri
   store.write('message-a/scene/cutoff', 0);
   assert.equal(remounted, 1);
 });
+
+test('assistant growth and appended turns never follow the bottom, while prepended history retains its keyed anchor', () => {
+  const rows = Array.from({ length: 30 }, (_, index) => message(index));
+  const base = { getScrollElement: () => null, initialRect: { width: 700, height: 400 },
+    observeElementRect: () => () => {}, observeElementOffset: () => () => {}, scrollToFn: () => {} };
+  const instance = new Virtualizer({ ...base, ...chatVirtualizerOptions(rows, 140) });
+  const total = instance.getTotalSize();
+  instance.scrollElement = { scrollHeight: total, clientHeight: 400 };
+  instance.scrollOffset = total - 400;
+  const bottomOffset = instance.scrollOffset;
+  const last = instance.getMeasurements().at(-1);
+  instance.resizeItem(rows.length - 1, last.size + 700);
+  assert.equal(instance.scrollOffset, bottomOffset, 'a growing answer must not move an exact-bottom viewport');
+  instance.setOptions({ ...base, ...chatVirtualizerOptions([...rows, message(30)], 140) });
+  assert.equal(instance.scrollOffset, bottomOffset, 'appending a message must not follow the bottom');
+
+  instance.scrollOffset = 900;
+  const anchor = instance.getVirtualItemForOffset(900);
+  const distance = 900 - anchor.start;
+  const older = message(-1);
+  instance.setOptions({ ...base, ...chatVirtualizerOptions([older, ...rows, message(30)], 140) });
+  const movedAnchor = instance.getMeasurements().find((row) => row.key === anchor.key);
+  assert.equal(instance.scrollOffset, movedAnchor.start + distance, 'older history must preserve the currently visible content');
+});

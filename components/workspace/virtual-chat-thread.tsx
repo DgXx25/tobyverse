@@ -1,16 +1,16 @@
 "use client";
 
 import { elementScroll, measureElement, useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
+import { memo, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useState, type ReactNode, type Ref, type RefObject } from "react";
 import { chatMessageGap, chatVirtualizerOptions } from "@/lib/workspace/chat-history";
 import type { ChatMessage } from "@/types/chat";
 import { ChatBlockStateProvider, ChatBlockStateScope } from "./chat-block-state";
 
-export type VirtualChatThreadHandle = { scrollToEnd: () => void };
+export type VirtualChatThreadHandle = { scrollToEnd: () => void; scrollToMessage: (id: string) => void };
 
 /** Scroll updates stay here, rather than reconciling the composer and chat controller. */
 export const VirtualChatThread = memo(function VirtualChatThread({
-  messages, scrollRef, handleRef, bottomInset, renderMessage, active = true,
+  messages, scrollRef, handleRef, bottomInset, renderMessage, onReady, active = true,
 }: {
   messages: ChatMessage[];
   scrollRef: RefObject<HTMLDivElement | null>;
@@ -18,6 +18,7 @@ export const VirtualChatThread = memo(function VirtualChatThread({
   bottomInset: number;
   active?: boolean;
   renderMessage: (message: ChatMessage, index: number) => ReactNode;
+  onReady?: () => void;
 }) {
   // An ancestor's scroll ref attaches after this child's layout effects.
   const [mounted, setMounted] = useState(false);
@@ -25,7 +26,7 @@ export const VirtualChatThread = memo(function VirtualChatThread({
   const options = useMemo(() => chatVirtualizerOptions(messages, bottomInset), [messages, bottomInset]);
   const virtualizer = useVirtualizer({
     ...options,
-    followOnAppend: active,
+    followOnAppend: false,
     useCachedMeasurements: !active,
     enabled: mounted,
     getScrollElement: () => scrollRef.current,
@@ -44,13 +45,16 @@ export const VirtualChatThread = memo(function VirtualChatThread({
     directDomUpdates: true,
     directDomUpdatesMode: "position",
   });
-  useImperativeHandle(handleRef, () => ({ scrollToEnd: () => virtualizer.scrollToEnd() }), [virtualizer]);
-  const positioned = useRef(false);
+  useImperativeHandle(handleRef, () => ({
+    scrollToEnd: () => virtualizer.scrollToEnd(),
+    scrollToMessage: (id) => {
+      const index = messages.findIndex((message) => message.id === id);
+      if (index >= 0) virtualizer.scrollToIndex(index, { align: "end" });
+    },
+  }), [virtualizer, messages]);
   useLayoutEffect(() => {
-    if (!mounted || !messages.length || positioned.current) return;
-    positioned.current = true;
-    virtualizer.scrollToEnd();
-  }, [mounted, messages.length, virtualizer]);
+    if (mounted) onReady?.();
+  }, [mounted, onReady]);
 
   return (
     <ChatBlockStateProvider>

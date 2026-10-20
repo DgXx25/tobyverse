@@ -1,0 +1,47 @@
+.toby-form {
+  margin: 24px 0;
+  padding: 18px;
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  background: var(--panel-bg);
+  color: var(--text);
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.toby-form .toby-form-header h4 { margin: 0; font-size: 1em; font-weight: 600; line-height: 1.55; }
+.toby-form .toby-form-help { margin: 5px 0 0; color: var(--text-muted); font-size: .875em; line-height: 1.55; }
+.toby-form-fields, .toby-form-choices { min-width: 0; margin: 0; padding: 0; border: 0; }
+.toby-form-fields { display: grid; gap: 19px; margin-top: 20px; }
+.toby-form-label, .toby-form-choices legend { display: block; padding: 0; font-size: .925em; font-weight: 500; line-height: 1.55; }
+.toby-form-required { color: var(--text-muted); }
+.toby-form-options { display: grid; gap: 9px; margin-top: 10px; }
+.toby-form-option { display: flex; align-items: flex-start; gap: 9px; width: fit-content; max-width: 100%; font-size: .925em; line-height: 1.55; cursor: pointer; }
+.toby-form-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); cursor: inherit; }
+.toby-form input[type="text"], .toby-form textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin-top: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: .925em;
+  line-height: 1.55;
+}
+.toby-form textarea { min-height: 88px; resize: vertical; }
+.toby-form input::placeholder, .toby-form textarea::placeholder { color: var(--text-muted); opacity: .8; }
+.toby-form input:focus-visible, .toby-form textarea:focus-visible, .toby-form button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.toby-form-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
+.toby-form button { min-height: 36px; padding: 7px 13px; border: 1px solid var(--panel-border); border-radius: 6px; background: var(--surface-2); color: var(--text); font: inherit; font-size: .875em; font-weight: 500; cursor: pointer; }
+.toby-form button:hover:not(:disabled) { background: var(--item-active-bg); }
+.toby-form button:disabled { opacity: .55; cursor: default; }
+.toby-form-fields:disabled .toby-form-option { cursor: default; }
+.toby-form-fields:disabled input, .toby-form-fields:disabled textarea { opacity: .75; }
+.toby-form-status { color: var(--text-muted); font-size: .8em; }
+.toby-form .toby-form-error { margin: 7px 0 0; color: var(--palette-red, var(--text)); font-size: .8em; line-height: 1.5; }
+.toby-form-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (max-width: 480px) { .toby-form { padding: 14px; } }

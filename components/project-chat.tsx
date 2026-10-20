@@ -343,7 +343,6 @@ export function ProjectChat({
   chatMode = "auto",
   onChatMode,
   onComposerHeightChange,
-  chatLayoutWidth,
   initialMessages = [],
   onLoadOlder,
   studioRequest = null,
@@ -435,7 +434,10 @@ export function ProjectChat({
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [expandedUserMessages, setExpandedUserMessages] = useState<Record<string, boolean>>({});
-  const pinBottomRef = useRef(true);
+  const pendingPromptScrollRef = useRef<string | null>(openingUi.messages.find((message) => message.role === "user")?.id ?? null);
+  const enteringPromptsRef = useRef(new Set(openingUi.messages.filter((message) => message.role === "user").map((message) => message.id)));
+  const [historyReady, setHistoryReady] = useState(false);
+  const onHistoryReady = useCallback(() => setHistoryReady(true), []);
   const pathRef = useRef<StudyPath | null>(null);
   const artifactStepsRef = useRef<Map<string, NonNullable<ChatArtifact["step"]>>>(new Map());
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -443,7 +445,6 @@ export function ProjectChat({
   const composerBoxRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<ChatComposerHandle>(null);
   const initialScrollRef = useRef(false);
-  const examStickRef = useRef<string | null>(null);
   const sendingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<StreamState | null>(null);
@@ -568,7 +569,6 @@ export function ProjectChat({
   useEffect(() => {
     namedRef.current = false;
     initialScrollRef.current = false;
-    pinBottomRef.current = true;
     memorizedRef.current = new Set();
     setMemorizedIds(new Set());
   }, [project.id, chatThreadId]);
@@ -625,7 +625,6 @@ export function ProjectChat({
     if (!scroller) return;
     const onScroll = () => {
       if (!scroller.clientHeight) return;
-      pinBottomRef.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 72;
       if (scroller.scrollTop < 160 && initialScrollRef.current && onLoadOlder && !loadingOlderRef.current && !olderExhaustedRef.current && messages[0]?.id) {
         loadingOlderRef.current = true;
         setLoadingOlder(true);
@@ -645,26 +644,25 @@ export function ProjectChat({
   }, [onLoadOlder, messages]);
 
   useLayoutEffect(() => {
-    if (loading) return;
+    if (loading || !historyReady) return;
     if (!initialScrollRef.current && messages.length > 0 && !sending && !stream) {
       initialScrollRef.current = true;
-      pinBottomRef.current = true;
       stickToBottom();
       return;
     }
-    if ((sending || stream) && pinBottomRef.current) stickToBottom();
-  }, [loading, messages, stream, sending, composerH, stickToBottom]);
-
-  useLayoutEffect(() => {
-    if (!isActive || !pinBottomRef.current) return;
-    stickToBottom();
-  }, [chatLayoutWidth, isActive, stickToBottom]);
+    const promptId = pendingPromptScrollRef.current;
+    if (promptId && messages.some((message) => message.id === promptId)) {
+      pendingPromptScrollRef.current = null;
+      historyViewRef.current?.scrollToMessage(promptId);
+    }
+  }, [loading, historyReady, messages, stream, sending, stickToBottom]);
 
   useEffect(() => {
     if (loading || namedRef.current) return;
     const listed = project.listed === true;
-    const currentTitle = listed ? (threadTitle || PLACEHOLDER_CHAT_TITLE) : project.title;
-    if (!needsAutoTitle(currentTitle)) {
+    const namesProject = isMainThread && !listed;
+    const currentTitle = namesProject ? project.title : (threadTitle || PLACEHOLDER_CHAT_TITLE);
+    if ((namesProject && project.manualTitle) || !needsAutoTitle(currentTitle)) {
       namedRef.current = true;
       return;
     }
@@ -680,12 +678,12 @@ export function ProjectChat({
       listedProject: listed,
     })
       .then((title) => {
-        if (title && !listed) onProjectPatch?.({ title });
+        if (title && namesProject) onProjectPatch?.({ title });
       })
       .catch(() => {
         namedRef.current = false;
       });
-  }, [loading, messages, project.id, project.title, project.listed, userId, onProjectPatch, chatThreadId, threadTitle]);
+  }, [loading, messages, project.id, project.title, project.manualTitle, project.listed, userId, onProjectPatch, chatThreadId, threadTitle, isMainThread]);
 
   useEffect(() => {
     const startKey = publicChatId(project.id, chatThreadId);
@@ -1104,6 +1102,7 @@ export function ProjectChat({
       resumeAssistantId?: string;
       resumePrefix?: string;
       resumeHistory?: ChatTurn[];
+      onUserMessageSaved?: () => void;
     },
   ) {
     let attachments = guest ? [] : (options?.attachments ?? []);
@@ -1152,6 +1151,10 @@ export function ProjectChat({
     sendingRef.current = true;
     const controller = new AbortController();
     const savedUserMessageId = options?.userMessageId ?? allocateChatMessageId(project.id, chatThreadId);
+    if (!options?.skipUser && !options?.studio) {
+      pendingPromptScrollRef.current = savedUserMessageId;
+      enteringPromptsRef.current.add(savedUserMessageId);
+    }
     abortRef.current = controller;
     setSending(true);
     setStoppable(true);
@@ -1192,7 +1195,6 @@ export function ProjectChat({
       startedAt: Date.now(),
       quiet: Boolean(options?.studio),
     });
-    pinBottomRef.current = !options?.studio;
     initialScrollRef.current = !options?.studio;
 
     const history = options?.resumeHistory ?? historyWithoutCurrentPrompt(historyTurnsFromMessages(messages), modelPrompt);
@@ -1280,6 +1282,7 @@ export function ProjectChat({
             void pending.catch(() => restoreClaimed());
             return pending;
           }, { signal: controller.signal });
+          options?.onUserMessageSaved?.();
         } catch (error) {
           if (!userWriteStarted) restoreClaimed();
           throw error;
@@ -1611,6 +1614,15 @@ export function ProjectChat({
     }
   }
 
+  async function sendFormReply(text: string) {
+    keepComposerFocus();
+    await new Promise<void>((resolve, reject) => {
+      let saved = false;
+      void sendPrompt(text, { onUserMessageSaved: () => { saved = true; resolve(); } })
+        .then(() => { if (!saved) reject(new Error("Answers were not sent.")); }, reject);
+    });
+  }
+
   async function retryImageSearch(messageId: string, userPrompt: string) {
     const prompt = userPrompt.trim();
     if (!prompt || sendingRef.current) return;
@@ -1847,14 +1859,6 @@ export function ProjectChat({
     if (image.materialId) onOpenMaterial?.(image.materialId);
   }, [onOpenMaterial]);
 
-  useLayoutEffect(() => {
-    if (loading || sending || stream) return;
-    const examId = latestAsk?.messageId;
-    if (!examId || examStickRef.current === examId) return;
-    examStickRef.current = examId;
-    stickToBottom();
-  }, [loading, sending, stream, latestAsk?.messageId, stickToBottom]);
-
   async function sendDislike(message: ChatMessage, reason: string, note: string) {
     if (feedbackBusy) return;
     setFeedbackBusy(true);
@@ -1926,7 +1930,8 @@ export function ProjectChat({
         : "Looking this over…";
 
     return (
-      <ChatExerciseProvider priorPapers={priorPapers} interactive={exerciseOpen}>
+      <ChatExerciseProvider priorPapers={priorPapers} interactive={exerciseOpen} images={images ?? []}
+        onReply={!sending ? sendFormReply : undefined}>
       <div className="flex w-full flex-col">
         <div className="flex flex-col gap-4">
           {showToolActivity ? <ToolActivity rows={live?.toolActivity ?? []} status={live?.status} startedAt={live?.startedAt} /> : null}
@@ -2224,6 +2229,10 @@ export function ProjectChat({
       <div
         ref={scrollerRef}
         className="chat-thread-viewport min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+        onWheel={() => { pendingPromptScrollRef.current = null; }}
+        onTouchStart={() => { pendingPromptScrollRef.current = null; }}
+        onPointerDown={() => { pendingPromptScrollRef.current = null; }}
+        onKeyDown={() => { pendingPromptScrollRef.current = null; }}
       >
         <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
             {loadingOlder ? <span role="status" className="pointer-events-none absolute top-2 z-10 rounded-full bg-background px-3 py-1 text-xs text-muted">Loading older messages…</span> : null}
@@ -2234,6 +2243,7 @@ export function ProjectChat({
               messages={visibleMessages}
               scrollRef={scrollerRef}
               handleRef={historyViewRef}
+              onReady={onHistoryReady}
               bottomInset={composerH}
               active={isActive}
               renderMessage={(message) => {
@@ -2243,7 +2253,8 @@ export function ProjectChat({
               return (
               <article
                 data-turn={message.id}
-                className={`chat-msg ${message.role === "user" ? "chat-msg-user flex justify-end" : "chat-msg-assistant"}`}
+                className={`chat-msg ${message.role === "user" ? `chat-msg-user flex justify-end${enteringPromptsRef.current.has(message.id) ? " chat-prompt-enter" : ""}` : "chat-msg-assistant"}`}
+                onAnimationEnd={() => { enteringPromptsRef.current.delete(message.id); }}
               >
                 {message.role === "user" ? (
                   <div className="flex w-fit max-w-[min(100%,36rem)] flex-col items-end gap-2">

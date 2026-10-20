@@ -3,6 +3,7 @@ import { CHAT_BLOCK_KINDS } from "@/lib/blocks/kinds";
 import type { ChatBlockDef, ParsedChatBlock } from "@/lib/blocks/types";
 import { SCENE_IDS } from "@/lib/blocks/kinds/scene";
 import { sectionItemSchema, sectionsSchema } from "@/lib/blocks/kinds/sections";
+import { imageListItemSchema, imageListSchema } from "@/lib/blocks/kinds/image-list";
 
 const BY_ID = new Map(CHAT_BLOCK_KINDS.map((item) => [item.id, item]));
 
@@ -74,6 +75,14 @@ function asText(value: unknown): string | undefined {
 }
 
 function previewBlock(type: string, raw: Record<string, unknown>): ParsedChatBlock | null {
+  if (type === "image-list") {
+    const items = Array.isArray(raw.items) ? raw.items.flatMap((item) => {
+      const parsed = imageListItemSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }) : [];
+    const parsed = imageListSchema.safeParse({ ...raw, items });
+    return parsed.success ? { type, data: parsed.data } : null;
+  }
   if (type === "sections") {
     const items = Array.isArray(raw.items) ? raw.items.flatMap((item) => {
       const parsed = sectionItemSchema.safeParse(item);

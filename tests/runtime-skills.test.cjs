@@ -129,21 +129,22 @@ test('Gemini receives the selected full guide after activation and preserves sig
   const provider = new GeminiProvider();
   let rounds = 0;
   provider.getModel = () => ({
-    generateContent: async (request) => {
+    generateContentStream: async (request) => {
       rounds++;
       if (rounds === 1) {
         assert.doesNotMatch(JSON.stringify(request), /# Algebra and equations/);
-        return { response: { candidates: [{ content: { parts: [{
+        const response = { candidates: [{ content: { parts: [{
           functionCall: { name: 'load_skill', args: { id: 'algebra-equations' } }, thoughtSignature: 'sig-guide',
-        }] } }] } };
+        }] } }] };
+        return { stream: (async function* () { yield response; })(), response: Promise.resolve(response) };
       }
       assert.equal(request.contents[1].parts[0].thoughtSignature, 'sig-guide');
       const skill = request.contents[2].parts[0].functionResponse.response.skill;
       assert.equal(skill.name, 'algebra-equations');
       assert.match(skill.content, /# Algebra and equations/);
-      return { response: { candidates: [{ content: { parts: [{ text: 'x = 8.' }] } }] } };
+      const response = { candidates: [{ content: { parts: [{ text: 'x = 8.' }] } }] };
+      return { stream: (async function* () { yield response; })(), response: Promise.resolve(response) };
     },
-    generateContentStream: async () => { throw new Error('Reuse the final answer'); },
   });
   const load = createSkillLoader();
   const parts = [];

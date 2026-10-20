@@ -330,7 +330,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "search_images",
     description:
-      'Find external photos, maps, charts, or diagrams only when the user explicitly asks for them or refers to an attached figure. Pass the full topic in the user\'s language and optionally cap the result count. Each completed search returns a galleryId with image titles and sources. You may place that gallery anywhere in your answer with an image-gallery code fence containing {"galleryId":"the returned ID"}. Mix prose, galleries, and available native or visual blocks in whatever order serves the request. Omit the placement fence to show results after the answer. Use only returned gallery IDs; do not print raw results or image URLs. Use illustrate when catalog blocks are a better fit.',
+      'Find external photos, maps, charts, or diagrams when requested or when pictures materially help identify, explain or compare the requested things. Optional, never required for an ordinary answer. Pass the full topic in the user\'s language and optionally cap the result count. Each completed search returns a galleryId with image titles, sources and zero-based imageIndex values. Place a gallery anywhere with an image-gallery code fence containing {"galleryId":"the returned ID"}, or use an available image-list block for individual illustrated entries. Mix prose, galleries, and available blocks in the order that serves the request. Omit placement to show results after the answer. Use only returned references; do not print raw results or image URLs. Use illustrate when catalog blocks fit better.',
     parameters: {
       type: "object",
       properties: {

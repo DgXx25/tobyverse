@@ -2,10 +2,13 @@
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { PaperPayload } from "@/types/exercise";
+import type { ChatImageHit } from "@/types/chat";
 
 type ChatExerciseValue = {
   priorPapers: PaperPayload[];
   interactive: boolean;
+  onReply?: (text: string) => void | Promise<void>;
+  images?: ChatImageHit[];
 };
 
 const ChatExerciseContext = createContext<ChatExerciseValue>({
@@ -16,9 +19,11 @@ const ChatExerciseContext = createContext<ChatExerciseValue>({
 export function ChatExerciseProvider({
   priorPapers,
   interactive,
+  onReply,
+  images,
   children,
 }: ChatExerciseValue & { children: ReactNode }) {
-  const value = useMemo(() => ({ priorPapers, interactive }), [priorPapers, interactive]);
+  const value = useMemo(() => ({ priorPapers, interactive, onReply, images }), [priorPapers, interactive, onReply, images]);
   return <ChatExerciseContext.Provider value={value}>{children}</ChatExerciseContext.Provider>;
 }
 

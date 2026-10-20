@@ -22,6 +22,8 @@ export type Project = {
   id: EntityId;
   title: string;
   description: string;
+  /** A user rename always takes precedence over generated titles. */
+  manualTitle?: boolean;
   userId: EntityId;
   goal: ProjectGoal;
   /** Frozen lesson composition for this project's goal. */

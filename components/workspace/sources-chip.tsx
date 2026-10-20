@@ -106,7 +106,7 @@ function SourceThumb({ item }: { item: SourceItem }) {
   );
 }
 
-export function StorageThumb({ path, className = "h-8 w-8" }: { path: string; className?: string }) {
+export function StorageThumb({ path, className = "h-8 w-8", alt = "" }: { path: string; className?: string; alt?: string }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!path.startsWith("users/") || isMissingMaterialFile(path)) return;
@@ -139,7 +139,7 @@ export function StorageThumb({ path, className = "h-8 w-8" }: { path: string; cl
   }
   return (
     <span className={`block shrink-0 overflow-hidden rounded-md bg-surface-2 ${className}`}>
-      <img src={url} alt="" className="h-full w-full object-cover" />
+      <img src={url} alt={alt} className="h-full w-full object-cover" />
     </span>
   );
 }

@@ -21,6 +21,39 @@ const { readChatSse } = require('../lib/ai/sse.ts');
 const { createChunkBuffer } = require('../lib/ai/chunk-stream.ts');
 const image = { url: 'https://example.com/leaf.jpg', thumbnail: 'https://example.com/leaf.jpg', alt: 'Leaf', source: 'web' };
 
+test('ordinary Gemini answers yield a signed live chunk before the provider finishes', async () => {
+  const provider = new GeminiProvider();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let finished = false;
+  const usage = [];
+  provider.getModel = () => ({
+    generateContent: async () => { throw new Error('Ordinary chat must use the streaming endpoint'); },
+    generateContentStream: async (_request, options) => {
+      assert.equal(options.signal, controller.signal);
+      return {
+        stream: (async function* () {
+          yield { candidates: [{ content: { parts: [{ text: 'First ', thoughtSignature: 'signed-text' }] } }] };
+          await gate;
+          finished = true;
+          yield { candidates: [{ content: { parts: [{ text: 'second.' }] } }] };
+        })(),
+        response: Promise.resolve({ usageMetadata: { totalTokenCount: 9 } }),
+      };
+    },
+  });
+  const controller = new AbortController();
+  const iterator = provider.generateToolStream('Explain', { tools: true, signal: controller.signal, usage: (item) => usage.push(item) });
+  try {
+    assert.deepEqual((await iterator.next()).value, { text: 'First ' });
+    assert.equal(finished, false);
+  } finally { release(); }
+  const rest = [];
+  for await (const part of iterator) rest.push(part);
+  assert.equal(rest.map((part) => part.text ?? '').join(''), 'second.');
+  assert.equal(usage.length, 1);
+});
+
 function isolatedModule(relativePath, mocks) {
   const filename = path.join(root, relativePath);
   const loaded = new Module(filename, module);
@@ -167,15 +200,15 @@ test('Gemini can search twice before answering and replays each completed result
   let rounds = 0;
   const queries = [];
   provider.getModel = () => ({
-    generateContent: async (request) => {
+    generateContentStream: async (request) => {
       rounds++;
       if (rounds > 1) assert.deepEqual(request.contents.at(-1).parts[0].functionResponse.response, { images: [image] });
       const parts = rounds < 3
         ? [{ functionCall: { name: 'search_images', args: { query: rounds === 1 ? 'mitosis' : 'meiosis' } }, thoughtSignature: `sig-${rounds}` }]
         : [{ text: 'Here is the comparison.' }];
-      return { response: { candidates: [{ content: { parts } }] } };
+      const response = { candidates: [{ content: { parts } }] };
+      return { stream: (async function* () { yield response; })(), response: Promise.resolve(response) };
     },
-    generateContentStream: async () => { throw new Error('An existing final answer must be reused'); },
   });
   const parts = [];
   for await (const part of provider.generateToolStream('Compare these cells', {
@@ -184,7 +217,7 @@ test('Gemini can search twice before answering and replays each completed result
   })) parts.push(part);
   assert.deepEqual(queries, ['mitosis', 'meiosis']);
   assert.equal(rounds, 3);
-  assert.equal(parts.at(-1).text, 'Here is the comparison.');
+  assert.equal(parts.map((part) => part.text ?? '').join(''), 'Here is the comparison.');
 });
 
 test('Gemini switches to a text-only continuation on tool failure without dispatching it again', async () => {
@@ -192,6 +225,10 @@ test('Gemini switches to a text-only continuation on tool failure without dispat
   provider.getModel = () => ({
     generateContent: async () => ({ response: { candidates: [{ content: { parts: [{ functionCall: { name: 'search_images', args: { query: 'leaf' } }, thoughtSignature: 'sig-fail' }] } }] } }),
     generateContentStream: async (request) => {
+      if (!request.toolConfig) {
+        const response = { candidates: [{ content: { parts: [{ functionCall: { name: 'search_images', args: { query: 'leaf' } }, thoughtSignature: 'sig-fail' }] } }] };
+        return { stream: (async function* () { yield response; })(), response: Promise.resolve(response) };
+      }
       assert.equal(request.toolConfig.functionCallingConfig.mode, 'NONE');
       assert.equal(request.contents.at(-1).parts[0].functionResponse.response.ok, false);
       return { stream: (async function* () { yield { candidates: [{ content: { parts: [{ text: 'I can describe the leaf.' }] } }] }; })(), response: Promise.resolve({}) };
@@ -304,7 +341,7 @@ test('chat route executes image search once, publishes gallery, and streams the 
       generateToolStream: async function* (_prompt, options) {
         const result = await options.executeTool(call);
         assert.equal(result.images.length, failSearch ? 0 : 1);
-        if (!failSearch) assert.deepEqual(result.images, [{ title: 'Leaf', source: 'web' }]);
+        if (!failSearch) assert.deepEqual(result.images, [{ title: 'Leaf', source: 'web', imageIndex: 0 }]);
         yield { tool: call };
         yield { text: 'ფოტოსინთეზი\n\n' };
         yield { text: '| ნაწილი | როლი |\n| --- | --- |\n| ქლოროფილი | სინათლე |' };
@@ -336,6 +373,41 @@ test('chat route executes image search once, publishes gallery, and streams the 
     assert.deepEqual(events, ['tool', 'images', 'text', 'text']);
     assert.match(result.text, /\n\n\| ნაწილი \| როლი \|\n/);
   }
+});
+
+test('chat route establishes SSE before retrieval and forwards ordinary text before generation completes', async () => {
+  let finishRetrieval;
+  const retrieval = new Promise((resolve) => { finishRetrieval = resolve; });
+  let finishAnswer;
+  const answerGate = new Promise((resolve) => { finishAnswer = resolve; });
+  let firstDelta;
+  const gotDelta = new Promise((resolve) => { firstDelta = resolve; });
+  let committed = 0;
+  const provider = {
+    generateToolStream: async function* () {
+      yield { text: 'First live chunk. ' };
+      await answerGate;
+      yield { text: 'Last chunk.' };
+    },
+  };
+  const { POST } = isolatedModule('app/api/chat/route.ts', {
+    '@/lib/api/assert': { assertSignedInRequest: async () => ({ uid: 'test', anonymous: false }) },
+    '@/lib/billing/server': { startAiUsageSession: async () => ({ report: () => {}, commit: async () => { committed++; } }) },
+    '@/lib/admin/assert': {},
+    '@/lib/rag/server': { retrieveChunks: () => retrieval },
+    '@/lib/adaptation/server': { adaptiveContextForChat: async () => undefined },
+    '@/lib/ai/gemini': { ...provider, getAIProvider: () => provider },
+  });
+  const response = await POST(new Request('https://example.com/api/chat', { method: 'POST', body: JSON.stringify({ prompt: 'Explain gravity', context: { projectId: 'p' } }) }));
+  assert.equal(response.headers.get('Content-Type'), 'text/event-stream; charset=utf-8');
+  const reading = readChatSse(response, { onDelta: () => firstDelta() });
+  try {
+    finishRetrieval([]);
+    await Promise.race([gotDelta, new Promise((_, reject) => setTimeout(() => reject(new Error('Live text was buffered until completion')), 1000))]);
+    assert.equal(committed, 0, 'receiving the first chunk must not require a completed generation');
+  } finally { finishAnswer(); }
+  assert.equal((await reading).text, 'First live chunk. Last chunk.');
+  assert.equal(committed, 1);
 });
 
 test('client artifact dispatch times out, aborts generation, and returns text without late status updates', async (t) => {

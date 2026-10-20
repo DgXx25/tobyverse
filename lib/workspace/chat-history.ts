@@ -71,7 +71,10 @@ export function chatVirtualizerOptions(messages: ChatMessage[], bottomInset: num
     paddingStart: 32,
     paddingEnd: bottomInset,
     anchorTo: "end" as const,
-    followOnAppend: true,
-    scrollEndThreshold: 72,
+    followOnAppend: false,
+    // Preserve keyed anchors when history is prepended, without anchoring a
+    // growing assistant row at the bottom, even at an exact bottom offset.
+    scrollEndThreshold: -1,
+    scrollPaddingEnd: bottomInset,
   };
 }

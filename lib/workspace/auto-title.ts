@@ -1,6 +1,5 @@
 import { authHeaders } from "@/lib/api/client";
-import { updateChatTitle } from "@/lib/chats";
-import { updateProjectTitle } from "@/lib/projects";
+import { updateAutomaticChatTitle } from "@/lib/chats";
 import { fallbackChatTitle, isRealUserPrompt, needsAutoTitle, sanitizeChatTitle } from "@/lib/workspace/title";
 import { DEFAULT_CHAT_THREAD_ID } from "@/lib/core/constants";
 
@@ -31,11 +30,13 @@ export async function autoNameChat(input: {
     // Local truncate+clean is enough if Gemini is unavailable.
   }
 
-  await updateChatTitle(input.projectId, input.threadId, title);
-  if (!input.listedProject) {
-    await updateProjectTitle(input.projectId, input.userId, title);
-  }
-  return title;
+  const updated = await updateAutomaticChatTitle({
+    projectId: input.projectId,
+    threadId: input.threadId,
+    userId: input.userId,
+    title,
+  });
+  return updated ? title : null;
 }
 
 /** @deprecated use autoNameChat — kept for any leftover callers */

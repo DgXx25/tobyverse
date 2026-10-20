@@ -11,6 +11,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   startAfter,
@@ -36,6 +37,7 @@ import type { VisualBlock } from "@/types/visual";
 import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode, ChatRole, ChatSourceRef, ChatThread, ChatThreadKind, PendingKind } from "@/types/chat";
 import type { ExerciseType } from "@/types/exercise";
 import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
+import { needsAutoTitle } from "@/lib/workspace/title";
 
 function isPermissionDenied(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -423,16 +425,46 @@ export async function updateChatTitle(
 ): Promise<void> {
   const next = title.trim();
   if (!next) return;
-  await setDoc(
-    chatRef(projectId, threadId),
-    { title: next, updatedAt: serverTimestamp() },
-    { merge: true },
-  );
-  await setDoc(
-    chatIndexRef(publicChatId(projectId, threadId)),
-    { title: next, updatedAt: serverTimestamp() },
-    { merge: true },
-  ).catch(() => undefined);
+  const thread = chatRef(projectId, threadId);
+  const index = chatIndexRef(publicChatId(projectId, threadId));
+  await runTransaction(getFirebaseDb(), async (transaction) => {
+    const indexSnapshot = await transaction.get(index);
+    const patch = { title: next, manualTitle: true, updatedAt: serverTimestamp() };
+    transaction.set(thread, patch, { merge: true });
+    if (indexSnapshot.exists()) transaction.set(index, patch, { merge: true });
+  });
+}
+
+/** Recheck durable rename intent after generation, atomically with the title writes. */
+export async function updateAutomaticChatTitle(input: {
+  projectId: string;
+  threadId: string;
+  userId: string;
+  title: string;
+}): Promise<boolean> {
+  const project = doc(getFirebaseDb(), COLLECTIONS.projects, input.projectId);
+  const thread = chatRef(input.projectId, input.threadId);
+  const index = chatIndexRef(publicChatId(input.projectId, input.threadId));
+  const updated = await runTransaction(getFirebaseDb(), async (transaction) => {
+    const projectSnapshot = await transaction.get(project);
+    const threadSnapshot = await transaction.get(thread);
+    const indexSnapshot = await transaction.get(index);
+    if (!projectSnapshot.exists()) return false;
+    const projectData = projectSnapshot.data();
+    const owner = asString(projectData.userId) || asString(projectData.ownerId);
+    if (owner !== input.userId) throw new Error("You do not have access to this project.");
+    const threadData = threadSnapshot.data() ?? {};
+    const namesProject = input.threadId === DEFAULT_CHAT_THREAD_ID && projectData.listed !== true;
+    if (threadData.manualTitle === true || !needsAutoTitle(asString(threadData.title))) return false;
+    if (namesProject && (projectData.manualTitle === true || !needsAutoTitle(asString(projectData.title)))) return false;
+    const patch = { title: input.title, updatedAt: serverTimestamp() };
+    transaction.set(thread, patch, { merge: true });
+    if (indexSnapshot.exists()) transaction.set(index, patch, { merge: true });
+    if (namesProject) transaction.update(project, patch);
+    return true;
+  });
+  if (updated) clearUntouchedNotebook(input.projectId);
+  return updated;
 }
 
 export async function resolveChatRoute(

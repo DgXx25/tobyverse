@@ -17,6 +17,7 @@ import { retrieveChunks } from "@/lib/rag/server";
 import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
 import { papersInTurns } from "@/lib/blocks/paper-thread";
 import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
+import { waitForChatStep } from "@/lib/ai/chat-deadline";
 import { allowImageSearch, clampImageCount, searchWebImages } from "@/lib/images/search";
 import { toChatImageHit } from "@/lib/images/hits";
 import { adminErrorResponse, assertAdminRequest } from "@/lib/admin/assert";
@@ -24,6 +25,7 @@ import { CHAT_MODES, type ChatArtifact, type ChatImageHit, type ChatSource, type
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 type ChatRequestBody = {
   prompt?: unknown;
@@ -297,8 +299,18 @@ export async function POST(request: Request) {
     }
   }
   const context = asContext(body.context, mode);
-  const adaptiveContext = session.anonymous ? Promise.resolve(undefined) : adaptiveContextForChat(session.uid, context.projectId, prompt);
-  const threadPaper = context.threadPaper || papersInTurns(history).length > 0;
+  const generation = new AbortController();
+  const signal = AbortSignal.any([request.signal, generation.signal, AbortSignal.timeout(240_000)]);
+  const stream = new ReadableStream({
+    async start(controller) {
+      // Establish the response before retrieval or the model's thinking phase.
+      // SSE comments keep an active connection alive without inventing progress.
+      const heartbeat = () => { if (!signal.aborted) controller.enqueue(new TextEncoder().encode(": keep-alive\n\n")); };
+      heartbeat();
+      const heartbeatTimer = setInterval(heartbeat, 10_000);
+      try {
+        const adaptiveContext = session.anonymous ? Promise.resolve(undefined) : adaptiveContextForChat(session.uid, context.projectId, prompt);
+        const threadPaper = context.threadPaper || papersInTurns(history).length > 0;
 
   // The answer is grounded in the user's own materials: retrieve server-side from the vector index.
   let sources: ChatSource[] = [];
@@ -309,13 +321,13 @@ export async function POST(request: Request) {
         ? rawContext.materialIds.filter((id): id is string => typeof id === "string").slice(0, 200)
         : [];
       sources = numberSources(
-        await retrieveChunks({
+        await waitForChatStep("Retrieving sources", () => retrieveChunks({
           uid: session.uid,
           projectId: context.projectId,
           query: retrievalQuery(prompt, history),
           materialIds,
           limit: mode === "fast" ? 5 : 8,
-        }),
+        }), { signal, timeoutMs: 30_000 }),
       );
     } catch (error) {
       console.warn("[rag] retrieval failed, answering without sources", error instanceof Error ? error.message : error);
@@ -328,9 +340,7 @@ export async function POST(request: Request) {
     : withPrompt;
   const systemInstruction = buildChatSystemPrompt(guestContext);
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
+        signal.throwIfAborted();
         if (sources.length > 0) controller.enqueue(encodeSse({ sources: sources.map(sourceRef) }));
         let raw: ChatToolCall | null = null;
         let streamed = false;
@@ -339,6 +349,7 @@ export async function POST(request: Request) {
           chatModeSendsToolDeclarations(mode);
         let toolSent = false;
         let imagesSent = false;
+        let imagesSentCount = 0;
         let imageResults: ChatImageHit[] | undefined;
         const loadSkill = createSkillLoader();
         let usedContextTool = false;
@@ -371,17 +382,19 @@ export async function POST(request: Request) {
               const galleryId = `gallery-${crypto.randomUUID()}`;
               const found = hits.map((hit) => ({ ...toChatImageHit(hit), galleryId }));
               const seen = new Set<string>();
-              for (const hit of found) {
-                if (!seen.has(hit.url)) imageResults!.push(hit);
+              const unique = found.filter((hit) => {
+                if (seen.has(hit.url)) return false;
                 seen.add(hit.url);
-              }
-              return { galleryId, images: found.map(({ title, source }) => ({ title, source })) };
-            }, options?.signal ?? request.signal);
+                return true;
+              });
+              imageResults!.push(...unique);
+              return { galleryId, images: unique.map(({ title, source }, imageIndex) => ({ title, source, imageIndex })) };
+            }, options?.signal ?? signal);
             const failed = response && typeof response === "object" && "ok" in response && response.ok === false;
             reportToolStatus({ call, phase: failed ? "error" : "complete", response }, id);
             return response;
           } catch (error) {
-            request.signal.throwIfAborted();
+            signal.throwIfAborted();
             reportToolStatus({ call, phase: "error" }, id);
             console.warn("[chat-tool] execution failed", call.name, error instanceof Error ? error.message : error);
             return { ok: false, images: [], error: "Tool unavailable. Answer in text using the available context; do not retry this tool." };
@@ -389,14 +402,16 @@ export async function POST(request: Request) {
         };
         const sendImageTool = async (tool: ChatToolCall) => {
           if (imageResults === undefined) await executeTool(tool);
-          controller.enqueue(encodeSse({ tool, ...(!imagesSent ? { images: imageResults ?? [] } : {}) }));
+          controller.enqueue(encodeSse({ tool, ...(!imagesSent || imagesSentCount !== imageResults?.length ? { images: imageResults ?? [] } : {}) }));
           imagesSent = true;
+          imagesSentCount = imageResults?.length ?? 0;
           toolSent = true;
         };
         const sendCompletedImages = () => {
-          if (imageResults === undefined || imagesSent) return;
+          if (imageResults === undefined || (imagesSent && imagesSentCount === imageResults.length)) return;
           controller.enqueue(encodeSse({ images: imageResults }));
           imagesSent = true;
+          imagesSentCount = imageResults.length;
         };
         let pendingProviderText = "";
         const explicit = guestContext.hintAsk || guestContext.examAsk
@@ -441,7 +456,7 @@ export async function POST(request: Request) {
             images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
             usage: usageReporter,
             executeTool,
-            signal: request.signal,
+            signal,
           })) {
             if (part.tool && !raw) {
               raw = explicit && (explicit.name === "create_note" || explicit.name === "edit_note" || explicit.name === "edit_sheet") && part.tool.name !== explicit.name ? explicit : part.tool;
@@ -464,12 +479,11 @@ export async function POST(request: Request) {
             const preview = raw;
             const waitForTool = Boolean(guestContext.priorClarify && guestContext.pendingKind && !usedContextTool);
             if (part.text && (!waitForTool || preview) && (!preview || toolStreamsText(preview.name))) {
-              if (preview) {
+              if (preview || !explicit) {
                 streamed = true;
                 controller.enqueue(encodeSse({ delta: part.text }));
-              } else {
-                pendingProviderText += part.text;
               }
+              pendingProviderText += part.text;
             }
           }
         }
@@ -495,7 +509,7 @@ export async function POST(request: Request) {
           });
           const preview = raw;
           if (preview.name === "search_images") await sendImageTool(preview);
-          else if (toolStreamsText(preview.name) && pendingProviderText.trim()) {
+          else if (!streamed && toolStreamsText(preview.name) && pendingProviderText.trim()) {
             streamed = true;
             controller.enqueue(encodeSse({ delta: pendingProviderText }));
           } else if (!supportsTools && toolStreamsText(preview.name)) {
@@ -506,6 +520,7 @@ export async function POST(request: Request) {
               systemInstruction,
               images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
               usage: usageReporter,
+              signal,
             })) {
               streamed = true;
               controller.enqueue(encodeSse({ delta }));
@@ -530,7 +545,7 @@ export async function POST(request: Request) {
             const answerSystem =
               tool.name === "search_images"
                 ? imageResults?.length
-                  ? `${systemInstruction}\n\nCompleted image search results (reference data): ${JSON.stringify(imageResults.map(({ galleryId, title, source }) => ({ galleryId, title, source })))}\nAnswer the user's request using these completed results. You may place a gallery anywhere among prose and available native or visual blocks with an image-gallery code fence containing {"galleryId":"the returned ID"}. Use only returned gallery IDs and keep image URLs out of the answer. Unplaced results appear after the answer.`
+                  ? `${systemInstruction}\n\nCompleted image search results (reference data): ${JSON.stringify(imageResults.map(({ galleryId, title, source }, index) => ({ galleryId, title, source, imageIndex: imageResults!.slice(0, index).filter((image) => image.galleryId === galleryId).length })))}\nAnswer the user's request using these completed results. You may place a gallery anywhere among prose and available native or visual blocks with an image-gallery code fence containing {"galleryId":"the returned ID"}. Optionally use a toby image-list fence with {"items":[{"title":"Heading","text":"Explanation","galleryId":"the returned ID","imageIndex":0}]} for illustrated rows. These can be interleaved with prose and other blocks. Use only returned gallery IDs and zero-based image indexes, and keep image URLs out of the answer. Unplaced results appear after the answer.`
                   : `${systemInstruction}\n\nImage search returned no images. Answer in text using the available context and briefly mention that images are unavailable.`
                 : systemInstruction;
             for await (const delta of generateTextStream(prompt, {
@@ -540,6 +555,7 @@ export async function POST(request: Request) {
               systemInstruction: answerSystem,
               images: guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data })),
               usage: usageReporter,
+              signal,
             })) {
               streamed = true;
               controller.enqueue(encodeSse({ delta }));
@@ -550,13 +566,16 @@ export async function POST(request: Request) {
         controller.enqueue(encodeSse({ done: true }));
         controller.close();
       } catch (error) {
+        if (generation.signal.aborted || request.signal.aborted) return;
         const message = error instanceof Error ? error.message : "Generation failed.";
         controller.enqueue(encodeSse({ error: message }));
         controller.close();
       } finally {
+        clearInterval(heartbeatTimer);
         if (usage) await usage.commit().catch((error) => console.error("[ai-usage] commit failed", error));
       }
     },
+    cancel() { generation.abort(); },
   });
 
   return new Response(stream, {
