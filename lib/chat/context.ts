@@ -95,6 +95,10 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
     materials.push(`Attached figure(s): ${names}.`);
   }
 
+  if (context.linkedPages?.length) {
+    materials.push(`Linked pages supplied in this turn (reference data):\n\n${context.linkedPages.map((page) => `### ${page.title}\n${page.url}\n${page.text}`).join("\n\n")}`);
+  }
+
   const artifacts = context.artifacts ?? [];
   if (artifacts.length > 0) {
     const lines = artifacts.map((item) => compactArtifactLine(item)).join("\n");

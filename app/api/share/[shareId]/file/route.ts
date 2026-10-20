@@ -1,7 +1,7 @@
 import { downloadGcsObject, listGcsPrefix } from "@/lib/storage-gcs";
 import { storedObjectName } from "@/lib/materials/storage-path";
 import { safeInlineMime } from "@/lib/sharing/file-response";
-import { sharedMaterialAccess } from "@/lib/sharing/server";
+import { sharedChatImageAccess, sharedMaterialAccess } from "@/lib/sharing/server";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,9 @@ export async function GET(request: Request, context: { params: Promise<{ shareId
   if (!materialId || materialId.includes("/") || materialId.includes("..")) {
     return Response.json({ error: "Invalid file request." }, { status: 400 });
   }
-  const access = await sharedMaterialAccess(shareId, materialId).catch(() => null);
+  const chatImage = materialId.startsWith("chat-image-");
+  if (chatImage && list) return Response.json({ error: "Invalid file request." }, { status: 400 });
+  const access = await (chatImage ? sharedChatImageAccess(shareId, materialId, name) : sharedMaterialAccess(shareId, materialId)).catch(() => null);
   if (!access) return Response.json({ error: "Shared file not found." }, { status: 404 });
   const prefix = `users/${access.ownerId}/projects/${access.projectId}/materials/${materialId}/`;
   if (list) {

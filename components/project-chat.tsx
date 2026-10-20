@@ -18,7 +18,7 @@ import { addChatMessage, allocateChatMessageId, ensureChatThread, patchChatMessa
 import { DEFAULT_CHAT_THREAD_ID, DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { figureAttachmentsForTurn, pickChatFigures, shouldAttachChatFigures } from "@/lib/materials/figures";
 import { listMaterials, removeMaterial, waitForMaterialPreviews } from "@/lib/materials";
-import { ingestMaterialPaste, ingestMaterialUrl, urlsInText } from "@/lib/materials/ingest-client";
+import { ingestMaterialPaste } from "@/lib/materials/ingest-client";
 import { discardChatImage, ingestComposerFile } from "@/lib/composer/attach-client";
 import { newChipId, attachmentsFromMaterials, snapshotChatAttachments } from "@/lib/composer/attach";
 import { patchComposerChip } from "@/lib/composer/chips";
@@ -798,7 +798,7 @@ export function ProjectChat({
     const id = newChipId();
     void addChip(
       { id, title: url, type: "url", status: "uploading" },
-      () => ingestMaterialUrl({ projectId: project.id, userId, url }),
+      () => Promise.resolve({ title: url, type: "url" }),
     );
   }
 
@@ -839,6 +839,7 @@ export function ProjectChat({
     history: ChatTurn[];
     appendPrefix?: string;
     materialIds: string[];
+    linkUrls?: string[];
     figures?: { name: string; page: number; path: string; mime: string; data: string }[];
     confirmed?: boolean;
     acceptedTool?: AcceptedChatTool;
@@ -921,6 +922,7 @@ export function ProjectChat({
           projectMemory: project.projectMemory,
           goal: sessionGoalRef.current ?? DEFAULT_PROJECT_GOAL,
           materialIds: input.materialIds,
+          linkUrls: input.linkUrls,
           materials: [],
           figures: input.figures,
           knowledgeItems: [],
@@ -1106,14 +1108,7 @@ export function ProjectChat({
     },
   ) {
     let attachments = guest ? [] : (options?.attachments ?? []);
-    const pendingIngest = guest ? undefined : options?.waitForIngest;
-    const promptUrls = guest || pendingIngest ? [] : urlsInText(prompt);
-    const urlIngest =
-      promptUrls.length > 0
-        ? Promise.all(promptUrls.map((url) => ingestMaterialUrl({ projectId: project.id, userId, url })))
-            .then((materialIds) => ({ materialIds, attachments: [] as ChatAttachment[] }))
-        : undefined;
-    const ingest = pendingIngest ?? urlIngest;
+    const ingest = guest ? undefined : options?.waitForIngest;
     let modelPrompt =
       prompt.trim() ||
       (attachments.length ? DEFAULT_FIRST_PROMPT : "");
@@ -1187,10 +1182,7 @@ export function ProjectChat({
           : options?.hintAsk
             ? "Hint…"
             : analysing
-              ? analysingStatus([
-                  ...attachments,
-                  ...urlsInText(prompt).map((url) => ({ title: url, type: "url" })),
-                ])
+              ? analysingStatus(attachments)
               : thinkingStatus(promptIsKa(modelPrompt)),
       startedAt: Date.now(),
       quiet: Boolean(options?.studio),
@@ -1358,6 +1350,7 @@ export function ProjectChat({
         history,
         appendPrefix: options?.resumePrefix,
         materialIds: sourceIds,
+        linkUrls: attachments.filter((item) => item.type === "url").map((item) => item.title),
         figures,
         confirmed: options?.confirmed,
         acceptedTool: guest ? undefined : options?.acceptedTool,

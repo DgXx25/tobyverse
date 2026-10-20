@@ -148,6 +148,10 @@ async function ingestAttachments(input: {
   const chatImages: ChatAttachment[] = [];
   try {
     for (const attachment of input.attachments) {
+      if (attachment.kind === "url") {
+        chatImages.push({ title: attachment.url, type: "url" });
+        continue;
+      }
       if (attachment.kind === "file" && inferMaterialType(attachment.file.name, attachment.file.type) === "image") {
         input.onPhase?.("uploading");
         chatImages.push(await uploadChatImage({ projectId: input.projectId, userId: input.userId, file: attachment.file }));

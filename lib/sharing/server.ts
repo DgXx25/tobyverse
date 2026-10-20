@@ -5,6 +5,7 @@ import { collectThreadReferences } from "@/lib/sharing/thread-references";
 import { mapNoteRecord } from "@/lib/notes/compat";
 import { storedObjectName } from "@/lib/materials/storage-path";
 import { imageGalleryId } from "@/lib/images/galleries";
+import { sharedChatImageRef } from "@/lib/sharing/chat-images";
 import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode } from "@/types/chat";
 import type { Material, MaterialImage, MaterialStatus, MaterialType } from "@/types/material";
 import type { SharedChatSnapshot } from "@/lib/sharing/types";
@@ -24,7 +25,7 @@ function iso(value: unknown): string | null {
   return null;
 }
 
-function attachments(value: unknown): ChatAttachment[] {
+function attachments(value: unknown, ownerId: string, projectId: string): ChatAttachment[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
@@ -35,6 +36,7 @@ function attachments(value: unknown): ChatAttachment[] {
       title,
       type: text(row.type, "file"),
       ...(text(row.materialId).trim() ? { materialId: text(row.materialId).trim() } : {}),
+      ...(!text(row.materialId).trim() && sharedChatImageRef(row.storagePath, ownerId, projectId) ? { storagePath: sharedChatImageRef(row.storagePath, ownerId, projectId) } : {}),
     }];
   });
 }
@@ -71,7 +73,7 @@ function artifact(value: unknown): ChatArtifact | null {
   return { kind, id, title: text(row.title, "Artifact") };
 }
 
-function message(id: string, projectId: string, threadId: string, data: Record<string, unknown>): ChatMessage {
+function message(id: string, projectId: string, threadId: string, data: Record<string, unknown>, ownerId: string): ChatMessage {
   const role = data.role === "user" ? "user" : data.role === "system" ? "system" : "assistant";
   const mode: ChatMode = data.mode === "fast" || data.mode === "teacher" ? data.mode : "auto";
   return {
@@ -83,7 +85,7 @@ function message(id: string, projectId: string, threadId: string, data: Record<s
     role,
     mode,
     content: text(data.content),
-    attachments: attachments(data.attachments),
+    attachments: attachments(data.attachments, ownerId, projectId),
     relatedExerciseType: null,
     intent: null,
     artifact: artifact(data.artifact),
@@ -177,7 +179,7 @@ export async function loadSharedChat(shareId: string): Promise<SharedChatSnapsho
   if (projectOwnerId !== ownerId || (threadOwnerId && threadOwnerId !== ownerId)) return null;
 
   const messages = messageDocs.docs
-    .map((doc) => message(doc.id, projectId, threadId, doc.data() as Record<string, unknown>))
+    .map((doc) => message(doc.id, projectId, threadId, doc.data() as Record<string, unknown>, ownerId))
     .filter((item) => item.role !== "system")
     .sort((left, right) => (left.createdAt ?? "").localeCompare(right.createdAt ?? ""));
   const refs = collectThreadReferences(messages);
@@ -229,4 +231,17 @@ export async function sharedMaterialAccess(shareId: string, materialId: string) 
     || text(indexData.nestedId, snapshot.project.id === index.id ? "main" : index.id) !== snapshot.thread.id
   ) return null;
   return { ownerId, projectId: snapshot.project.id, materialId };
+}
+
+/** Authorize only the exact standalone photo referenced by this currently public chat. */
+export async function sharedChatImageAccess(shareId: string, materialId: string, name: string) {
+  if (!/^chat-image-[A-Za-z0-9_-]+$/.test(materialId) || storedObjectName(name) !== name) return null;
+  const snapshot = await loadSharedChat(shareId);
+  if (!snapshot?.messages.some((message) => message.attachments.some((item) => !item.materialId && item.storagePath === `${materialId}/${name}`))) return null;
+  const index = await getAdminFirestore().collection("chats").doc(snapshot.chatId).get();
+  const data = index.data() as Record<string, unknown> | undefined;
+  if (!data || data.public !== true || text(data.shareId) !== shareId || text(data.projectId) !== snapshot.project.id
+    || text(data.nestedId, snapshot.project.id === index.id ? "main" : index.id) !== snapshot.thread.id) return null;
+  const ownerId = text(data.userId).trim();
+  return ownerId ? { ownerId, projectId: snapshot.project.id, materialId } : null;
 }

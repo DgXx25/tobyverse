@@ -81,8 +81,9 @@ function ImageThumb({ path, title, onClick, materialId, fileAccess }: { path: st
     let objectUrl: string | null = null;
     let cancelled = false;
     setUrl(null);
-    const load = shareId && materialId
-      ? getMaterialFile("", materialId, storedObjectName(path) || "", { shareId }).then(file => {
+    const sharedFileId = materialId || path.match(/^(chat-image-[A-Za-z0-9_-]+)\/[^/]+$/)?.[1];
+    const load = shareId && sharedFileId
+      ? getMaterialFile("", sharedFileId, storedObjectName(path) || "", { shareId }).then(file => {
         if (!file.ok) throw new Error(file.message);
         return URL.createObjectURL(new Blob([new Uint8Array(file.bytes)], { type: file.contentType }));
       })

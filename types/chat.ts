@@ -159,6 +159,8 @@ export type ChatKnowledgeContext = {
 };
 
 export type ChatGenerationContext = {
+  /** Read-only pages from current-turn URLs, never saved as Sources. */
+  linkedPages?: { url: string; title: string; text: string }[];
   /** Server-selected, evidence-backed observations; never accepted from a client payload. */
   adaptiveContext?: string;
   projectId: EntityId;

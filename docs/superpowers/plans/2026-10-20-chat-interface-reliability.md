@@ -42,3 +42,12 @@
 - TypeScript passed. Production build passed after clearing the validated generated .next directory.
 - Live browser: Gemini 3.1 Pro completed the requested native form in 59 seconds without the old 45-second connection timeout. Radio selection enabled submission; original model selection restored.
 - Review caught a false form-success state; acceptance now follows successful user-message persistence. Follow-up review reported no findings.
+
+
+## Added before release: chat media stays separate from Sources
+
+- Composer photos use compressed private chat blobs, with no material document or vector index. Add source keeps the existing compressed-photo and OCR workflow.
+- Plain prompt URLs no longer enter material ingestion on either chat entry point. URL chips remain chat attachments; bounded read-only page extraction supplies current-turn context without storing source text.
+- Fourteen photo/link regressions passed. Required prompt architecture checks and TypeScript passed; release build includes this change.
+
+- Shared chats retain standalone photo previews through exact attachment references; no source document or broad file access is created. Wrong-owner paths, unrelated files and revoked shares are rejected. Twenty-two relevant checks and the final TypeScript check passed; review reported no further findings.

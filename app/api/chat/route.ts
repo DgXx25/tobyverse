@@ -18,6 +18,7 @@ import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
 import { papersInTurns } from "@/lib/blocks/paper-thread";
 import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 import { waitForChatStep } from "@/lib/ai/chat-deadline";
+import { readChatLinkedPages } from "@/lib/chat/linked-pages";
 import { allowImageSearch, clampImageCount, searchWebImages } from "@/lib/images/search";
 import { toChatImageHit } from "@/lib/images/hits";
 import { adminErrorResponse, assertAdminRequest } from "@/lib/admin/assert";
@@ -310,6 +311,8 @@ export async function POST(request: Request) {
       const heartbeatTimer = setInterval(heartbeat, 10_000);
       try {
         const adaptiveContext = session.anonymous ? Promise.resolve(undefined) : adaptiveContextForChat(session.uid, context.projectId, prompt);
+        const linkedPages = session.anonymous ? Promise.resolve([]) : readChatLinkedPages(prompt,
+          body.context && typeof body.context === "object" ? (body.context as Record<string, unknown>).linkUrls : [], signal).catch(() => []);
         const threadPaper = context.threadPaper || papersInTurns(history).length > 0;
 
   // The answer is grounded in the user's own materials: retrieve server-side from the vector index.
@@ -334,7 +337,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const withPrompt = { ...context, prompt, threadPaper, sources, adaptiveContext: await adaptiveContext };
+  const withPrompt = { ...context, prompt, threadPaper, sources, adaptiveContext: await adaptiveContext, linkedPages: await linkedPages };
   const guestContext = session.anonymous
     ? { ...withPrompt, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
     : withPrompt;

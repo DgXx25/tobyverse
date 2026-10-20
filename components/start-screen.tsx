@@ -12,7 +12,6 @@ import { newChipId } from "@/lib/composer/attach";
 import { ensureSessionUser } from "@/lib/auth";
 import { guestCapReached, GuestCapError, isGuestUser } from "@/lib/guest";
 import { startChatInProject, startProjectFromPrompt } from "@/lib/workspace/start-project";
-import { urlsInText } from "@/lib/materials/ingest-client";
 import { promptIsKa, type ComposerIntent } from "@/lib/composer/intent";
 import { uploadStatusText } from "@/components/workspace/composer-status";
 import {
@@ -219,15 +218,7 @@ export function StartScreen({ publicHome = false }: { publicHome?: boolean }) {
   async function start() {
     if (sending) return;
     const prompt = draft.trim();
-    const promptUrls = urlsInText(prompt);
-    const packed = guest
-      ? []
-      : [
-          ...attachments,
-          ...promptUrls
-            .filter((url) => !attachments.some((item) => item.kind === "url" && item.url === url))
-            .map((url) => ({ id: newChipId(), kind: "url" as const, url })),
-        ];
+    const packed = guest ? [] : attachments;
     if (!prompt && packed.length === 0) return;
     if (guest && (mode === "practice" || mode === "sheet" || mode === "materials")) return;
     if (guest && guestCapReached()) {

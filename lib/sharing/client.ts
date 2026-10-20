@@ -11,6 +11,7 @@ import { getFirebaseDb } from "@/lib/firebase";
 import { mapNoteRecord } from "@/lib/notes/compat";
 import { collectThreadReferences } from "@/lib/sharing/thread-references";
 import { imageGalleryId } from "@/lib/images/galleries";
+import { sharedChatImageRef } from "@/lib/sharing/chat-images";
 import type { SharedChatSnapshot } from "@/lib/sharing/types";
 import type { ChatMessage, ChatMode } from "@/types/chat";
 import type { Material, MaterialStatus, MaterialType } from "@/types/material";
@@ -27,14 +28,15 @@ function iso(value: unknown): string | null {
   return date instanceof Date && Number.isFinite(date.valueOf()) ? date.toISOString() : null;
 }
 
-function mapMessage(id: string, projectId: string, threadId: string, raw: Record<string, unknown>): ChatMessage {
+function mapMessage(id: string, projectId: string, threadId: string, raw: Record<string, unknown>, ownerId: string): ChatMessage {
   const role = raw.role === "user" ? "user" : raw.role === "system" ? "system" : "assistant";
   const attachments = Array.isArray(raw.attachments) ? raw.attachments.flatMap((entry) => {
     if (!entry || typeof entry !== "object") return [];
     const item = entry as Record<string, unknown>;
     const title = str(item.title).trim();
     if (!title) return [];
-    return [{ title, type: str(item.type, "file"), ...(str(item.materialId).trim() ? { materialId: str(item.materialId).trim() } : {}) }];
+    const media = !str(item.materialId).trim() ? sharedChatImageRef(item.storagePath, ownerId, projectId) : undefined;
+    return [{ title, type: str(item.type, "file"), ...(str(item.materialId).trim() ? { materialId: str(item.materialId).trim() } : {}), ...(media ? { storagePath: media } : {}) }];
   }) : [];
   const images = Array.isArray(raw.images) ? raw.images.flatMap((entry) => {
     if (!entry || typeof entry !== "object") return [];
@@ -116,7 +118,7 @@ export async function loadSharedChatClient(shareId: string): Promise<SharedChatS
   const [threadSnap, messageSnaps] = await Promise.all([getDoc(threadRef), getDocs(messagesRef)]);
   if (!threadSnap.exists()) return null;
   const messages = messageSnaps.docs
-    .map((item) => mapMessage(item.id, projectId, threadId, item.data()))
+    .map((item) => mapMessage(item.id, projectId, threadId, item.data(), str(indexData.userId)))
     .filter((item) => item.role !== "system")
     .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
   const refs = collectThreadReferences(messages);

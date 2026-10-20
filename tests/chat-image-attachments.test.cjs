@@ -27,6 +27,39 @@ function isolated(relativePath, mocks) {
 const imagePath = 'users/alice/projects/project/materials/chat-image-123/problem.jpg';
 const photo = { title: 'problem.heic', type: 'image', storagePath: imagePath, sizeBytes: 250 };
 
+test('shared chat media exposes only owner/project-scoped image references', () => {
+  const { sharedChatImageRef } = require('../lib/sharing/chat-images.ts');
+  assert.equal(sharedChatImageRef(imagePath, 'alice', 'project'), 'chat-image-123/problem.jpg');
+  for (const path of [imagePath.replace('/alice/', '/bob/'), imagePath.replace('/project/', '/other/'), imagePath.replace('chat-image-123', 'source'), imagePath.replace('problem.jpg', 'secrets.txt'), imagePath.replace('problem.jpg', '..%2Fprivate.jpg')]) {
+    assert.equal(sharedChatImageRef(path, 'alice', 'project'), undefined);
+  }
+});
+
+test('shared standalone photos require an exact current-chat reference and a live public share', async () => {
+  const shareId = 's'.repeat(32);
+  const indexData = { userId: 'alice', projectId: 'project', nestedId: 'main', public: true, shareId };
+  const docs = new Map([['projects/project', { userId: 'alice' }], ['projects/project/chats/main', { userId: 'alice' }], ['chats/chat', indexData]]);
+  const reference = key => ({
+    get: async () => ({ exists: docs.has(key), id: key.split('/').at(-1), data: () => docs.get(key) }),
+    doc: id => reference(`${key}/${id}`),
+    collection: name => name === 'messages' ? { get: async () => ({ docs: [{ id: 'message', data: () => ({ role: 'user', attachments: [photo] }) }] }) } : reference(`${key}/${name}`),
+  });
+  const query = { where: () => query, limit: () => query, doc: id => reference(`chats/${id}`), get: async () => ({ docs: indexData.public ? [{ id: 'chat', data: () => indexData }] : [] }) };
+  const { loadSharedChat, sharedChatImageAccess } = isolated('lib/sharing/server.ts', {
+    'server-only': {}, '@/lib/notes/compat': {},
+    '@/lib/server/firestore-admin': { getAdminFirestore: () => ({ collection: name => name === 'chats' ? query : reference(name) }) },
+  });
+  const snapshot = await loadSharedChat(shareId);
+  assert.equal(snapshot.materials.length, 0, 'a shared chat photo must still not become a Source');
+  assert.equal(snapshot.messages[0].attachments[0].storagePath, 'chat-image-123/problem.jpg');
+  assert.deepEqual(await sharedChatImageAccess(shareId, 'chat-image-123', 'problem.jpg'), { ownerId: 'alice', projectId: 'project', materialId: 'chat-image-123' });
+  assert.equal(await sharedChatImageAccess(shareId, 'chat-image-123', 'another.jpg'), null);
+  assert.equal(await sharedChatImageAccess(shareId, 'chat-image-456', 'problem.jpg'), null);
+  assert.equal(await sharedChatImageAccess(shareId, 'chat-image-123', '../problem.jpg'), null);
+  indexData.public = false;
+  assert.equal(await sharedChatImageAccess(shareId, 'chat-image-123', 'problem.jpg'), null);
+});
+
 function composerUploads() {
   const materialDocs = [];
   const blobs = [];
@@ -36,6 +69,7 @@ function composerUploads() {
     '@/lib/workspace/draft-notebook': { clearUntouchedNotebook: () => {} },
     '@/lib/materials/ingest-client': { ingestMaterialFile: async ({ file }) => { materialDocs.push(file.name); return 'document-id'; } },
     '@/lib/materials/store': { getMaterial: async () => ({ storagePath: imagePath, sizeBytes: 250 }) },
+    '@/lib/materials/compress-image': { compressImageForUpload: async () => ({ blob: new Blob(['compressed'], { type: 'image/webp' }), name: 'problem.webp', mime: 'image/webp' }) },
     '@/lib/materials/storage': {
       originalStoragePath: (uid, project, id, name) => `users/${uid}/projects/${project}/materials/${id}/${name}`,
       uploadMaterialBytes: async (storagePath, file, _mime, options) => {
@@ -48,13 +82,14 @@ function composerUploads() {
   return { api, materialDocs, blobs };
 }
 
-test('composer photos refer to the single saved image source with OCR and quota accounting', async () => {
+test('composer photos keep compressed chat media without creating a Source or index', async () => {
   const { api, materialDocs, blobs } = composerUploads();
   const file = new File(['heic image'], 'problem.heic', { type: 'image/heic' });
   const result = await api.ingestComposerFile({ projectId: 'project', userId: 'ignored-client-id', file });
-  assert.deepEqual(result, { ...photo, materialId: 'document-id' }, 'preserve the normalized path and reference the saved source for sharing');
-  assert.deepEqual(materialDocs, ['problem.heic']);
-  assert.equal(blobs.length, 0, 'never upload a duplicate standalone original');
+  assert.deepEqual(result, photo, 'preserve the normalized private chat path without a materialId');
+  assert.deepEqual(materialDocs, [], 'chat upload must not call material ingestion');
+  assert.equal(blobs.length, 1);
+  assert.match(blobs[0].storagePath, /\/chat-image-[^/]+\/problem.webp$/);
 });
 
 test('composer documents retain normal source ingestion, including files whose names mention photos', async () => {
@@ -108,13 +143,13 @@ test('a later photo question reuses the latest image in this chat; an unrelated 
   assert.deepEqual(figureAttachmentsForTurn('ამოხსენი', [older], messages), [older]);
 });
 
-test('new-chat photos keep their saved source reference through the opening handoff without duplicate ingestion', async () => {
+test('new-chat photos and links stay chat attachments through the opening handoff', async () => {
   const session = new Map();
   const previous = global.window;
   global.window = { sessionStorage: { getItem: (key) => session.get(key) ?? null, setItem: (key, value) => session.set(key, value), removeItem: (key) => session.delete(key) }, setTimeout: () => 0 };
   try {
     const materialDocs = [];
-    const savedPhoto = { ...photo, materialId: 'photo-id' };
+    const savedPhoto = { ...photo };
     const { startChatInProject, takeProjectStartIngest } = isolated('lib/workspace/start-project.ts', {
       '@/lib/projects': {}, '@/lib/chats': { createChatThread: async () => 'new-thread', allocateChatMessageId: () => 'message' },
       '@/lib/auth': { requireSignedInUser: async () => ({ uid: 'alice' }) },
@@ -127,12 +162,14 @@ test('new-chat photos keep their saved source reference through the opening hand
     const id = await startChatInProject({ projectId: 'project', userId: 'alice', prompt: 'ამოხსენი', attachments: [
       { kind: 'file', file: new File(['image'], 'problem.png') },
       { kind: 'file', file: new File(['pdf'], 'notes.pdf') },
+      { kind: 'url', url: 'https://example.org/page' },
     ] });
     const result = await takeProjectStartIngest(id);
-    assert.deepEqual(result, { materialIds: ['pdf-id'], attachments: [savedPhoto] });
+    const expectedAttachments = [savedPhoto, { title: 'https://example.org/page', type: 'url' }];
+    assert.deepEqual(result, { materialIds: ['pdf-id'], attachments: expectedAttachments });
     assert.deepEqual(materialDocs, ['notes.pdf']);
     const { peekPendingStart } = require('../lib/workspace/pending-start.ts');
-    assert.deepEqual(peekPendingStart(id).attachments, [savedPhoto]);
+    assert.deepEqual(peekPendingStart(id).attachments, expectedAttachments);
     assert.deepEqual(peekPendingStart(id).materialIds, ['pdf-id']);
   } finally { global.window = previous; }
 });
