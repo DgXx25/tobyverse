@@ -1,22 +1,16 @@
-import { createProject, reserveProjectId } from "@/lib/projects";
 import { loadSavedChatMode } from "@/lib/workspace/chat-mode";
-import { UNTITLED_NOTEBOOK_TITLE } from "@/lib/workspace/title";
 import { projectHomePath } from "@/lib/workspace/routes";
 import { markUntouchedNotebook } from "@/lib/workspace/draft-notebook";
+import { createNotebookProject } from "@/lib/workspace/start-project";
 
 /**
  * A new notebook exists the moment you ask for it: "Untitled notebook", empty, ready for sources.
  * The first real question renames it (see autoNameChat).
  */
-export async function createNotebook(input: { userId: string; folder?: string }): Promise<{ id: string; path: string }> {
-  const id = reserveProjectId();
-  await createProject({
-    id,
-    userId: input.userId,
-    title: UNTITLED_NOTEBOOK_TITLE,
-    preferredChatMode: loadSavedChatMode(),
+export async function createNotebook(input: { folder?: string }): Promise<{ id: string; path: string }> {
+  const id = await createNotebookProject({
     folder: input.folder,
-    createThread: true,
+    preferredChatMode: loadSavedChatMode(),
   });
   markUntouchedNotebook(id);
   return { id, path: projectHomePath(id) };

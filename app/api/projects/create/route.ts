@@ -27,23 +27,26 @@ export async function POST(request: Request) {
     const projectRef = requestedId ? db.collection("projects").doc(requestedId) : db.collection("projects").doc();
     if (requestedId && (await projectRef.get()).exists) return Response.json({ error: "Project already exists." }, { status: 409 });
     const now = Timestamp.now();
-    await projectRef.set({
+    const projectData = {
       title: title || "New project", description: "", userId: decoded.uid, goal,
       recipe: recipeForGoal(goal as never), preferredChatMode: mode, projectMemory: [],
       listed: body.listed === true, createdAt: now, updatedAt: now,
       ...(typeof body.icon === "string" && body.icon.trim() ? { icon: body.icon.trim().slice(0, 8) } : {}),
       ...(typeof body.folder === "string" && body.folder.trim() ? { folder: body.folder.trim().slice(0, 40) } : {}),
-    });
+    };
+    const batch = db.batch();
+    batch.set(projectRef, projectData);
     if (body.createThread !== false) {
-      await projectRef.collection("chats").doc(DEFAULT_CHAT_THREAD_ID).set({
+      batch.set(projectRef.collection("chats").doc(DEFAULT_CHAT_THREAD_ID), {
         projectId: projectRef.id, userId: decoded.uid, lessonId: null, exerciseId: null,
         mode, kind: "main", pathId: null, createdAt: now, updatedAt: now,
       });
-      await db.collection("chats").doc(projectRef.id).set({
+      batch.set(db.collection("chats").doc(projectRef.id), {
         projectId: projectRef.id, nestedId: DEFAULT_CHAT_THREAD_ID, userId: decoded.uid,
         kind: "main", createdAt: now, updatedAt: now,
       });
     }
+    await batch.commit();
     return Response.json({ projectId: projectRef.id });
   } catch (error) {
     console.error("Project creation failed", error);

@@ -10,8 +10,7 @@ import {
 import {
   getFirestore,
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
   type Firestore,
 } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
@@ -121,9 +120,12 @@ export function getFirebaseDb(): Firestore {
   if (typeof window !== "undefined") {
     try {
       db = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-        }),
+        // Keep the browser cache in memory. Firestore's persistent multi-tab
+        // manager writes a mutation marker to localStorage for every pending
+        // write; in long-lived browser profiles that queue can hit the
+        // localStorage quota and make Firestore's async queue fail internally.
+        // Memory cache keeps tabs independent and leaves server data untouched.
+        localCache: memoryLocalCache(),
       });
       return db;
     } catch {

@@ -23,7 +23,7 @@ import {
   type IngestPhase,
   type PreparedMaterial,
 } from "@/lib/materials/ingest-client";
-import { DEFAULT_FIRST_PROMPT, PLACEHOLDER_CHAT_TITLE } from "@/lib/workspace/title";
+import { DEFAULT_FIRST_PROMPT, PLACEHOLDER_CHAT_TITLE, UNTITLED_NOTEBOOK_TITLE } from "@/lib/workspace/title";
 
 const ingestByProject = new Map<string, Promise<StartIngestResult>>();
 
@@ -42,6 +42,7 @@ async function createProjectViaApi(input: {
   createThread?: boolean;
   goal?: string;
   preferredChatMode?: ChatMode;
+  folder?: string;
   timeoutMs?: number;
 }): Promise<string> {
   const controller = new AbortController();
@@ -275,6 +276,20 @@ export async function createListedProject(input: { userId: string; title: string
     title,
     listed: true,
     createThread: false,
+    timeoutMs: 12_000,
+  });
+}
+
+export async function createNotebookProject(input: {
+  folder?: string;
+  preferredChatMode: ChatMode;
+}): Promise<string> {
+  return createProjectViaApi({
+    title: UNTITLED_NOTEBOOK_TITLE,
+    folder: input.folder,
+    listed: false,
+    createThread: true,
+    preferredChatMode: input.preferredChatMode,
     timeoutMs: 12_000,
   });
 }

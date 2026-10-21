@@ -84,7 +84,7 @@ export function NotebooksHome() {
     setCreating(true);
     setError(null);
     try {
-      const created = await createNotebook({ userId: user.uid, folder: activeFolder || undefined });
+      const created = await createNotebook({ folder: activeFolder || undefined });
       router.push(created.path);
     } catch (err) {
       setError(err instanceof Error && err.message.trim() ? err.message : "Could not create a notebook.");

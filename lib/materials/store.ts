@@ -2,7 +2,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getCountFromServer,
   getDocs,
   getDoc,
   onSnapshot,
@@ -14,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
+import { requireSignedInUser } from "@/lib/auth";
 import { PREVIEW_HTML_MAX } from "@/lib/materials/limits";
 import { extractedTextPath } from "@/lib/materials/storage";
 import { storedObjectName } from "@/lib/materials/storage-path";
@@ -220,8 +220,18 @@ export async function getMaterial(projectId: string, materialId: string): Promis
 }
 
 export async function countMaterials(projectId: string): Promise<number> {
-  const snapshot = await getCountFromServer(materialsRef(projectId));
-  return snapshot.data().count;
+  const user = await requireSignedInUser();
+  const token = await user.getIdToken();
+  const response = await fetch("/api/materials/count", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ projectId }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { count?: unknown; error?: unknown };
+  if (!response.ok || typeof data.count !== "number") {
+    throw new Error(typeof data.error === "string" ? data.error : "Could not count project sources.");
+  }
+  return data.count;
 }
 
 export async function listMaterials(projectId: string): Promise<Material[]> {
