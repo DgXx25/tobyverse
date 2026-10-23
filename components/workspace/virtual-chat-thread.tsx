@@ -6,7 +6,7 @@ import { chatMessageGap, chatVirtualizerOptions } from "@/lib/workspace/chat-his
 import type { ChatMessage } from "@/types/chat";
 import { ChatBlockStateProvider, ChatBlockStateScope } from "./chat-block-state";
 
-export type VirtualChatThreadHandle = { scrollToEnd: () => void; scrollToMessage: (id: string) => void };
+export type VirtualChatThreadHandle = { scrollToEnd: () => void; scrollToMessage: (id: string, followOutput?: boolean) => void };
 
 /** Scroll updates stay here, rather than reconciling the composer and chat controller. */
 export const VirtualChatThread = memo(function VirtualChatThread({
@@ -22,11 +22,11 @@ export const VirtualChatThread = memo(function VirtualChatThread({
 }) {
   // An ancestor's scroll ref attaches after this child's layout effects.
   const [mounted, setMounted] = useState(false);
+  const [followOutput, setFollowOutput] = useState(false);
   useEffect(() => setMounted(true), []);
-  const options = useMemo(() => chatVirtualizerOptions(messages, bottomInset), [messages, bottomInset]);
+  const options = useMemo(() => chatVirtualizerOptions(messages, bottomInset, followOutput), [messages, bottomInset, followOutput]);
   const virtualizer = useVirtualizer({
     ...options,
-    followOnAppend: false,
     useCachedMeasurements: !active,
     enabled: mounted,
     getScrollElement: () => scrollRef.current,
@@ -47,9 +47,12 @@ export const VirtualChatThread = memo(function VirtualChatThread({
   });
   useImperativeHandle(handleRef, () => ({
     scrollToEnd: () => virtualizer.scrollToEnd(),
-    scrollToMessage: (id) => {
+    scrollToMessage: (id, shouldFollowOutput = false) => {
       const index = messages.findIndex((message) => message.id === id);
-      if (index >= 0) virtualizer.scrollToIndex(index, { align: "end" });
+      if (index < 0) return;
+      setFollowOutput(shouldFollowOutput);
+      if (shouldFollowOutput) virtualizer.scrollToEnd();
+      else virtualizer.scrollToIndex(index, { align: "start" });
     },
   }), [virtualizer, messages]);
   useLayoutEffect(() => {

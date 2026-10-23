@@ -469,6 +469,7 @@ export function ProjectChat({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [expandedUserMessages, setExpandedUserMessages] = useState<Record<string, boolean>>({});
   const pendingPromptScrollRef = useRef<string | null>(openingUi.messages.find((message) => message.role === "user")?.id ?? null);
+  const pendingPromptFollowRef = useRef(false);
   const enteringPromptsRef = useRef(new Set(openingUi.messages.filter((message) => message.role === "user").map((message) => message.id)));
   const [historyReady, setHistoryReady] = useState(false);
   const onHistoryReady = useCallback(() => setHistoryReady(true), []);
@@ -697,13 +698,16 @@ export function ProjectChat({
     if (loading || !historyReady) return;
     if (!initialScrollRef.current && messages.length > 0 && !sending && !stream) {
       initialScrollRef.current = true;
+      pendingPromptScrollRef.current = null;
+      pendingPromptFollowRef.current = false;
       stickToBottom();
       return;
     }
     const promptId = pendingPromptScrollRef.current;
     if (promptId && messages.some((message) => message.id === promptId)) {
       pendingPromptScrollRef.current = null;
-      historyViewRef.current?.scrollToMessage(promptId);
+      historyViewRef.current?.scrollToMessage(promptId, pendingPromptFollowRef.current);
+      pendingPromptFollowRef.current = false;
     }
   }, [loading, historyReady, messages, stream, sending, stickToBottom]);
 
@@ -1233,6 +1237,10 @@ export function ProjectChat({
     sendingRef.current = true;
     const savedUserMessageId = options?.userMessageId ?? allocateChatMessageId(project.id, chatThreadId);
     if (!options?.skipUser && !options?.studio) {
+      const scroller = scrollerRef.current;
+      pendingPromptFollowRef.current = Boolean(
+        scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 96,
+      );
       pendingPromptScrollRef.current = savedUserMessageId;
       enteringPromptsRef.current.add(savedUserMessageId);
     }
