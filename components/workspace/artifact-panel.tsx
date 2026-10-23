@@ -35,6 +35,7 @@ type TabId = ArtifactTabId;
 export type ArtifactFocus = ChatArtifact | { kind: "material" | "settings"; id: string };
 
 export function ArtifactPanel({
+  enabled = true,
   projectId,
   userId,
   listedProject,
@@ -59,6 +60,7 @@ export function ArtifactPanel({
   onStudioRetry,
   selectedSourceIds = [],
 }: {
+  enabled?: boolean;
   projectId: string;
   userId: string;
   listedProject: boolean;
@@ -116,15 +118,18 @@ export function ArtifactPanel({
     setPracticeId(null);
   }, [projectId]);
 
-  useEffect(() => subscribeMaterials(projectId, setMaterials), [projectId]);
   useEffect(() => {
+    if (!enabled) return;
+    return subscribeMaterials(projectId, setMaterials);
+  }, [projectId, enabled]);
+  useEffect(() => {
+    if (!enabled) return;
     setStudioArtifacts([]);
     setStudioError(null);
     return subscribeStudioArtifacts(projectId, (items) => { setStudioArtifacts(items); setStudioError(null); }, (error) => setStudioError(error.message));
-  }, [projectId]);
+  }, [projectId, enabled]);
   useEffect(
-    () =>
-      subscribeStudySheets(
+    () => enabled ? subscribeStudySheets(
         projectId,
         (items) => {
           setSheets(items);
@@ -134,25 +139,24 @@ export function ArtifactPanel({
           setSheetError(err.message);
           setSheetsReady(true);
         },
-      ),
-    [projectId],
+      ) : undefined,
+    [projectId, enabled],
   );
   useEffect(
-    () =>
-      subscribeChatMessages(
+    () => enabled ? subscribeChatMessages(
         projectId,
         (items) => {
           setMessages(items);
           setPracticeReady(true);
         },
         () => setPracticeReady(true),
-      ),
-    [projectId],
+      ) : undefined,
+    [projectId, enabled],
   );
-  useEffect(() => subscribeStudyPaths(projectId, (items) => {
+  useEffect(() => enabled ? subscribeStudyPaths(projectId, (items) => {
     setPaths(items);
     setPathsReady(true);
-  }), [projectId]);
+  }) : undefined, [projectId, enabled]);
   useEffect(() => {
     setProgress(loadPracticeProgress(projectId));
   }, [projectId, session]);
@@ -348,7 +352,7 @@ export function ArtifactPanel({
                   onOpenPath={() => setTab("path")}
                 />
               )}
-              {tab === "materials" && (
+              {enabled && tab === "materials" && (
                 <MaterialsView
                   items={materials}
                   selectedId={materialId}

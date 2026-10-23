@@ -19,7 +19,7 @@ export default function PrivacyPage() {
       <p>
         TobyVerse operates this service and is responsible for the information described here.
         For privacy questions or requests, email{" "}
-        <a href="mailto:hello@tobyverse.app">hello@tobyverse.app</a>. Please do not send passwords,
+        <a href="mailto:hello.tobyverse@gmail.com">hello.tobyverse@gmail.com</a>. Please do not send passwords,
         identity numbers, or other sensitive details in your request.
       </p>
 
@@ -178,7 +178,7 @@ export default function PrivacyPage() {
         projects, materials, and Memory entries in the app. For access, correction, deletion,
         restriction, portability, objection, or other rights available under the law that applies
         to you, email{" "}
-        <a href="mailto:hello@tobyverse.app">hello@tobyverse.app</a>. We may ask for enough
+        <a href="mailto:hello.tobyverse@gmail.com">hello.tobyverse@gmail.com</a>. We may ask for enough
         information to verify that the request is yours. You may also complain to the competent
         data-protection authority.
       </p>
@@ -202,7 +202,7 @@ export default function PrivacyPage() {
       <h2>Contact</h2>
       <p>
         For privacy requests or questions, contact{" "}
-        <a href="mailto:hello@tobyverse.app">hello@tobyverse.app</a>.
+        <a href="mailto:hello.tobyverse@gmail.com">hello.tobyverse@gmail.com</a>.
       </p>
     </LegalPage>
   );

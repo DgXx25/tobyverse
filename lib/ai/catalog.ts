@@ -1,3 +1,5 @@
+import type { EffectivePlanId } from "@/types/billing";
+
 export const AI_PROVIDER_OPTIONS = [
   {
     id: "gemini",
@@ -30,39 +32,46 @@ export const DEFAULT_AI_PROVIDER: AiProviderId = "gemini";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite" as const;
 
 export const GEMINI_MODEL_OPTIONS = [
-  { id: DEFAULT_GEMINI_MODEL, name: "Gemini 3.1 Flash", adminOnly: false },
-  { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", adminOnly: true },
-  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash", adminOnly: true },
+  { id: DEFAULT_GEMINI_MODEL, name: "Gemini 3.1 Flash", paidOnly: false },
+  { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", paidOnly: true },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash", paidOnly: true },
 ] as const;
 
 export type AiModelId = (typeof GEMINI_MODEL_OPTIONS)[number]["id"];
 export type AiModelOption = (typeof GEMINI_MODEL_OPTIONS)[number];
 
 const KNOWN_MODEL_IDS = new Set<string>(GEMINI_MODEL_OPTIONS.map((item) => item.id));
-const ADMIN_MODEL_IDS = new Set<string>(GEMINI_MODEL_OPTIONS.filter((item) => item.adminOnly).map((item) => item.id));
+const PAID_MODEL_IDS = new Set<string>(GEMINI_MODEL_OPTIONS.filter((item) => item.paidOnly).map((item) => item.id));
+
+function hasPaidModelAccess(planOrAdmin: EffectivePlanId | boolean): boolean {
+  if (typeof planOrAdmin === "boolean") return planOrAdmin;
+  return planOrAdmin !== "free_beta";
+}
 
 export function isKnownAiModel(id: string): id is AiModelId {
   return KNOWN_MODEL_IDS.has(id);
 }
 
-export function isAllowedAiModel(id: string, isAdmin: boolean): id is AiModelId {
-  return isKnownAiModel(id) && (isAdmin || !ADMIN_MODEL_IDS.has(id));
+export function isAllowedAiModel(id: string, planOrAdmin: EffectivePlanId | boolean): id is AiModelId {
+  return isKnownAiModel(id) && (hasPaidModelAccess(planOrAdmin) || !PAID_MODEL_IDS.has(id));
 }
 
-export function isAdminOnlyAiModel(id: string): boolean {
-  return ADMIN_MODEL_IDS.has(id);
+export function isPaidOnlyAiModel(id: string): boolean {
+  return PAID_MODEL_IDS.has(id);
 }
 
-export function availableAiModels(isAdmin: boolean): AiModelOption[] {
-  return GEMINI_MODEL_OPTIONS.filter((item) => isAdmin || !item.adminOnly);
+export const isAdminOnlyAiModel = isPaidOnlyAiModel;
+
+export function availableAiModels(planOrAdmin: EffectivePlanId | boolean): AiModelOption[] {
+  return GEMINI_MODEL_OPTIONS.filter((item) => hasPaidModelAccess(planOrAdmin) || !item.paidOnly);
 }
 
 export function parsePreferredModel(value: unknown): AiModelId | null {
   return typeof value === "string" && isKnownAiModel(value) ? value : null;
 }
 
-export function resolveAiModel(id: string | null | undefined, isAdmin: boolean): AiModelId {
-  if (id && isAllowedAiModel(id, isAdmin)) return id;
+export function resolveAiModel(id: string | null | undefined, planOrAdmin: EffectivePlanId | boolean): AiModelId {
+  if (id && isAllowedAiModel(id, planOrAdmin)) return id;
   return DEFAULT_GEMINI_MODEL;
 }
 
@@ -93,3 +102,4 @@ export function resolveAiProvider(id: string | null | undefined): AiProviderId {
 export function providerDisplayName(id: AiProviderId): string {
   return AI_PROVIDER_OPTIONS.find((item) => item.id === id)?.name ?? "Gemini";
 }
+

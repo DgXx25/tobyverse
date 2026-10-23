@@ -2,14 +2,29 @@
 
 import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/components/auth-provider";
+import { AuthProvider, useAuth } from "@/components/auth-provider";
+import { ThemeProvider } from "@/components/workspace/theme-provider";
+import { rememberPostAuthPath } from "@/lib/auth";
 
 export default function AccountLayout({ children }: { children: ReactNode }) {
+  return (
+    <AuthProvider>
+      <ThemeProvider>
+        <AccountAccess>{children}</AccountAccess>
+      </ThemeProvider>
+    </AuthProvider>
+  );
+}
+
+function AccountAccess({ children }: { children: ReactNode }) {
   const { user, loading, configured } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) router.replace("/login");
+    if (!loading && !user) {
+      rememberPostAuthPath(`${window.location.pathname}${window.location.search}${window.location.hash}`);
+      router.replace("/login");
+    }
   }, [loading, user, router]);
 
   if (loading) {

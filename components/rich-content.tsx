@@ -6,7 +6,6 @@ import { StreamAnimRoot } from "@/components/workspace/stream-text";
 import { ChatBlockStateScope } from "@/components/workspace/chat-block-state";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import "katex/dist/katex.min.css";
 import { parsePartialObject } from "@/lib/ai/json-stream";
 import { parseTobyFence } from "@/lib/blocks/registry";
 import { TobyBlockView } from "@/components/blocks/toby-block";

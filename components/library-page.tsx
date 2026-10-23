@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
@@ -51,10 +50,6 @@ export function LibraryPage() {
   const [preview, setPreview] = useState<{ projectId: string; id: string; title?: string } | null>(null);
   const [notePreview, setNotePreview] = useState<LibraryItem | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
-  const reduceMotion = useReducedMotion();
-  const pillTransition = reduceMotion
-    ? { duration: 0 }
-    : { type: "spring" as const, bounce: 0.18, duration: 0.5 };
 
   useEffect(() => {
     if (user?.isAnonymous) {
@@ -128,7 +123,6 @@ export function LibraryPage() {
       <div className="min-w-0 flex-1 overflow-y-auto px-6 py-6 md:px-12 md:py-8">
         <div className="mx-auto max-w-6xl">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-2 max-md:border-0">
-          <LayoutGroup id="library-tabs">
             <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto max-md:hidden">
               {TABS.map((item) => {
                 const active = tab === item.id;
@@ -137,25 +131,16 @@ export function LibraryPage() {
                     key={item.id}
                     type="button"
                     onClick={() => setTab(item.id)}
-                    className={`relative shrink-0 rounded-full px-3 py-1.5 text-[14px] ${
-                      active ? "library-tab-active text-foreground" : "text-muted hover:text-foreground"
+                    className={`relative shrink-0 rounded-full px-3 py-1.5 text-[14px] transition-colors ${
+                      active ? "library-tab-active bg-surface-2 text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.18)]" : "text-muted hover:text-foreground"
                     }`}
                     aria-current={active ? "true" : undefined}
                   >
-                    {active ? (
-                      <motion.span
-                        layoutId="library-tab-pill"
-                        className="library-tab-pill pointer-events-none absolute inset-0 rounded-full bg-surface-2 shadow-[0_1px_2px_rgba(0,0,0,0.18)]"
-                        style={{ borderRadius: 9999 }}
-                        transition={pillTransition}
-                      />
-                    ) : null}
-                    <span className="relative z-[1]">{item.label}</span>
+                    {item.label}
                   </button>
                 );
               })}
             </nav>
-          </LayoutGroup>
           <select
             aria-label="Library filter"
             value={tab}

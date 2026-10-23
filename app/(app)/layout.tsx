@@ -1,5 +1,10 @@
 import { AppShell } from "@/components/app-shell";
+import { AppRouteProviders } from "@/components/app-route-providers";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  return <AppShell>{children}</AppShell>;
+  return (
+    <AppRouteProviders>
+      <AppShell>{children}</AppShell>
+    </AppRouteProviders>
+  );
 }

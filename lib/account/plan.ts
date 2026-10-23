@@ -1,19 +1,32 @@
 import type { UserPlan, UserUsage } from "@/types/user";
 import { normalizeStoredPlan, PLAN_CATALOG } from "@/lib/billing/plans";
 import { formatBytes } from "@/lib/format";
+import type { EffectivePlanId } from "@/types/billing";
 
 export const BETA_PLAN: UserPlan = "free_beta";
 
-/** 1 GiB per user for materials, enforced during beta. */
-export const STORAGE_CAP_BYTES = 1024 * 1024 * 1024;
-export const STORAGE_CAP_LABEL = "1 GB";
+export const STORAGE_LIMITS_BYTES = {
+  free_beta: 300 * 1024 * 1024,
+  lite: 2 * 1024 * 1024 * 1024,
+  pro: 10 * 1024 * 1024 * 1024,
+  max: 50 * 1024 * 1024 * 1024,
+  team: 200 * 1024 * 1024 * 1024,
+} as const;
+
+export function storageLimitForPlan(plan: EffectivePlanId): number | null {
+  return plan === "admin" ? null : STORAGE_LIMITS_BYTES[plan];
+}
+
+/** Default cap is for the free tier; server reservations resolve paid access separately. */
+export const STORAGE_CAP_BYTES = STORAGE_LIMITS_BYTES.free_beta;
+export const STORAGE_CAP_LABEL = "300 MB";
 
 export const FREE_CAPS = {
   chatTurns: 100,
   practiceGenerated: 20,
   notesGenerated: 20,
   memories: 40,
-  storageBytes: STORAGE_CAP_BYTES,
+  storageBytes: STORAGE_LIMITS_BYTES.free_beta,
 } as const;
 
 export type UsageCounter = "chatTurns" | "practiceGenerated" | "notesGenerated";
@@ -69,16 +82,17 @@ export function usageRatio(used: number, cap: number): number {
   return Math.min(1, Math.max(0, used / cap));
 }
 
-export function wouldExceedStorage(used: number, extra: number): boolean {
-  return Math.max(0, used) + Math.max(0, extra) > FREE_CAPS.storageBytes;
+export function wouldExceedStorage(used: number, extra: number, cap = FREE_CAPS.storageBytes): boolean {
+  return Math.max(0, used) + Math.max(0, extra) > cap;
 }
 
 export function storageQuotaMessage(): string {
   return storageInsufficientMessage(0, 0);
 }
 
-export function storageInsufficientMessage(remainingBytes: number, requiredBytes: number): string {
+export function storageInsufficientMessage(remainingBytes: number, requiredBytes: number, capBytes = STORAGE_CAP_BYTES): string {
   const left = formatBytes(Math.max(0, remainingBytes)) || "0 B";
   const need = formatBytes(Math.max(0, requiredBytes)) || "more space";
-  return `Not enough storage. This needs ${need}; ${left} left of ${STORAGE_CAP_LABEL}.`;
+  const cap = formatBytes(capBytes) || STORAGE_CAP_LABEL;
+  return `Not enough storage. This needs ${need}; ${left} left of ${cap}.`;
 }

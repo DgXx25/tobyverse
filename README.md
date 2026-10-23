@@ -29,6 +29,25 @@ npm run build && npm start
 
 Production build, then `next start` on port 3000.
 
+## Parallel Vite and background-job preview
+
+The existing Next app remains the default. To run the parallel migration slice, use Node.js 22.16 or newer and keep the existing Firebase web keys in the repository-root `.env.local`. Large job inputs/results also require `FIREBASE_STORAGE_BUCKET` or the existing `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` value so the backend can select the Storage bucket explicitly:
+
+```bash
+npm run dev:stack
+```
+
+This starts the Vite preview at [http://localhost:5173](http://localhost:5173) and the Express API plus durable job worker on port 4000. The worker uses the repository's existing Firebase Admin credentials. The Next app can continue running separately with `npm run dev` on port 3000.
+
+The first SPA slice includes authenticated chat generation jobs. Jobs continue after closing the Vite tab, can be restored from the active-job list, and expose saved status/events/results. Only chat jobs are enabled so far; other existing routes still run from Next and have not moved to the SPA. The new chat handler temporarily reuses the existing `/api/chat` source to preserve its current prompts, tools, retrieval, and budget logic.
+
+```bash
+npm run build:stack
+npm run jobs:inspect
+```
+
+`build:stack` builds the Vite and backend workspaces without changing the Next scripts. `jobs:inspect` uses Firebase Admin credentials to list recent queued, running, failed, and stuck jobs with sanitized metadata only.
+
 ## Hosting
 
 Classic Firebase Hosting is a CDN. It cannot execute this Next.js app (API routes, App Router, no `output: "export"`). The working path is the Firebase web-frameworks adapter: `hosting.source` is this repo, and `firebase deploy --only auth,hosting` applies Google sign-in configuration, builds Next, and updates Cloud Function / Cloud Run `ssrtobyverse` (us-central1) plus the `tobyverse` Hosting site on project `ugstuff-c351a`. Do not rewrite Hosting to the old `ssrugstuffc351a` service — that leaves `/project/[id]` and other dynamic routes on a stale build while `/new` looks current.

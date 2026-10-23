@@ -7,5 +7,5 @@ export default async function NotebookPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  return <ChatRoute chatId={projectId} />;
+  return <ChatRoute chatId={projectId} projectRoute />;
 }

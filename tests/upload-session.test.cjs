@@ -12,7 +12,7 @@ let cloudBytes = 0;
 let cloudCancelled = false;
 let deleted = 0;
 let normalizedInputs = [];
-const cap = 1024 * 1024 * 1024;
+const cap = 300 * 1024 * 1024;
 const userPath = 'users/alice';
 
 function reference(key) {
@@ -45,7 +45,7 @@ const mocks = {
     authErrorResponse: (error) => Response.json({ error: error.message }, { status: 500 }),
   },
   '@/lib/server/firestore-admin': { getAdminFirestore: () => db },
-  '@/lib/server/material-storage-quota': { MaterialStorageQuotaError: QuotaError },
+  '@/lib/server/material-storage-quota': { MaterialStorageQuotaError: QuotaError, userStorageCap: async () => cap },
   '@/lib/account/plan': { STORAGE_CAP_BYTES: cap },
   '@/lib/auth': { requireSignedInUser: async () => ({ uid: 'alice', getIdToken: async () => 'alice' }) },
   '@/lib/firestore': { materialStoragePath: (...segments) => segments.join('/') },

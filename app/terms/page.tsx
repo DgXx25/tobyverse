@@ -141,7 +141,7 @@ export default function TermsPage() {
       <h2>Contact</h2>
       <p>
         Questions about these Terms can be sent to{" "}
-        <a href="mailto:hello@tobyverse.app">hello@tobyverse.app</a>.
+        <a href="mailto:hello.tobyverse@gmail.com">hello.tobyverse@gmail.com</a>.
       </p>
     </LegalPage>
   );

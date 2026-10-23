@@ -1,0 +1,26 @@
+{
+  "name": "@tobyverse/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.16.0" },
+  "scripts": {
+    "dev": "node --conditions=react-server --env-file-if-exists=../.env.local --import tsx --watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --conditions=react-server --env-file-if-exists=../.env.local --import tsx src/server.ts",
+    "jobs:inspect": "node --conditions=react-server --env-file-if-exists=../.env.local --import tsx src/jobs/inspect.ts",
+    "test": "node --conditions=react-server --import tsx --test src/app.test.ts",
+    "test:jobs": "node --conditions=react-server --import tsx --test src/jobs/limits.test.ts src/jobs/payload-storage.test.ts src/jobs/firestore-store.test.ts src/jobs/worker.test.ts src/jobs/firestore-config.test.ts src/jobs/budget.test.ts src/jobs/routes.test.ts src/jobs/handlers/chat.test.ts src/jobs/handlers/legacy-chat-bridge.test.ts"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "firebase-admin": "^14.3.0",
+    "server-only": "^0.0.1",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

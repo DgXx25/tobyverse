@@ -1,7 +1,6 @@
 import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
 import { getAdminFirestore } from "@/lib/server/firestore-admin";
-import { MaterialStorageQuotaError } from "@/lib/server/material-storage-quota";
-import { STORAGE_CAP_BYTES } from "@/lib/account/plan";
+import { MaterialStorageQuotaError, userStorageCap } from "@/lib/server/material-storage-quota";
 import { MAX_UPLOAD_BYTES, uploadTooLargeMessage } from "@/lib/materials/limits";
 import { UPLOAD_CHUNK_BYTES } from "@/lib/materials/resumable-upload";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
@@ -44,8 +43,9 @@ export async function POST(request: Request) {
     if (body.reservePool === true) {
       const user = await getAdminFirestore().collection("users").doc(uid).get();
       const used = Math.max(0, Number(user.data()?.usage?.storageBytes) || 0);
-      const remaining = Math.max(0, STORAGE_CAP_BYTES - used);
-      if (bytes > remaining) throw new MaterialStorageQuotaError(remaining, bytes);
+      const capBytes = await userStorageCap(uid);
+      const remaining = capBytes == null ? Number.MAX_SAFE_INTEGER : Math.max(0, capBytes - used);
+      if (capBytes != null && bytes > remaining) throw new MaterialStorageQuotaError(remaining, bytes, capBytes);
     }
     const ref = sessions(uid).doc();
     // Every session owns a distinct object, including a retry of the same file.
@@ -160,6 +160,7 @@ async function handleSession(request: Request, action: "write" | "status" | "can
         }
         // Count only finished objects, once. Interrupted sessions hold no quota.
         try {
+          const capBytes = session.reservePool ? await userStorageCap(uid) : null;
           session.reservedBytes = await getAdminFirestore().runTransaction(async (transaction) => {
             const current = await transaction.get(ref);
             if (["cancelling", "cancelled"].includes(current.data()?.state)) throw new Error("Upload was cancelled.");
@@ -169,8 +170,8 @@ async function handleSession(request: Request, action: "write" | "status" | "can
               const userRef = getAdminFirestore().collection("users").doc(uid);
               const user = await transaction.get(userRef);
               const used = Math.max(0, Number(user.data()?.usage?.storageBytes) || 0);
-              const remaining = Math.max(0, STORAGE_CAP_BYTES - used);
-              if (reserved > remaining) throw new MaterialStorageQuotaError(remaining, reserved);
+              const remaining = capBytes == null ? Number.MAX_SAFE_INTEGER : Math.max(0, capBytes - used);
+              if (capBytes != null && reserved > remaining) throw new MaterialStorageQuotaError(remaining, reserved, capBytes);
               transaction.update(userRef, { "usage.storageBytes": used + reserved });
             }
             transaction.update(ref, { state: "complete", reservedBytes: reserved, path: session.path, sizeBytes: session.sizeBytes, contentType: session.contentType });

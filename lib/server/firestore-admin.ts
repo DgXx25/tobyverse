@@ -157,6 +157,10 @@ export function getAdminFirestore() {
   return getFirestore(adminApp());
 }
 
+export function getAdminAuth() {
+  return getAuth(adminApp());
+}
+
 export function verifyAdminIdToken(token: string) {
   return getAuth(adminApp()).verifyIdToken(token);
 }

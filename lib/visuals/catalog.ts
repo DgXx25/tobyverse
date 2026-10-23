@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from "react";
-import katex from "katex";
+import { FormulaLoader } from "@/components/visuals/formula-loader";
 import { CATALOG_KINDS, type CatalogKind } from "@/types/visual";
 import { CATALOG_ICON_IDS, UiIcon, resolveUiIconName, type UiIconName } from "@/components/workspace/ui-icon";
 import { unwrapLatex } from "@/lib/visuals/math";
@@ -54,23 +54,7 @@ function iconClass(className?: string) {
 export function renderFormula(source: string, display = false): ReactNode | null {
   const latex = unwrapLatex(source);
   if (!latex) return null;
-  try {
-    const html = katex.renderToString(latex, {
-      throwOnError: false,
-      displayMode: display,
-      output: "html",
-      strict: false,
-    });
-    if (!html || html.includes("katex-error")) {
-      return createElement("span", { className: "font-mono text-[15px] text-foreground" }, latex);
-    }
-    return createElement("span", {
-      className: display ? "katex-display-host" : "katex-host",
-      dangerouslySetInnerHTML: { __html: html },
-    });
-  } catch {
-    return createElement("span", { className: "font-mono text-[15px] text-foreground" }, latex);
-  }
+  return createElement(FormulaLoader, { source: latex, display });
 }
 
 /** Resolves a catalog id to a React node. Unknown id or kind → null (text only). New kinds: catalog entry + renderer. */

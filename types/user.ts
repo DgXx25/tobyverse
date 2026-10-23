@@ -21,6 +21,8 @@ export type UserUsage = {
 };
 
 export type UserProfile = {
+  /** Server-resolved access, held only in memory; never written to the user document. */
+  access?: import("@/types/billing-admin").AccountAccess;
   id: EntityId;
   displayName: string | null;
   email: string | null;

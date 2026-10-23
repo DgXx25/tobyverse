@@ -13,7 +13,7 @@ export class AdminAuthError extends AuthError {
 export async function assertAdminSession(request: Request): Promise<AdminSession> {
   const session = await assertSignedInRequest(request);
   const token = await readIdToken(request);
-  if (isAdminUid(session.uid) || session.email?.toLowerCase() === "davit.gvakharia@gmail.com") {
+  if (isAdminUid(session.uid) || (session.emailVerified === true && session.email?.toLowerCase() === "davit.gvakharia@gmail.com")) {
     return { uid: session.uid, token };
   }
 

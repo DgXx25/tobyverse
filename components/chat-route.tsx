@@ -23,7 +23,7 @@ type ResolvedChat = {
   olderCursor?: string | null;
 };
 
-export function ChatRoute({ chatId }: { chatId: string }) {
+export function ChatRoute({ chatId, projectRoute = false }: { chatId: string; projectRoute?: boolean }) {
   const { user } = useAuth();
   const opening = peekOpeningProject(chatId);
   const [resolved, setResolved] = useState<ResolvedChat | null>(() =>
@@ -49,12 +49,15 @@ export function ChatRoute({ chatId }: { chatId: string }) {
       if (!project || !fast) throw new Error("Chat not found.");
       return { ...fast, initialProject: project };
     });
-    const indexed = resolveChatRoute(chatId, user.uid).then(async (next) => {
-      if (!next) throw new Error("Chat not found.");
-      const project = await getProjectById(next.projectId);
-      if (!project || project.userId !== user.uid) throw new Error("Chat not found.");
-      return { ...next, initialProject: project };
-    });
+    const routeCandidates: Promise<ResolvedChat>[] = [direct];
+    if (!projectRoute) {
+      routeCandidates.push(resolveChatRoute(chatId, user.uid).then(async (next) => {
+        if (!next) throw new Error("Chat not found.");
+        const project = await getProjectById(next.projectId);
+        if (!project || project.userId !== user.uid) throw new Error("Chat not found.");
+        return { ...next, initialProject: project };
+      }));
+    }
     // Same-origin fallback works when the browser's Firestore connection stalls.
     let fallbackTimer: ReturnType<typeof setTimeout>;
     const server = new Promise<void>((resolve) => { fallbackTimer = setTimeout(resolve, 1_500); })
@@ -68,7 +71,7 @@ export function ChatRoute({ chatId }: { chatId: string }) {
         return { projectId: data.projectId, threadId: data.threadId,
           initialProject: mapProject(data.projectId, data.project), initialMessages: data.messages, olderCursor: data.olderCursor };
       });
-    void waitForChatStep("Opening chat", () => Promise.any([direct, indexed, server]), { signal: controller.signal })
+    void waitForChatStep("Opening chat", () => Promise.any([...routeCandidates, server]), { signal: controller.signal })
       .then((next) => { if (!cancelled) setResolved(next); })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -79,7 +82,7 @@ export function ChatRoute({ chatId }: { chatId: string }) {
       clearTimeout(fallbackTimer);
       controller.abort();
     };
-  }, [chatId, user, attempt]);
+  }, [chatId, projectRoute, user, attempt]);
 
   useEffect(() => {
     if (!error) return;
@@ -107,6 +110,7 @@ export function ChatRoute({ chatId }: { chatId: string }) {
   return (
     <ProjectView
       key={`${resolved.projectId}:${resolved.threadId}`}
+      routeId={chatId}
       projectId={resolved.projectId}
       threadId={resolved.threadId}
       initialProject={resolved.initialProject}

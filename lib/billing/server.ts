@@ -1,28 +1,27 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminFirestore } from "@/lib/server/firestore-admin";
-import { isAdminUid } from "@/lib/admin/constants";
+import { readAccountAccess } from "@/lib/billing/account-server";
 import { DEFAULT_GEMINI_MODEL } from "@/lib/ai/catalog";
 import { createAiUsageCollector } from "@/lib/billing/collector";
-import { FREE_BETA_WEEKLY_MICROS, resolveEffectivePlan, utcWeekWindow } from "@/lib/billing/plans";
+import { FREE_BETA_WEEKLY_MICROS, utcWeekWindow } from "@/lib/billing/plans";
 import { emptyAiUsageWeek, mergeAiUsage, MODEL_PRICES } from "@/lib/billing/pricing";
 import type { AiUsageDelta, AiUsageReporter, AiUsageWeek, EffectivePlanId } from "@/types/billing";
 
 const DEFAULT_MODEL = DEFAULT_GEMINI_MODEL;
-const LEGACY_ADMIN_EMAIL = "davit.gvakharia@gmail.com";
 
 export class AiUsageLimitError extends Error {
   readonly code = "weekly_ai_budget_exhausted";
   readonly resetsAt: string;
 
   constructor(resetsAt: string) {
-    super(`Your weekly AI beta budget is used up. It resets at ${resetsAt}.`);
+    super(`Your weekly AI allowance is used up. It resets at ${resetsAt}.`);
     this.name = "AiUsageLimitError";
     this.resetsAt = resetsAt;
   }
 }
 
-export function decideAiBudget(input: { plan: EffectivePlanId; costMicros: number; resetsAt: string }): { allowed: true } {
-  if (input.plan !== "admin" && input.costMicros >= FREE_BETA_WEEKLY_MICROS) {
+export function decideAiBudget(input: { plan: EffectivePlanId; costMicros: number; resetsAt: string; weeklyBudgetMicros?: number | null }): { allowed: true } {
+  if (input.plan !== "admin" && input.costMicros >= (input.weeklyBudgetMicros ?? FREE_BETA_WEEKLY_MICROS)) {
     throw new AiUsageLimitError(input.resetsAt);
   }
   return { allowed: true };
@@ -60,6 +59,14 @@ function weekRef(db: ReturnType<typeof getAdminFirestore>, uid: string, weekStar
   return db.collection("users").doc(uid).collection("aiUsageWeeks").doc(weekStart);
 }
 
+/** Current week's server-metered AI usage for the signed-in account's Plan & usage view. */
+export async function readAiUsageSummary(uid: string) {
+  const { weekStart, resetsAt } = utcWeekWindow();
+  const snapshot = await weekRef(getAdminFirestore(), uid, weekStart).get();
+  const week = asWeek(weekStart, snapshot.data());
+  return { weekStart, resetsAt, costMicros: week.costMicros, requestCount: week.requestCount };
+}
+
 export type AiUsageSession = {
   plan: EffectivePlanId;
   weekStart: string;
@@ -68,54 +75,16 @@ export type AiUsageSession = {
   commit(): Promise<void>;
 };
 
-function missingServerCredentials(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /default credentials|certificate credential|Server Firebase is not signed in|invalid-credential|Unable to detect a Project Id/i.test(message);
-}
-
-/** Generation must not stop because this machine has no Google service account. */
-function skippedUsageSession(): AiUsageSession {
-  const { weekStart, resetsAt } = utcWeekWindow();
-  const collector = createAiUsageCollector({ allowUnpriced: true });
-  return {
-    plan: "free_beta",
-    weekStart,
-    resetsAt,
-    report: collector.report,
-    async commit() {},
-  };
-}
-
 export async function startAiUsageSession(uid: string, options: { models?: string[] } = {}): Promise<AiUsageSession> {
   const models = options.models?.length ? options.models : [DEFAULT_MODEL];
-  let db: ReturnType<typeof getAdminFirestore>;
-  try {
-    db = getAdminFirestore();
-  } catch (error) {
-    if (missingServerCredentials(error)) return skippedUsageSession();
-    throw error;
-  }
+  const db = getAdminFirestore();
   const { weekStart, resetsAt } = utcWeekWindow();
-  let profileSnapshot;
-  let usageSnapshot;
-  try {
-    [profileSnapshot, usageSnapshot] = await Promise.all([
-      db.collection("users").doc(uid).get(),
-      weekRef(db, uid, weekStart).get(),
-    ]);
-  } catch (error) {
-    if (missingServerCredentials(error)) return skippedUsageSession();
-    throw error;
-  }
-  const profile = profileSnapshot.data() ?? {};
-  const plan = resolveEffectivePlan({
-    storedPlan: profile.plan,
-    admin: isAdminUid(uid) || profile.admin === true || profile.email === LEGACY_ADMIN_EMAIL,
-  });
+  const [access, usageSnapshot] = await Promise.all([readAccountAccess(uid), weekRef(db, uid, weekStart).get()]);
+  const plan = access.plan;
   const unknown = models.find((model) => !MODEL_PRICES[model]);
   if (unknown && plan !== "admin") throw new Error(`No AI price configured for model ${unknown}`);
   const current = asWeek(weekStart, usageSnapshot.data());
-  decideAiBudget({ plan, costMicros: current.costMicros, resetsAt });
+  decideAiBudget({ plan, costMicros: current.costMicros, resetsAt, weeklyBudgetMicros: access.weeklyBudgetMicros });
   const collector = createAiUsageCollector({ allowUnpriced: plan === "admin" });
   let committed = false;
 
@@ -136,7 +105,7 @@ export async function startAiUsageSession(uid: string, options: { models?: strin
         const snapshot = await transaction.get(ref);
         const latest = asWeek(weekStart, snapshot.data());
         const merged = mergeCommittedUsage(latest, delta);
-        decideAiBudget({ plan, costMicros: merged.costMicros, resetsAt });
+        // Always record incurred usage, including the final request that crosses its budget.
         transaction.set(ref, {
           ...merged,
           updatedAt: FieldValue.serverTimestamp(),
@@ -151,6 +120,6 @@ export function aiUsageErrorResponse(error: unknown): Response {
   if (error instanceof AiUsageLimitError) {
     return Response.json({ error: error.message, code: error.code, resetsAt: error.resetsAt }, { status: 429 });
   }
-  const message = error instanceof Error ? error.message : "AI usage could not be started.";
-  return Response.json({ error: message }, { status: 500 });
+  console.error("[ai-usage] access check failed", error instanceof Error ? error.name : "Error");
+  return Response.json({ error: "Account access could not be checked. Please try again shortly." }, { status: 503 });
 }

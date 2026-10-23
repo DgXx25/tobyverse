@@ -1,8 +1,6 @@
-import type { Metadata } from "next";
-import { PlansPage } from "@/components/account/plans-page";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Plans · TobyVerse" };
-
+/** Keep old plan links pointed at the Plan & usage settings page. */
 export default function PlansRoute() {
-  return <PlansPage />;
+  redirect("/pricing");
 }

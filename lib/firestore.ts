@@ -4,7 +4,7 @@
  * users/{userId}
  *   displayName, email, photoURL, plan ("free" in beta; not client-writable to other values),
  *   usage { weekStart, chatTurns, practiceGenerated, notesGenerated, storageBytes },
- *     storageBytes is capped at 1 GiB per user (materials), enforced during beta.
+ *     storageBytes is capped according to the server-resolved plan (materials).
  *   preferredModel (optional Gemini model id; admin-only models are authorized by the server),
  *   chatMode (optional: auto | fast | teacher), theme (optional: light | dark),
  *   themeAccents (optional: light/dark accent ids), highContrast (optional: boolean),

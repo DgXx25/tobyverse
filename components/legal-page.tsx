@@ -30,6 +30,12 @@ export function LegalPage({
         </div>
         <hr className="mt-5 border-[#33312f]" />
         <div className="legal-body mt-10">{children}</div>
+        <nav aria-label="Policies" className="mt-16 flex flex-wrap gap-x-6 gap-y-3 border-t border-[#33312f] pt-6 text-sm text-[#a7a7a7]">
+          <Link href="/privacy" className="hover:text-white">Privacy</Link>
+          <Link href="/terms" className="hover:text-white">Terms</Link>
+          <Link href="/refunds" className="hover:text-white">Refund policy</Link>
+          <Link href="/pricing" className="hover:text-white">Pricing</Link>
+        </nav>
       </article>
     </main>
   );

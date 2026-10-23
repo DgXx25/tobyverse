@@ -603,10 +603,10 @@ function TextStage({
     return () => onChrome(null);
   }, [onChrome, zoom]);
 
-  if (!file) return <FileMessage text="Loading…" />;
-  if (!file.ok && file.status === 401) return <FileMessage text="Sign in." />;
+  if (file && !file.ok && file.status === 401) return <FileMessage text="Sign in." />;
   const text = textFallback(material, file);
-  if (!file.ok && !text) return <FileMessage text="File not found." />;
+  if (!file && !text) return <FileMessage text="Loading…" />;
+  if (file && !file.ok && !text) return <FileMessage text="File not found." />;
   return <TextPage text={text || "No preview yet."} zoom={zoom} paper={material.type !== "paste"} />;
 }
 

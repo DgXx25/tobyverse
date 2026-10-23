@@ -5,11 +5,60 @@ import { useAuth } from "@/components/auth-provider";
 import { subscribeUserProfile } from "@/lib/account/store";
 import { asUserPlan, asUserUsage, emptyUsage } from "@/lib/account/plan";
 import type { UserProfile } from "@/types/user";
+import type { AccountAccess } from "@/types/billing-admin";
+import type { User } from "firebase/auth";
+
+const accessCache = new Map<string, { value?: AccountAccess; at: number; pending?: Promise<AccountAccess> }>();
+async function loadAccess(user: User): Promise<AccountAccess> {
+  const previous = accessCache.get(user.uid);
+  if (previous?.pending) return previous.pending;
+  // Keep the access snapshot warm for the same interval as the periodic refresh below.
+  if (previous?.value && Date.now() - previous.at < 60_000) return previous.value;
+  const pending = user.getIdToken().then(async (token) => {
+    const response = await fetch("/api/account/access", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+    if (!response.ok) throw new Error("Account access unavailable");
+    const { access: value }: { access: AccountAccess } = await response.json();
+    accessCache.set(user.uid, { value, at: Date.now() });
+    return value;
+  }).catch((error) => { accessCache.delete(user.uid); throw error; });
+  accessCache.set(user.uid, { at: 0, pending });
+  return pending;
+}
 
 export function useUserProfile(): { profile: UserProfile | null; loading: boolean } {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [access, setAccess] = useState<{ uid: string; value: AccountAccess } | null>(null);
+
+  useEffect(() => {
+    if (!user || user.isAnonymous) { setAccess(null); return; }
+    let alive = true;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void loadAccess(user).then((value) => { if (alive) setAccess({ uid: user.uid, value }); }).catch(() => {
+        if (alive) setAccess(null);
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { alive = false; window.clearInterval(timer); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, [user]);
+
+  // Refresh at the exact grant/paid-period boundary, even when the tab remains open.
+  useEffect(() => {
+    if (!user || access?.uid !== user.uid) return;
+    const times = [access.value.expiresAt, access.value.grant?.expiresAt, ...access.value.subscriptions.flatMap((subscription) => [subscription.periodEndsAt, subscription.scheduledEndsAt])]
+      .filter((value): value is string => !!value).map(Date.parse).filter((value) => value > Date.now());
+    if (!times.length) return;
+    const timer = window.setTimeout(() => {
+      accessCache.delete(user.uid);
+      void loadAccess(user).then((value) => setAccess({ uid: user.uid, value })).catch(() => setAccess(null));
+    }, Math.min(2_147_483_647, Math.max(100, Math.min(...times) - Date.now() + 100)));
+    return () => window.clearTimeout(timer);
+  }, [access, user]);
 
   useEffect(() => {
     if (!user) {
@@ -28,7 +77,7 @@ export function useUserProfile(): { profile: UserProfile | null; loading: boolea
             email: user.email,
             photoURL: user.photoURL,
             plan: asUserPlan(undefined),
-            admin: user.email?.toLowerCase() === "davit.gvakharia@gmail.com",
+            admin: false,
             usage: emptyUsage(),
             preferredModel: null,
             chatMode: null,
@@ -46,6 +95,7 @@ export function useUserProfile(): { profile: UserProfile | null; loading: boolea
   }, [user]);
 
   const usage = asUserUsage(profile?.usage);
-  const resolved = profile ? { ...profile, plan: asUserPlan(profile.plan), usage } : null;
+  const effective = access?.uid === user?.uid ? access?.value : undefined;
+  const resolved = profile && profile.id === user?.uid ? { ...profile, access: effective, plan: asUserPlan(effective?.plan ?? "free_beta"), admin: effective?.source === "admin", usage } : null;
   return { profile: resolved, loading };
 }

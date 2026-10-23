@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, startTransition, type Dispatch, type SetStateAction } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
@@ -12,7 +13,7 @@ import { readChatSse } from "@/lib/ai/sse";
 import { waitForChatStep } from "@/lib/ai/chat-deadline";
 import { upsertToolStatus, type ToolStatusUpdate } from "@/lib/ai/tool-execution";
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
-import { dispatchChatTool, dispatchStatus, imageFailLine, imageFoundLine, analysingStatus, thinkingStatus } from "@/lib/chat/dispatch";
+import { dispatchChatTool, dispatchStatus, analysingStatus, thinkingStatus } from "@/lib/chat/dispatch";
 import { latestOpenAsk, splitTeachingExam } from "@/lib/chat/prompt-ask";
 import { addChatMessage, allocateChatMessageId, ensureChatThread, patchChatMessage, subscribeChatMessages } from "@/lib/chats";
 import { DEFAULT_CHAT_THREAD_ID, DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
@@ -30,7 +31,7 @@ import {
 } from "@/lib/workspace/pending-start";
 import { peekOpeningPending, takeProjectStartIngest, waitForOpeningProject } from "@/lib/workspace/start-project";
 import { authHeaders } from "@/lib/api/client";
-import { searchImagesClient, toImageAttach } from "@/lib/images/client";
+import { toImageAttach } from "@/lib/images/client";
 import {
   acceptedToolFromIntent,
   intentFromTool,
@@ -68,16 +69,21 @@ import { recipeForGoal } from "@/lib/core/recipes";
 import { updateProjectActiveArtifact, updateProjectGoal } from "@/lib/projects";
 import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
 import { markProjectActivityComplete } from "@/lib/workspace/project-activity";
+import {
+  MAX_ACTIVE_NAVIGATION_GENERATIONS,
+  abortLiveGeneration,
+  beginLiveGeneration,
+  finishLiveGeneration,
+  getActiveGenerationCount,
+  getLiveGeneration,
+  makeLiveGenerationKey,
+  subscribeLiveGeneration,
+  updateLiveGeneration,
+} from "@/lib/workspace/live-generations";
 import { RichContent } from "@/components/rich-content";
 import { ChatExerciseProvider } from "@/components/workspace/chat-exercise-context";
 import { ChatComposer, type ChatComposerHandle, type ComposerChip } from "@/components/workspace/chat-composer";
 import { VirtualChatThread, type VirtualChatThreadHandle } from "@/components/workspace/virtual-chat-thread";
-import { IllustrationBlocks } from "@/components/workspace/illustration-blocks";
-import { ClarifyChips } from "@/components/workspace/clarify-chips";
-import { MessageAttachments } from "@/components/workspace/message-attachments";
-import { ArtifactCard } from "@/components/workspace/artifact-card";
-import { ChatSetCard } from "@/components/exercises/chat-set";
-import { ImageGallery } from "@/components/workspace/image-gallery";
 import { LinkifiedText } from "@/components/workspace/linkified-text";
 import { StatusWait, formatWorked } from "@/components/workspace/status-wait";
 import { ToolActivity } from "@/components/workspace/tool-activity";
@@ -85,7 +91,6 @@ import { CitationProvider } from "@/components/workspace/citations";
 import { usedSources } from "@/lib/rag/sources";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
-import { ReportContentModal } from "@/components/workspace/report-content-modal";
 import { getStudySheet } from "@/lib/study-sheets/store";
 import { findNode, findNodeByPracticeSet, flattenNodes, hintAskPrompt, leadPathPrompt, markNodeDone, markNodeReady, moveOnPrompt, nodeTeach, pathBriefing, pathIsStarted, resumeAfterWorkPrompt, subscribeStudyPaths } from "@/lib/paths";
 import { patchStudyPath } from "@/lib/paths/store";
@@ -99,6 +104,14 @@ import type { Material } from "@/types/material";
 import type { StudyPath } from "@/types/path";
 import type { ProjectGoal } from "@/types/goals";
 import type { LessonRecipe } from "@/types/lesson";
+
+const IllustrationBlocks = dynamic(() => import("@/components/workspace/illustration-blocks").then((module) => module.IllustrationBlocks), { ssr: false });
+const ClarifyChips = dynamic(() => import("@/components/workspace/clarify-chips").then((module) => module.ClarifyChips), { ssr: false });
+const MessageAttachments = dynamic(() => import("@/components/workspace/message-attachments").then((module) => module.MessageAttachments), { ssr: false });
+const ArtifactCard = dynamic(() => import("@/components/workspace/artifact-card").then((module) => module.ArtifactCard), { ssr: false });
+const ChatSetCard = dynamic(() => import("@/components/exercises/chat-set").then((module) => module.ChatSetCard), { ssr: false });
+const ImageGallery = dynamic(() => import("@/components/workspace/image-gallery").then((module) => module.ImageGallery), { ssr: false });
+const ReportContentModal = dynamic(() => import("@/components/workspace/report-content-modal").then((module) => module.ReportContentModal), { ssr: false });
 
 type StreamState = {
   id: string;
@@ -391,8 +404,18 @@ export function ProjectChat({
   const { openSettings } = useShell();
   const guest = isGuestUser(user);
   const chatThreadId = threadId || DEFAULT_CHAT_THREAD_ID;
+  const liveGenerationKey = makeLiveGenerationKey(project.id, chatThreadId);
   const isMainThread = chatThreadId === DEFAULT_CHAT_THREAD_ID;
   const [openingUi] = useState(() => openingChatState(project.id, chatThreadId));
+  const subscribeToGeneration = useCallback(
+    (listener: () => void) => subscribeLiveGeneration(liveGenerationKey, listener),
+    [liveGenerationKey],
+  );
+  const getGenerationSnapshot = useCallback(
+    () => getLiveGeneration<StreamState>(liveGenerationKey),
+    [liveGenerationKey],
+  );
+  const liveGeneration = useSyncExternalStore(subscribeToGeneration, getGenerationSnapshot, () => null);
   const [messages, setMessages] = useState<ChatMessage[]>(openingUi.messages);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const loadingOlderRef = useRef(false);
@@ -402,12 +425,23 @@ export function ProjectChat({
   const memorizedRef = useRef<Set<string>>(new Set());
   const [skill, setSkill] = useState<ComposerSkill | null>(null);
   const [loading, setLoading] = useState(openingUi.loading);
-  const [sending, setSending] = useState(openingUi.sending);
-  const [stoppable, setStoppable] = useState(false);
+  const [sending, setSending] = useState(openingUi.sending || Boolean(liveGeneration));
+  const [stoppable, setStoppable] = useState(Boolean(liveGeneration));
   const [error, setError] = useState<string | null>(null);
   const retryRef = useRef<(() => void) | null>(null);
   const [canRetry, setCanRetry] = useState(false);
-  const [stream, setStream] = useState<StreamState | null>(openingUi.stream);
+  const [localStream, setLocalStream] = useState<StreamState | null>(() =>
+    getLiveGeneration<StreamState>(liveGenerationKey) ? null : openingUi.stream,
+  );
+  const stream = liveGeneration ? liveGeneration.stream : localStream;
+  const setStream: Dispatch<SetStateAction<StreamState | null>> = useCallback((update) => {
+    const current = getLiveGeneration<StreamState>(liveGenerationKey);
+    if (current) {
+      updateLiveGeneration(liveGenerationKey, current.controller, update);
+      return;
+    }
+    setLocalStream(update);
+  }, [liveGenerationKey]);
   const [chips, setChips] = useState<ComposerChip[]>([]);
   const removedChipIds = useRef(new Set<string>());
   const unsentChatImages = useRef(new Map<string, ChatAttachment>());
@@ -445,11 +479,25 @@ export function ProjectChat({
   const composerBoxRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<ChatComposerHandle>(null);
   const initialScrollRef = useRef(false);
-  const sendingRef = useRef(false);
+  const sendingRef = useRef(Boolean(liveGeneration));
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<StreamState | null>(null);
   const finishedKeyRef = useRef<string | null>(null);
+  const previousLiveGenerationRef = useRef(liveGeneration);
   streamRef.current = stream;
+
+  useEffect(() => {
+    if (liveGeneration) {
+      sendingRef.current = true;
+      setSending(true);
+      setStoppable(true);
+    } else if (previousLiveGenerationRef.current) {
+      sendingRef.current = false;
+      setSending(false);
+      setStoppable(false);
+    }
+    previousLiveGenerationRef.current = liveGeneration;
+  }, [liveGeneration]);
 
   useEffect(() => {
     if (!initialMessages.length) return;
@@ -465,6 +513,7 @@ export function ProjectChat({
   const [composerH, setComposerH] = useState(128);
 
   useEffect(() => {
+    if (!isActive) return;
     let cancelled = false;
     const keepOpening = Boolean(
       peekPendingStart(publicChatId(project.id, chatThreadId)) ??
@@ -520,9 +569,10 @@ export function ProjectChat({
       cancelled = true;
       unsubscribe();
     };
-  }, [project.id, userId, guest, chatThreadId, isMainThread]);
+  }, [project.id, userId, guest, chatThreadId, isMainThread, isActive]);
 
   useEffect(() => {
+    if (!isActive) return;
     if (guest) {
       setPath(null);
       return;
@@ -538,7 +588,7 @@ export function ProjectChat({
       }
       setPath(next);
     });
-  }, [project.id, guest]);
+  }, [project.id, guest, isActive]);
 
   useEffect(() => {
     pathRef.current = path;
@@ -1113,6 +1163,14 @@ export function ProjectChat({
       prompt.trim() ||
       (attachments.length ? DEFAULT_FIRST_PROMPT : "");
     if ((!modelPrompt && !ingest) || sendingRef.current) return;
+    if (getLiveGeneration<StreamState>(liveGenerationKey)) {
+      setError("A response is already running for this conversation. Switch back to its project tab to follow it.");
+      return;
+    }
+    if (getActiveGenerationCount() >= MAX_ACTIVE_NAVIGATION_GENERATIONS) {
+      setError("Three project responses are already running. Wait for one to finish before starting another.");
+      return;
+    }
     if (guest && guestCapReached(messages.filter((item) => item.role === "assistant").length)) {
       setNeedGoogle(true);
       return;
@@ -1143,8 +1201,36 @@ export function ProjectChat({
         : current);
     };
 
-    sendingRef.current = true;
     const controller = new AbortController();
+    const initialStream: StreamState = {
+      id: assistantId,
+      content: options?.resumePrefix ?? "",
+      intent: "ask",
+      status: options?.leadPath
+        ? "Teaching…"
+        : options?.examAsk
+          ? thinkingStatus(promptIsKa(modelPrompt))
+          : options?.hintAsk
+            ? "Hint…"
+            : analysing
+              ? analysingStatus(attachments)
+              : thinkingStatus(promptIsKa(modelPrompt)),
+      startedAt: Date.now(),
+      quiet: Boolean(options?.studio),
+    };
+    if (!beginLiveGeneration({
+      key: liveGenerationKey,
+      projectId: project.id,
+      threadId: chatThreadId,
+      controller,
+      stream: initialStream,
+    })) {
+      restoreClaimed();
+      setError("Three project responses are already running. Wait for one to finish before starting another.");
+      return;
+    }
+    streamRef.current = initialStream;
+    sendingRef.current = true;
     const savedUserMessageId = options?.userMessageId ?? allocateChatMessageId(project.id, chatThreadId);
     if (!options?.skipUser && !options?.studio) {
       pendingPromptScrollRef.current = savedUserMessageId;
@@ -1171,22 +1257,7 @@ export function ProjectChat({
     setSuggest(null);
     setSuggestedFollowups(null);
     setFollowup(null);
-    setStream({
-      id: assistantId,
-      content: options?.resumePrefix ?? "",
-      intent: "ask",
-      status: options?.leadPath
-        ? "Teaching…"
-        : options?.examAsk
-          ? thinkingStatus(promptIsKa(modelPrompt))
-          : options?.hintAsk
-            ? "Hint…"
-            : analysing
-              ? analysingStatus(attachments)
-              : thinkingStatus(promptIsKa(modelPrompt)),
-      startedAt: Date.now(),
-      quiet: Boolean(options?.studio),
-    });
+    setStream(initialStream);
     initialScrollRef.current = !options?.studio;
 
     const history = options?.resumeHistory ?? historyWithoutCurrentPrompt(historyTurnsFromMessages(messages), modelPrompt);
@@ -1533,13 +1604,11 @@ export function ProjectChat({
         streamed.tool.name === "answer" &&
         !promptAsk &&
         !artifact &&
-        !dispatched.suggest &&
-        chatModeRef.current !== "fast" &&
-        !isSimpleChatTask(modelPrompt)
+        !dispatched.suggest
           ? (streamed.tool.args.options ?? [])
               .map((item) => item.trim())
               .filter((item) => item.endsWith("?") && item.length <= 160)
-              .slice(0, 2)
+              .slice(0, 3)
           : [];
       if (!options?.studio && responseFollowups.length > 0) {
         setSuggestedFollowups({ messageId: id, prompts: responseFollowups });
@@ -1556,7 +1625,7 @@ export function ProjectChat({
       setStream(null);
       retryRef.current = null;
       setCanRetry(false);
-      if (dispatched.openThreadId && dispatched.openThreadId !== chatThreadId) {
+      if (dispatched.openThreadId && dispatched.openThreadId !== chatThreadId && isCurrentConversationRoute()) {
         router.push(chatPath(dispatched.openThreadId));
       } else if (dispatched.leadTopic && !options?.leadPath && !guest) {
         followTopic = dispatched.leadTopic;
@@ -1564,6 +1633,7 @@ export function ProjectChat({
       }
     } catch (err) {
       if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError") || (err instanceof Error && err.name === "AbortError")) {
+        streamRef.current = getLiveGeneration<StreamState>(liveGenerationKey)?.stream ?? streamRef.current;
         const partial = stripArtifactMarkup(
           (err as { partial?: string }).partial ?? streamRef.current?.content ?? "",
         ).trim();
@@ -1599,6 +1669,7 @@ export function ProjectChat({
       sendingRef.current = false;
       setSending(false);
       setStoppable(false);
+      finishLiveGeneration(liveGenerationKey, controller);
       keepComposerFocus();
       markProjectActivityComplete(project.id);
     }
@@ -1616,35 +1687,10 @@ export function ProjectChat({
     });
   }
 
-  async function retryImageSearch(messageId: string, userPrompt: string) {
-    const prompt = userPrompt.trim();
-    if (!prompt || sendingRef.current) return;
-    sendingRef.current = true;
-    setSending(true);
-    setError(null);
-    setStream({
-      id: messageId,
-      content: "",
-      intent: "ask",
-      status: "Searching photos…",
-      startedAt: Date.now(),
-    });
-    keepComposerFocus();
-    try {
-      const images = await searchImagesClient(prompt);
-      const prior = messages.find((item) => item.id === messageId)?.content?.trim();
-      await patchChatMessage(project.id, messageId, {
-        images,
-        content: images.length > 0 ? prior || imageFoundLine(prompt) : prior || imageFailLine(prompt),
-      }, chatThreadId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Image search failed.");
-    } finally {
-      setStream(null);
-      sendingRef.current = false;
-      setSending(false);
-      keepComposerFocus();
-    }
+  function isCurrentConversationRoute() {
+    if (typeof window === "undefined") return false;
+    const id = publicChatId(project.id, chatThreadId);
+    return window.location.pathname === `/p/${id}` || window.location.pathname === chatPath(id);
   }
 
   async function send() {
@@ -1893,7 +1939,6 @@ export function ProjectChat({
     const ka = promptIsKa(prev?.role === "user" ? prev.content : "") || threadKa;
     const orientKa = ka || promptIsKa(taught);
     const showOrient = Boolean(nowTitle && taught && !artifact && message.id === teachId);
-    const showRetry = Boolean(images && images.length === 0 && !sending);
     const showClarify =
       options != null &&
       !promptAsk &&
@@ -2006,20 +2051,6 @@ export function ProjectChat({
                 if (image.materialId) onOpenMaterial?.(image.materialId);
               }}
             />
-          ) : null}
-          {showRetry ? (
-            <button
-              type="button"
-              onClick={() => {
-                const promptText = prev?.role === "user" ? prev.content : "";
-                if (!promptText) return;
-                keepComposerFocus();
-                void retryImageSearch(message.id, promptText).finally(keepComposerFocus);
-              }}
-              className="w-fit rounded-full border border-border px-3 py-1 text-[12px] text-muted hover:border-accent hover:text-foreground"
-            >
-              Retry
-            </button>
           ) : null}
           {showClarify ? (
             <ClarifyChips
@@ -2336,7 +2367,9 @@ export function ProjectChat({
                 }
               }}
               onSend={() => void send()}
-              onStop={stoppable ? () => abortRef.current?.abort() : undefined}
+              onStop={stoppable ? () => {
+                if (!abortLiveGeneration(liveGenerationKey)) abortRef.current?.abort();
+              } : undefined}
               onResume={resumeStoppedResponse}
               resumeAvailable={resumeAvailable}
               onFile={onFile}

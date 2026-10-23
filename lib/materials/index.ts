@@ -23,6 +23,7 @@ export {
   subscribeMaterials,
   listMaterials,
   countMaterials,
+  countMaterialsForProjects,
   waitForMaterialPreviews,
   deleteMaterialDoc,
   newMaterialRef,

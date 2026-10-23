@@ -21,6 +21,7 @@ import { authPopupUnreliable } from "@/lib/standalone";
 export { POST_LOGIN_PATH };
 
 const PENDING_REDIRECT_KEY = "tv.auth-redirect";
+const POST_AUTH_RETURN_KEY = "tv.auth-return";
 const GOOGLE_OIDC_KEY = "tv.google-oidc";
 const GOOGLE_OIDC_STATE_KEY = "tv.google-oidc-state";
 const GOOGLE_ID_TOKEN_KEY = "tv.google-id-token";
@@ -87,6 +88,39 @@ function isPreAuthPath(pathname: string): boolean {
   return pathname === "/" || pathname === "/login";
 }
 
+function safePostAuthPath(path: string | null | undefined): string | null {
+  if (typeof window === "undefined" || !path?.startsWith("/") || path.startsWith("//")) return null;
+  try {
+    const target = new URL(path, window.location.origin);
+    if (target.origin !== window.location.origin || target.pathname === "/login" || target.pathname === "/login/google-callback") return null;
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberPostAuthPath(path: string) {
+  const safePath = safePostAuthPath(path);
+  if (!safePath) return;
+  try {
+    sessionStorage.setItem(POST_AUTH_RETURN_KEY, safePath);
+  } catch {
+    /* ignore storage restrictions */
+  }
+}
+
+export function consumePostAuthPath(): string {
+  let remembered: string | null = null;
+  try {
+    remembered = sessionStorage.getItem(POST_AUTH_RETURN_KEY);
+    sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
+  } catch {
+    /* ignore storage restrictions */
+  }
+  const fromQuery = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("redirect");
+  return safePostAuthPath(remembered) ?? safePostAuthPath(fromQuery) ?? POST_LOGIN_PATH;
+}
+
 let enteredApp = false;
 
 export function enterAppAfterSignIn(_cookieJustSet: boolean, go?: (path: string) => void) {
@@ -94,11 +128,12 @@ export function enterAppAfterSignIn(_cookieJustSet: boolean, go?: (path: string)
   if (!isPreAuthPath(window.location.pathname)) return;
   if (peekCurrentUser()?.isAnonymous) return;
   enteredApp = true;
+  const destination = consumePostAuthPath();
   if (go) {
-    go(POST_LOGIN_PATH);
+    go(destination);
     return;
   }
-  window.location.replace(POST_LOGIN_PATH);
+  window.location.replace(destination);
 }
 
 export function persistSignedInSession(user: User | null) {

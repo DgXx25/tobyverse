@@ -10,7 +10,7 @@
   isolation: isolate;
   background: #000000;
   color: var(--ink);
-  font-family: "Google Sans Flex", "Noto Sans Georgian", "Google Sans", sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   touch-action: none;
 }
 
@@ -38,6 +38,10 @@
 .headerLogin svg { color: var(--ice); }
 
 .scene { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.scene[data-entering="true"][data-direction="1"] { animation: scene-enter-forward 500ms cubic-bezier(.22,1,.36,1) both; }
+.scene[data-entering="true"][data-direction="-1"] { animation: scene-enter-backward 500ms cubic-bezier(.22,1,.36,1) both; }
+@keyframes scene-enter-forward { from { opacity: 0; transform: translateY(26px); filter: blur(7px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@keyframes scene-enter-backward { from { opacity: 0; transform: translateY(-26px); filter: blur(7px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
 .sceneCopy { position: absolute; pointer-events: auto; }
 .scene h1, .scene h2 { margin: 0; color: var(--ice); font-family: inherit; font-weight: 700; letter-spacing: -.055em; line-height: 1.2; text-wrap: balance; }
 .scene h1 span, .scene h2 span { display: block; }
@@ -93,4 +97,4 @@
 @media (max-width: 620px) { .responseModes { font-size: 8px; }.responseModes span { padding: 3px 6px; }.responseModes span:nth-child(1) { top: 25%; left: 8%; }.responseModes span:nth-child(2) { top: 39%; right: 8%; }.responseModes span:nth-child(3) { top: 53%; left: 12%; }.responseModes span:nth-child(4) { top: 31%; right: 11%; } }
 @media (max-height: 600px) and (min-width: 621px) { .header { padding: 14px 26px; }.intro .sceneCopy { top: 28%; }.intro h1 { font-size: min(9.4vh,66px); }.intro p { margin-top: 21px; max-width: 380px; font-size: 12px; }.quietCta { margin-top: 10px; }.editorial .sceneCopy { bottom: 19%; }.editorial h2 { font-size: 36px; }.editorial p { margin-top: 13px; max-width: 370px; font-size: 12px; }.footer { bottom: 14px; }.final .sceneCopy { top: 43%; }.final h2 { font-size: 47px; }.final p { margin: 13px 0 20px; } }
 @media (max-height: 710px) and (max-width: 620px) { .chapters { top: 74px; }.intro .sceneCopy { top: 34%; }.intro h1 { font-size: 38px; }.intro p { margin-top: 22px; font-size: 12px; }.editorial .sceneCopy { bottom: 17%; }.editorial h2 { font-size: 28px; }.editorial p { max-width: 300px; font-size: 11px; }.footer { bottom: 18px; }.final .sceneCopy { top: 49%; }.final h2 { font-size: 38px; } }
-@media (prefers-reduced-motion: reduce) { .chapterButton span, .chapterButton small { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .chapterButton span, .chapterButton small { transition: none; }.scene[data-entering="true"] { animation: none; } }

@@ -7,7 +7,7 @@ import { useAuth } from "@/components/auth-provider";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { ProjectSymbol, iconSearchLabel } from "@/components/workspace/pack-icon";
 import { deleteProject, updateProjectMeta, updateProjectTitle } from "@/lib/projects";
-import { countMaterials } from "@/lib/materials";
+import { countMaterialsForProjects } from "@/lib/materials";
 import { createNotebook } from "@/lib/workspace/notebook";
 import { useTheme } from "@/components/workspace/theme-provider";
 import { accentColor, type AccentId } from "@/lib/workspace/theme";
@@ -39,36 +39,37 @@ export function NotebooksHome() {
   const { user } = useAuth();
   const { notebooks, ready } = useNotebooks(user?.uid);
   const [folder, setFolderState] = useState("");
+  const [folderLoaded, setFolderLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => setFolderState(readFolder()), []);
+  useEffect(() => {
+    setFolderState(readFolder());
+    setFolderLoaded(true);
+  }, []);
 
   const folders = useMemo(() => foldersOf(notebooks), [notebooks]);
   const activeFolder = folder && folders.includes(folder) ? folder : "";
   const shown = activeFolder ? notebooks.filter((item) => normalizeFolder(item.folder) === activeFolder) : notebooks;
-  const shownKey = shown.map((item) => item.id).join(",");
+  const shownIds = shown.map((item) => item.id).sort();
+  const shownKey = shownIds.join(",");
   const [sourceCounts, setSourceCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const ids = shownKey ? shownKey.split(",") : [];
-    if (ids.length === 0) return;
+    if (!ready || !folderLoaded || ids.length === 0) return;
     let cancel = false;
-    void Promise.all(
-      ids.map(async (id) => {
-        try {
-          return [id, await countMaterials(id)] as const;
-        } catch {
-          return [id, 0] as const;
-        }
-      }),
-    ).then((rows) => {
-      if (!cancel) setSourceCounts(Object.fromEntries(rows));
-    });
+    void countMaterialsForProjects(ids)
+      .then((counts) => {
+        if (!cancel) setSourceCounts(counts);
+      })
+      .catch(() => {
+        if (!cancel) setSourceCounts(Object.fromEntries(ids.map((id) => [id, 0])));
+      });
     return () => {
       cancel = true;
     };
-  }, [shownKey]);
+  }, [shownKey, ready, folderLoaded]);
 
   function setFolder(next: string) {
     setFolderState(next);

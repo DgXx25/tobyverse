@@ -3,6 +3,7 @@ import { materialStoragePath } from "@/lib/firestore";
 import { extForMime } from "@/lib/materials/types";
 import { parseMaterialStoragePath } from "@/lib/materials/storage-path";
 import { RESUMABLE_UPLOAD_THRESHOLD, sendUploadChunks } from "@/lib/materials/resumable-upload";
+import { requestPlanUpgrade } from "@/lib/billing/limit-prompt";
 
 export class StorageUploadError extends Error {
   readonly status?: number;
@@ -55,6 +56,10 @@ export type MaterialStorageUpload = { path: string; sizeBytes: number; contentTy
 
 type UploadSessionProgress = MaterialStorageUpload & { offset: number; done: boolean; error?: string };
 
+function promptForStorageUpgrade(body: { remainingBytes?: unknown }): void {
+  if (typeof body.remainingBytes === "number") requestPlanUpgrade("storage");
+}
+
 function putUploadChunk(
   url: string,
   chunk: Blob,
@@ -71,13 +76,14 @@ function putUploadChunk(
     request.upload.onprogress = (event) => onProgress(event.loaded);
     request.onerror = () => reject(new StorageUploadError("Upload interrupted. Please retry the file.", { kind: "network" }));
     request.onload = () => {
-      let body: UploadSessionProgress = { path: "", sizeBytes: 0, contentType: "", reservedBytes: 0, offset, done: false };
+      let body: UploadSessionProgress & { remainingBytes?: number } = { path: "", sizeBytes: 0, contentType: "", reservedBytes: 0, offset, done: false };
       try {
         body = JSON.parse(request.responseText) as UploadSessionProgress;
       } catch {
         // Keep the HTTP status as the useful error when the server response is not JSON.
       }
       if (request.status < 200 || request.status >= 300) {
+        promptForStorageUpgrade(body);
         reject(new StorageUploadError(body.error || `Upload failed (${request.status}).`, { status: request.status }));
         return;
       }
@@ -102,20 +108,24 @@ async function uploadInChunks(
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({ path, sizeBytes: blob.size, contentType, reservePool, originalName }),
   });
-  const started = await init.json() as { id?: string; error?: string };
+  const started = await init.json() as { id?: string; error?: string; remainingBytes?: number };
+  if (!init.ok) promptForStorageUpgrade(started);
   if (!init.ok || !started.id) throw new StorageUploadError(started.error || "Could not start upload.", { status: init.status });
   const url = `/api/materials/upload-session?id=${encodeURIComponent(started.id)}`;
   let result: MaterialStorageUpload | undefined;
   const progress = async (method: "PUT" | "GET", chunk?: Blob, offset?: number) => {
-    let body: UploadSessionProgress;
+    let body: UploadSessionProgress & { remainingBytes?: number };
     if (method === "PUT" && chunk && typeof offset === "number") {
       body = await putUploadChunk(url, chunk, offset, token, (loaded) => {
         if (blob.size > 0) onProgress?.(Math.min(1, (offset + loaded) / blob.size));
       });
     } else {
       const response = await fetch(url, { method, headers, cache: "no-store" });
-      body = await response.json() as UploadSessionProgress;
-      if (!response.ok) throw new StorageUploadError(body.error || `Upload failed (${response.status}).`, { status: response.status });
+      body = await response.json() as UploadSessionProgress & { remainingBytes?: number };
+      if (!response.ok) {
+        promptForStorageUpgrade(body);
+        throw new StorageUploadError(body.error || `Upload failed (${response.status}).`, { status: response.status });
+      }
     }
     if (body.done) result = body;
     if (blob.size > 0) onProgress?.(Math.min(1, body.offset / blob.size));
@@ -169,6 +179,7 @@ async function postStorageUpload(
   }
   const body = await new Promise<{
     error?: string;
+    remainingBytes?: number;
     path?: string;
     sizeBytes?: number;
     contentType?: string;
@@ -182,13 +193,14 @@ async function postStorageUpload(
     };
     request.onerror = () => reject(new StorageUploadError("Network error. Try again.", { kind: "network" }));
     request.onload = () => {
-      let payload: { error?: string; path?: string; sizeBytes?: number; contentType?: string; reservedBytes?: number } = {};
+      let payload: { error?: string; remainingBytes?: number; path?: string; sizeBytes?: number; contentType?: string; reservedBytes?: number } = {};
       try {
         payload = JSON.parse(request.responseText) as typeof payload;
       } catch {
         // Keep the HTTP status as the useful error when the server response is not JSON.
       }
       if (request.status < 200 || request.status >= 300) {
+        promptForStorageUpgrade(payload);
         reject(new StorageUploadError(payload.error?.trim() || `Storage upload failed (${request.status}).`, { status: request.status }));
         return;
       }
@@ -243,6 +255,7 @@ export async function releaseStoragePool(bytes: number): Promise<void> {
 }
 
 const missingMaterialFiles = new Set<string>();
+const pendingMaterialFiles = new Map<string, Promise<{ bytes: Uint8Array; contentType: string }>>();
 
 export function isMissingMaterialFile(path: string): boolean {
   return missingMaterialFiles.has(path);
@@ -256,34 +269,45 @@ async function fetchMaterialFile(path: string): Promise<{ bytes: Uint8Array; con
   if (missingMaterialFiles.has(path)) {
     throw new Error("File not found.");
   }
-  const user = await requireSignedInUser();
-  const parsed = parseMaterialStoragePath(path);
-  if (!parsed || parsed.userId !== user.uid) {
-    throw new Error("Invalid storage path.");
-  }
-  const token = await user.getIdToken();
-  const query = new URLSearchParams({
-    projectId: parsed.projectId,
-    materialId: parsed.materialId,
-    name: parsed.name,
-  });
-  let response: Response;
-  try {
-    response = await fetch(`/api/materials/file?${query}`, {
-      headers: { Authorization: `Bearer ${token}` },
+  const pending = pendingMaterialFiles.get(path);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const user = await requireSignedInUser();
+    const parsed = parseMaterialStoragePath(path);
+    if (!parsed || parsed.userId !== user.uid) {
+      throw new Error("Invalid storage path.");
+    }
+    const token = await user.getIdToken();
+    const query = new URLSearchParams({
+      projectId: parsed.projectId,
+      materialId: parsed.materialId,
+      name: parsed.name,
     });
-  } catch {
-    throw new Error("Could not read file.");
+    let response: Response;
+    try {
+      response = await fetch(`/api/materials/file?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      throw new Error("Could not read file.");
+    }
+    if (!response.ok) {
+      if (response.status === 404) markMissingMaterialFile(path);
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error?.trim() || `Could not read file (${response.status}).`);
+    }
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      contentType: response.headers.get("content-type") || "application/octet-stream",
+    };
+  })();
+  pendingMaterialFiles.set(path, request);
+  try {
+    return await request;
+  } finally {
+    if (pendingMaterialFiles.get(path) === request) pendingMaterialFiles.delete(path);
   }
-  if (!response.ok) {
-    if (response.status === 404) markMissingMaterialFile(path);
-    const body = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error?.trim() || `Could not read file (${response.status}).`);
-  }
-  return {
-    bytes: new Uint8Array(await response.arrayBuffer()),
-    contentType: response.headers.get("content-type") || "application/octet-stream",
-  };
 }
 
 export async function readExtractedText(path: string): Promise<string> {

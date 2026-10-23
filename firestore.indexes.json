@@ -31,6 +31,22 @@
         { "fieldPath": "materialId", "order": "ASCENDING" },
         { "fieldPath": "page", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "generationJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "generationJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "leaseExpiresAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

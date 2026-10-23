@@ -11,6 +11,7 @@ import {
   type DocumentReference,
   type Unsubscribe,
 } from "firebase/firestore";
+import type { User } from "firebase/auth";
 import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { requireSignedInUser } from "@/lib/auth";
@@ -20,6 +21,21 @@ import { storedObjectName } from "@/lib/materials/storage-path";
 import { mimeFromName } from "@/lib/materials/types";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import { MATERIAL_TYPES, type Material, type MaterialImage, type MaterialIndex, type MaterialStatus, type MaterialType } from "@/types/material";
+
+const MATERIAL_COUNT_CACHE_MS = 10_000;
+const MATERIAL_COUNT_BATCH_SIZE = 100;
+const materialCountCache = new Map<string, { count: number; expiresAt: number }>();
+const materialCountRequests = new Map<string, Promise<Record<string, number>>>();
+
+function materialCountCacheKey(uid: string, projectId: string): string {
+  return `${uid}\u0000${projectId}`;
+}
+
+export function invalidateMaterialCount(projectId: string): void {
+  for (const key of materialCountCache.keys()) {
+    if (key.endsWith(`\u0000${projectId}`)) materialCountCache.delete(key);
+  }
+}
 
 function materialsRef(projectId: string) {
   return collection(
@@ -194,6 +210,7 @@ export async function writeMaterialDoc(
   };
   if (data.status === "processing") payload.createdAt = serverTimestamp();
   await setDoc(doc(materialsRef(projectId), materialId), omitUndefined(payload), { merge: true });
+  invalidateMaterialCount(projectId);
 }
 
 export function subscribeMaterials(
@@ -220,18 +237,75 @@ export async function getMaterial(projectId: string, materialId: string): Promis
 }
 
 export async function countMaterials(projectId: string): Promise<number> {
-  const user = await requireSignedInUser();
-  const token = await user.getIdToken();
-  const response = await fetch("/api/materials/count", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ projectId }),
-  });
-  const data = (await response.json().catch(() => ({}))) as { count?: unknown; error?: unknown };
-  if (!response.ok || typeof data.count !== "number") {
-    throw new Error(typeof data.error === "string" ? data.error : "Could not count project sources.");
+  const counts = await countMaterialsForProjects([projectId]);
+  const count = counts[projectId];
+  if (typeof count !== "number") throw new Error("Could not count project sources.");
+  return count;
+}
+
+async function loadMaterialCountBatch(user: User, projectIds: string[]): Promise<Record<string, number>> {
+  const userId = user.uid;
+  const now = Date.now();
+  const cached: Record<string, number> = {};
+  const missing: string[] = [];
+  for (const projectId of projectIds) {
+    const entry = materialCountCache.get(materialCountCacheKey(userId, projectId));
+    if (entry && entry.expiresAt > now) cached[projectId] = entry.count;
+    else {
+      materialCountCache.delete(materialCountCacheKey(userId, projectId));
+      missing.push(projectId);
+    }
   }
-  return data.count;
+  if (missing.length === 0) return cached;
+
+  const requestKey = `${userId}\u0000${[...missing].sort().join("\u0000")}`;
+  let request = materialCountRequests.get(requestKey);
+  if (!request) {
+    request = (async () => {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/materials/count", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ projectIds: missing }),
+        cache: "no-store",
+      });
+      const data = (await response.json().catch(() => ({}))) as { counts?: unknown; error?: unknown };
+      if (!response.ok || !data.counts || typeof data.counts !== "object") {
+        throw new Error(typeof data.error === "string" ? data.error : "Could not count project sources.");
+      }
+
+      const responseCounts = Object.create(null) as Record<string, number>;
+      for (const projectId of missing) {
+        const count = (data.counts as Record<string, unknown>)[projectId];
+        if (typeof count !== "number") throw new Error("Could not count project sources.");
+        responseCounts[projectId] = count;
+        materialCountCache.set(materialCountCacheKey(userId, projectId), {
+          count,
+          expiresAt: Date.now() + MATERIAL_COUNT_CACHE_MS,
+        });
+      }
+      return responseCounts;
+    })();
+    materialCountRequests.set(requestKey, request);
+  }
+
+  try {
+    return { ...cached, ...await request };
+  } finally {
+    if (materialCountRequests.get(requestKey) === request) materialCountRequests.delete(requestKey);
+  }
+}
+
+export async function countMaterialsForProjects(projectIds: string[]): Promise<Record<string, number>> {
+  const ids = [...new Set(projectIds.map((projectId) => projectId.trim()).filter(Boolean))];
+  if (ids.length === 0) return {};
+  const user = await requireSignedInUser();
+  const batches: string[][] = [];
+  for (let index = 0; index < ids.length; index += MATERIAL_COUNT_BATCH_SIZE) {
+    batches.push(ids.slice(index, index + MATERIAL_COUNT_BATCH_SIZE));
+  }
+  const result = await Promise.all(batches.map((batch) => loadMaterialCountBatch(user, batch)));
+  return Object.assign({}, ...result);
 }
 
 export async function listMaterials(projectId: string): Promise<Material[]> {
@@ -291,6 +365,7 @@ export async function renameMaterial(projectId: string, materialId: string, titl
 
 export async function deleteMaterialDoc(projectId: string, materialId: string): Promise<void> {
   await deleteDoc(doc(materialsRef(projectId), materialId));
+  invalidateMaterialCount(projectId);
 }
 
 export async function patchMaterialStatus(projectId: string, materialId: string, status: MaterialStatus): Promise<void> {

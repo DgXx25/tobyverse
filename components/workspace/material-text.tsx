@@ -7,19 +7,23 @@ import type { Material } from "@/types/material";
 
 /** Extracted text only. No page image, slide, or paper background. */
 export function MaterialText({ material, onBack }: { material: Material; onBack: () => void }) {
-  const [text, setText] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(() => material.extractedTextPreview || "");
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setText(null);
+    const preview = material.extractedTextPreview || "";
+    setText(preview);
     setFailed(false);
     loadMaterialText(material)
       .then((value) => {
-        if (!cancelled) setText(value);
+        if (!cancelled) setText(value || preview);
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) {
+          setFailed(true);
+          setText(preview);
+        }
       });
     return () => {
       cancelled = true;

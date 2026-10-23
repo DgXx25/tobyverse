@@ -33,10 +33,10 @@ const PreferredModelContext = createContext<PreferredModelValue | null>(null);
 export function PreferredModelProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { profile } = useUserProfile();
-  const isAdmin = profile?.admin === true;
+  const modelPlan = profile?.access?.plan ?? (profile?.admin ? "admin" : "free_beta");
   const [optimistic, setOptimistic] = useState<AiModelId | null>(null);
-  const fromProfile = resolveAiModel(profile?.preferredModel, isAdmin);
-  const model = optimistic && isAllowedAiModel(optimistic, isAdmin) ? optimistic : fromProfile;
+  const fromProfile = resolveAiModel(profile?.preferredModel, modelPlan);
+  const model = optimistic && isAllowedAiModel(optimistic, modelPlan) ? optimistic : fromProfile;
 
   useEffect(() => {
     setOptimistic(null);
@@ -48,22 +48,22 @@ export function PreferredModelProvider({ children }: { children: ReactNode }) {
 
   const setModel = useCallback(
     (id: AiModelId) => {
-      if (!isAllowedAiModel(id, isAdmin)) return;
+      if (!isAllowedAiModel(id, modelPlan)) return;
       setOptimistic(id);
       if (!user) return;
       void updatePreferredModel(user.uid, id).catch(() => undefined);
     },
-    [isAdmin, user],
+    [modelPlan, user],
   );
 
   const value = useMemo<PreferredModelValue>(
     () => ({
       model,
       name: aiModelDisplayName(model),
-      options: availableAiModels(isAdmin),
+      options: availableAiModels(modelPlan),
       setModel,
     }),
-    [isAdmin, model, setModel],
+    [modelPlan, model, setModel],
   );
 
   return <PreferredModelContext.Provider value={value}>{children}</PreferredModelContext.Provider>;

@@ -108,6 +108,7 @@ function ProgressCircle({ value, label }: { value?: number; label: string }) {
  * restricted (selectedIds empty) every source is used, which is the default for a new notebook.
  */
 export function SourcesPane({
+  active = true,
   projectId,
   userId,
   items,
@@ -120,6 +121,7 @@ export function SourcesPane({
   hideTopBar = false,
   className = "",
 }: {
+  active?: boolean;
   projectId: string;
   userId: string;
   items: Material[];
@@ -156,15 +158,16 @@ export function SourcesPane({
   const selectionAnchor = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     setFolders([]);
     setManagedIds([]);
     setOrganizing(false);
     setCollapsed([]);
     return subscribeSourceFolders(projectId, setFolders, err => setError(err.message));
-  }, [projectId]);
+  }, [projectId, active]);
 
   const visiblePending = pending.filter((entry) => !items.some((item) => sameFile(entry.name, item)));
-  const reading = items.find((item) => item.id === readingId) ?? null;
+  const reading = active ? items.find((item) => item.id === readingId) ?? null : null;
   const allIds = items.map((item) => item.id);
   const none = selectedIds.length === 1 && selectedIds[0] === NONE;
   const picked = selectedIds.filter((id) => allIds.includes(id));

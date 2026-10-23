@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Topbar } from "@/components/topbar";
 import { ShellProvider, useShell } from "@/components/workspace/shell-context";
-import { WhatsNewModal } from "@/components/whats-new-modal";
 import { ChatModeSync } from "@/components/account/chat-mode-sync";
 import { ProjectTabKeepAlive } from "@/components/workspace/project-tab-keep-alive";
 import { CHAT_SEARCH_OPEN_EVENT } from "@/lib/workspace/ui-events";
@@ -14,6 +13,7 @@ import { CHAT_SEARCH_OPEN_EVENT } from "@/lib/workspace/ui-events";
 const SettingsModal = dynamic(() => import("@/components/workspace/settings-modal").then((mod) => mod.SettingsModal), { ssr: false });
 const AccountSheet = dynamic(() => import("@/components/account-sheet").then((mod) => mod.AccountSheet), { ssr: false });
 const ChatSearch = dynamic(() => import("@/components/chat-search").then((mod) => mod.ChatSearch), { ssr: false });
+const WhatsNewModal = dynamic(() => import("@/components/whats-new-modal").then((mod) => mod.WhatsNewModal), { ssr: false });
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, configured } = useAuth();
@@ -68,11 +68,22 @@ function AppShellFrame({ userId, children }: { userId: string; children: React.R
       </main>
       {settingsOpen ? <SettingsModal /> : null}
       {accountSheetOpen ? <AccountSheet /> : null}
-      <WhatsNewModal />
+      <DeferredWhatsNewModal />
       <LazyChatSearch userId={userId} />
       <ChatModeSync />
     </div>
   );
+}
+
+function DeferredWhatsNewModal() {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setReady(true), 700);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return ready ? <WhatsNewModal /> : null;
 }
 
 function LazyChatSearch({ userId }: { userId: string }) {

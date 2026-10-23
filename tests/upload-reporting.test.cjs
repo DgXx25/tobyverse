@@ -35,8 +35,8 @@ try {
 
 test("upload failures keep one actionable line per file", () => {
   assert.equal(
-    formatUploadFailure({ name: "book.pdf", reason: { status: 413, message: "Not enough storage. This needs 9 MB; 2 MB left of 1 GB." } }),
-    "book.pdf: Not enough storage. This needs 9 MB; 2 MB left of 1 GB.",
+    formatUploadFailure({ name: "book.pdf", reason: { status: 413, message: "Not enough storage. This needs 9 MB; 2 MB left of 300 MB." } }),
+    "book.pdf: Not enough storage. This needs 9 MB; 2 MB left of 300 MB.",
   );
   assert.equal(
     formatUploadFailure({ name: "slides.pptx", reason: { status: 401 } }),
@@ -57,9 +57,9 @@ test("network failures stay actionable and the secondary transport ceiling is 10
 test("quota rejection explains the pool space left before any transport ceiling", () => {
   assert.equal(
     storageInsufficientMessage(2 * 1024 * 1024, 9 * 1024 * 1024),
-    "Not enough storage. This needs 9.0 MB; 2.0 MB left of 1 GB.",
+    "Not enough storage. This needs 9.0 MB; 2.0 MB left of 300 MB.",
   );
-  assert.equal(storageInsufficientMessage(0, 1), "Not enough storage. This needs 1 B; 0 B left of 1 GB.");
+  assert.equal(storageInsufficientMessage(0, 1), "Not enough storage. This needs 1 B; 0 B left of 300 MB.");
 });
 
 test("HEIC and HEIF are photo inputs and receive JPEG object names", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { useUserProfile } from "@/components/account/use-user-profile";
@@ -10,13 +10,22 @@ import { UiIcon } from "@/components/workspace/ui-icon";
 import { firstNameFromUser, initialsFromName, signInMethodsFromProviderData } from "@/lib/account/providers";
 import { planLabel } from "@/lib/account/plan";
 import { resolveEffectivePlan } from "@/lib/billing/plans";
+import { PlanUsage } from "@/components/account/plan-usage";
 
-type AccountTab = "account" | "memory" | "data";
+type AccountTab = "account" | "planUsage" | "memory" | "data";
 
 export function AccountWorkspace() {
   const { user } = useAuth();
   const { profile } = useUserProfile();
   const [tab, setTab] = useState<AccountTab>("account");
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("section") !== "planUsage") return;
+    setTab("planUsage");
+    url.searchParams.delete("section");
+    window.history.replaceState(window.history.state, "", url);
+  }, []);
 
   const displayName = profile?.displayName || user?.displayName || "Signed in";
   const email = profile?.email || user?.email || "";
@@ -54,6 +63,12 @@ export function AccountWorkspace() {
               icon={<UiIcon name="user" size={18} />}
               label="Account"
               onClick={() => setTab("account")}
+            />
+            <NavItem
+              active={tab === "planUsage"}
+              icon={<UiIcon name="usage" size={18} />}
+              label="Plan & usage"
+              onClick={() => setTab("planUsage")}
             />
             <NavItem
               active={tab === "memory"}
@@ -96,7 +111,7 @@ export function AccountWorkspace() {
                 <InfoRow label="Account created" value={formatCreated(createdAt)} last />
               </div>
 
-              <Link href="/plans" className="mt-5 inline-flex rounded-full border border-border px-4 py-2 text-[13px] text-foreground">View plans</Link>
+              <button type="button" onClick={() => setTab("planUsage")} className="mt-5 inline-flex rounded-full border border-border px-4 py-2 text-[13px] text-foreground">Plan & usage</button>
 
               <div className="mt-10">
                 <h3 className="text-[18px] font-semibold tracking-tight text-foreground">Sign-in methods</h3>
@@ -120,6 +135,12 @@ export function AccountWorkspace() {
                   )}
                 </div>
               </div>
+            </div>
+          ) : tab === "planUsage" ? (
+            <div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Plan & usage</h2>
+              <p className="mt-1 text-[14px] text-muted">Manage your plan and keep track of AI and storage usage.</p>
+              <div className="mt-6"><PlanUsage profile={profile} /></div>
             </div>
           ) : tab === "memory" ? (
             <div>

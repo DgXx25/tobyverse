@@ -57,7 +57,7 @@ function mapProfile(id: string, data: Record<string, unknown>): UserProfile {
     email: typeof data.email === "string" ? data.email : null,
     photoURL: typeof data.photoURL === "string" ? data.photoURL : null,
     plan: asUserPlan(data.plan),
-    admin: data.admin === true || (typeof data.email === "string" && data.email.toLowerCase() === "davit.gvakharia@gmail.com"),
+    admin: data.admin === true,
     usage: asUserUsage(data.usage, weekStart),
     preferredModel: parsePreferredModel(data.preferredModel),
     chatMode: isChatMode(data.chatMode) ? data.chatMode : null,

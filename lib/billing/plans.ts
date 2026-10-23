@@ -2,6 +2,13 @@ import type { EffectivePlanId } from "@/types/billing";
 
 export const FREE_BETA_WEEKLY_MICROS = 2_000_000;
 
+export const PAID_WEEKLY_BUDGET_MICROS = {
+  lite: 5_000_000,
+  pro: 15_000_000,
+  max: 40_000_000,
+  team: 100_000_000,
+} as const;
+
 export type PlanDefinition = {
   id: EffectivePlanId;
   monthlyPriceCents: number | null;
@@ -22,24 +29,24 @@ export const PLAN_CATALOG: Record<EffectivePlanId, PlanDefinition> = {
   },
   lite: {
     id: "lite",
-    monthlyPriceCents: 1_000,
-    weeklyBudgetMicros: null,
+    monthlyPriceCents: 799,
+    weeklyBudgetMicros: PAID_WEEKLY_BUDGET_MICROS.lite,
     available: false,
     name: "Lite",
     description: "A lightweight plan for everyday AI work.",
   },
   pro: {
     id: "pro",
-    monthlyPriceCents: 2_000,
-    weeklyBudgetMicros: null,
+    monthlyPriceCents: 1_499,
+    weeklyBudgetMicros: PAID_WEEKLY_BUDGET_MICROS.pro,
     available: false,
     name: "Pro",
     description: "More room for deeper study and creation.",
   },
   max: {
     id: "max",
-    monthlyPriceCents: 5_000,
-    weeklyBudgetMicros: null,
+    monthlyPriceCents: 2_999,
+    weeklyBudgetMicros: PAID_WEEKLY_BUDGET_MICROS.max,
     available: false,
     name: "Max",
     description: "Maximum individual access for demanding work.",
@@ -47,7 +54,7 @@ export const PLAN_CATALOG: Record<EffectivePlanId, PlanDefinition> = {
   team: {
     id: "team",
     monthlyPriceCents: null,
-    weeklyBudgetMicros: null,
+    weeklyBudgetMicros: PAID_WEEKLY_BUDGET_MICROS.team,
     available: false,
     name: "Team",
     description: "One payer, shared workspace, and seats for your team.",

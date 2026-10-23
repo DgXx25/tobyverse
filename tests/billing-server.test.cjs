@@ -11,6 +11,11 @@ Module._resolveFilename = function (request, parent, isMain, options) {
   if (request.startsWith("@/")) request = path.join(root, request.slice(2));
   return originalResolve.call(this, request, parent, isMain, options);
 };
+const originalLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === "server-only") return {};
+  return originalLoad.call(this, request, parent, isMain);
+};
 function loadTypeScript(module, filename) {
   const source = fs.readFileSync(filename, "utf8");
   const output = ts.transpileModule(source, {
@@ -32,6 +37,12 @@ test("ordinary account at cap is rejected with reset time", () => {
 
 test("admin remains allowed above the beta cap", () => {
   assert.equal(decideAiBudget({ plan: "admin", costMicros: 9_000_000, resetsAt: "2026-09-28T00:00:00.000Z" }).allowed, true);
+});
+
+test("paid AI allowance blocks at its plan cap and a new UTC week starts at zero", () => {
+  assert.equal(decideAiBudget({ plan: "lite", costMicros: 4_999_999, weeklyBudgetMicros: 5_000_000, resetsAt: "2026-09-28T00:00:00.000Z" }).allowed, true);
+  assert.throws(() => decideAiBudget({ plan: "lite", costMicros: 5_000_000, weeklyBudgetMicros: 5_000_000, resetsAt: "2026-09-28T00:00:00.000Z" }), AiUsageLimitError);
+  assert.equal(emptyAiUsageWeek("2026-09-28").costMicros, 0);
 });
 
 test("the final crossing request is merged at actual cost", () => {

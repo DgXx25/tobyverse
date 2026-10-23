@@ -1,32 +1,50 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { MessageAttachments } from "@/components/workspace/message-attachments";
-import { MaterialViewer } from "@/components/workspace/material-viewer";
-import { NoteDocument } from "@/components/visuals/note-document";
 import { QuietIconCluster } from "@/components/workspace/quiet-icon-cluster";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { RichContent } from "@/components/rich-content";
-import { loadSharedChatClient } from "@/lib/sharing/client";
 import type { SharedChatSnapshot } from "@/lib/sharing/types";
 import { isStudioConfigPrompt } from "@/lib/workspace/studio";
 
 type SharedFocus = { kind: "material" | "sheet"; id: string };
+type InitialStatus = "ready" | "missing" | "loading";
 
-export function SharedChatView({ shareId }: { shareId: string }) {
-  const [snapshot, setSnapshot] = useState<SharedChatSnapshot | null>(null);
-  const [missing, setMissing] = useState(false);
+const MaterialViewer = dynamic(
+  () => import("@/components/workspace/material-viewer").then((mod) => mod.MaterialViewer),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-sm text-muted">Loading…</div> },
+);
+const NoteDocument = dynamic(
+  () => import("@/components/visuals/note-document").then((mod) => mod.NoteDocument),
+  { ssr: false, loading: () => <div className="h-20 animate-pulse rounded-xl bg-surface-2" /> },
+);
+
+export function SharedChatView({
+  shareId,
+  initialSnapshot = null,
+  initialStatus = "loading",
+}: {
+  shareId: string;
+  initialSnapshot?: SharedChatSnapshot | null;
+  initialStatus?: InitialStatus;
+}) {
+  const [snapshot, setSnapshot] = useState<SharedChatSnapshot | null>(initialSnapshot);
+  const [missing, setMissing] = useState(initialStatus === "missing");
   const [loadError, setLoadError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [focus, setFocus] = useState<SharedFocus | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
 
   useEffect(() => {
+    if (retryCount === 0 && (initialSnapshot || initialStatus === "missing")) return;
     let cancelled = false;
     setMissing(false);
     setLoadError(false);
-    void loadSharedChatClient(shareId)
+    void import("@/lib/sharing/client")
+      .then(({ loadSharedChatClient }) => loadSharedChatClient(shareId))
       .catch(async () => {
         const response = await fetch(`/api/share/${encodeURIComponent(shareId)}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Shared chat service unavailable.");
@@ -43,7 +61,7 @@ export function SharedChatView({ shareId }: { shareId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [shareId, retryCount]);
+  }, [shareId, retryCount, initialSnapshot, initialStatus]);
 
   const activeMaterial = useMemo(
     () => focus?.kind === "material" ? snapshot?.materials.find((item) => item.id === focus.id) ?? null : null,

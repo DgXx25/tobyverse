@@ -5,6 +5,7 @@ import type { ChatImageHit, ChatSourceRef } from "@/types/chat";
 import { parseSearchHits } from "@/lib/images/hits";
 import { GUEST_CAP_CODE, GuestCapError } from "@/lib/guest";
 import { waitForChatStep } from "@/lib/ai/chat-deadline";
+import { requestPlanUpgrade } from "@/lib/billing/limit-prompt";
 
 export async function readSseStream(
   response: Response,
@@ -35,6 +36,7 @@ export async function readChatSse(
       signal: options.signal, timeoutMs: options.idleTimeoutMs ?? 45_000,
     })) as { error?: string; code?: string } | null;
     if (data?.code === GUEST_CAP_CODE) throw new GuestCapError();
+    if (data?.code === "weekly_ai_budget_exhausted") requestPlanUpgrade("ai");
     throw new Error(data?.error ?? "Request failed.");
   }
 

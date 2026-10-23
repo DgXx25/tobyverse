@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -23,6 +23,7 @@ import { discardUntouchedNotebook } from "@/lib/workspace/discard-draft-notebook
 import { notebookTitle } from "@/lib/workspace/title";
 import { useNotebooks } from "@/lib/workspace/use-notebooks";
 import { activeNotebookId } from "@/lib/workspace/active-notebook-tab";
+import { getActiveGenerationProjectIds, subscribeActiveGenerations } from "@/lib/workspace/live-generations";
 import {
   clearProjectActivityNotificationFor,
   getProjectActivityNotifications,
@@ -32,6 +33,7 @@ import {
 const SYMBOL_COLORS = ["blue", "red", "orange", "yellow", "green", "teal", "purple", "pink"] as const satisfies readonly AccentId[];
 
 const OPEN_KEY = "tv.openNotebooks";
+const NO_ACTIVE_GENERATION_PROJECTS: readonly string[] = [];
 
 function readOpen(): string[] {
   if (typeof window === "undefined") return [];
@@ -61,6 +63,11 @@ export function Topbar() {
   const pathname = usePathname();
   const { openSettings, openAccountSheet, setSelectedProjectId, setPendingPanel, projectShare } = useShell();
   const { notebooks } = useNotebooks(user?.uid);
+  const generatingProjects = useSyncExternalStore(
+    subscribeActiveGenerations,
+    getActiveGenerationProjectIds,
+    () => NO_ACTIVE_GENERATION_PROJECTS,
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const [tabMenu, setTabMenu] = useState<{ id: string; left: number; top: number } | null>(null);
   const [openIds, setOpenIds] = useState<string[]>([]);
@@ -295,6 +302,12 @@ export function Topbar() {
               >
                 <ProjectSymbol name={projectIconFor(project)} size={20} color={project.iconColor} className="shrink-0" />
                 <span className="min-w-0 truncate">{notebookTitle(project.title)}</span>
+                {generatingProjects.includes(project.id) ? (
+                  <span className="relative ml-auto mr-1 h-2 w-2 shrink-0" role="img" aria-label="A response is running" title="A response is running">
+                    <span className="absolute inset-0 animate-ping rounded-full bg-blue-400/70" />
+                    <span className="relative block h-2 w-2 rounded-full bg-blue-500" />
+                  </span>
+                ) : null}
               </Link>
               <button
                 type="button"

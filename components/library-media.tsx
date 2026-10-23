@@ -16,25 +16,46 @@ function IconFallback({ item }: { item: LibraryItem }) {
 export function LibraryCardThumb({ item }: { item: LibraryItem }) {
   const target = useMemo(() => libraryThumbTarget(item), [item]);
   const [state, setState] = useState<{ key: string; file: MaterialFileResult } | null>(null);
+  const [nearViewport, setNearViewport] = useState(false);
+  const thumbRef = useRef<HTMLDivElement>(null);
   const key = target ? cacheKey(item.projectId, item.id, target.name) : "";
 
   useEffect(() => {
-    if (!target) { setState(null); return; }
+    const node = thumbRef.current;
+    if (!node) return;
+    if (!("IntersectionObserver" in window)) {
+      setNearViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      setNearViewport(true);
+      observer.disconnect();
+    }, { rootMargin: "100px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!target || !nearViewport) { setState(null); return; }
     let cancelled = false;
     setState(null);
     void getMaterialFile(item.projectId, item.id, target.name).then((file) => {
       if (!cancelled) setState({ key, file });
     });
     return () => { cancelled = true; };
-  }, [item.id, item.projectId, key, target]);
+  }, [item.id, item.projectId, key, nearViewport, target]);
 
   const file = state?.key === key ? state.file : null;
+  let preview = <IconFallback item={item} />;
   if (target && file?.ok && target.mode === "image") {
     const url = materialFileObjectUrl(file, key);
-    return <img src={url} alt="" className={`h-full w-full ${item.materialType === "image" ? "object-cover" : "object-contain"}`} />;
+    preview = <img src={url} alt="" loading="lazy" decoding="async" className={`h-full w-full ${item.materialType === "image" ? "object-cover" : "object-contain"}`} />;
+  } else if (target && file?.ok && target.mode === "pdf") {
+    preview = <LibraryPdfThumb data={file.bytes} />;
   }
-  if (target && file?.ok && target.mode === "pdf") return <LibraryPdfThumb data={file.bytes} />;
-  return <div className="flex h-full w-full items-center justify-center"><IconFallback item={item} /></div>;
+
+  return <div ref={thumbRef} className="flex h-full w-full items-center justify-center">{preview}</div>;
 }
 
 function LibraryPdfThumb({ data }: { data: ArrayBuffer }) {

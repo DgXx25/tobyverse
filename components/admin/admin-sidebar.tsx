@@ -8,6 +8,8 @@ import { useAuth } from "@/components/auth-provider";
 import { useShell } from "@/components/workspace/shell-context";
 
 const ITEMS = [
+  { href: "/admin/plans", label: "Plans", icon: "billing" as const },
+  { href: "/admin/plan-settings", label: "Plan settings", icon: "settings" as const },
   { href: "/admin/reports", label: "Reports", icon: "notes" as const },
   { href: "/admin/system", label: "System", icon: "settings" as const },
   { href: "/admin/playground", label: "Playground", icon: "spark" as const },

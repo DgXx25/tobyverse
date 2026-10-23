@@ -1,7 +1,7 @@
 import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/gemini";
 import { eligibleChatToolNames, isInternalTool, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { toolStatusText, withToolTimeout, type ToolExecutionStatus } from "@/lib/ai/tool-execution";
-import { DEFAULT_AI_PROVIDER, DEFAULT_GEMINI_MODEL, isAdminOnlyAiModel, isKnownAiModel, isEnabledProvider } from "@/lib/ai/catalog";
+import { DEFAULT_AI_PROVIDER, DEFAULT_GEMINI_MODEL, isPaidOnlyAiModel, isKnownAiModel, isEnabledProvider } from "@/lib/ai/catalog";
 import { FREE_CAPS } from "@/lib/account/plan";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
@@ -17,6 +17,7 @@ import { retrieveChunks } from "@/lib/rag/server";
 import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
 import { papersInTurns } from "@/lib/blocks/paper-thread";
 import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
+import { readAccountAccess } from "@/lib/billing/account-server";
 import { waitForChatStep } from "@/lib/ai/chat-deadline";
 import { readChatLinkedPages } from "@/lib/chat/linked-pages";
 import { allowImageSearch, clampImageCount, searchWebImages } from "@/lib/images/search";
@@ -273,11 +274,15 @@ export async function POST(request: Request) {
   if (!isKnownAiModel(requestedModel)) {
     return Response.json({ error: "That model is not available." }, { status: 400 });
   }
-  if (isAdminOnlyAiModel(requestedModel)) {
-    try {
-      await assertAdminRequest(request);
-    } catch (error) {
-      return adminErrorResponse(error);
+  if (isPaidOnlyAiModel(requestedModel)) {
+    if (session.anonymous) return Response.json({ error: "This model is available on Lite and higher plans.", code: "paid_model_required" }, { status: 403 });
+    let access;
+    try { access = await readAccountAccess(session.uid); }
+    catch (error) { return aiUsageErrorResponse(error); }
+    if (access.plan === "free_beta") return Response.json({ error: "This model is available on Lite and higher plans.", code: "paid_model_required" }, { status: 403 });
+    if (access.plan === "admin") {
+      try { await assertAdminRequest(request); }
+      catch (error) { return adminErrorResponse(error); }
     }
   }
   const modelId = requestedModel;

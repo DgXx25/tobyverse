@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { asChatMode } from "@/lib/core/chat-modes";
@@ -23,9 +24,7 @@ import {
 import { useAuth } from "@/components/auth-provider";
 import { ProjectChat } from "@/components/project-chat";
 import { ProjectLoading } from "@/components/project-loading";
-import { ArtifactPanel, type ArtifactFocus, type ArtifactTabId } from "@/components/workspace/artifact-panel";
-import { ProjectSettingsPane } from "@/components/workspace/project-settings-pane";
-import { SourcesPane } from "@/components/workspace/sources-pane";
+import type { ArtifactFocus, ArtifactTabId } from "@/components/workspace/artifact-panel";
 import type { StudioJob, StudioRequest, StudioTile } from "@/lib/workspace/studio";
 import { useShell } from "@/components/workspace/shell-context";
 import { QuietIconCluster, type QuietIconAction } from "@/components/workspace/quiet-icon-cluster";
@@ -41,6 +40,19 @@ import type { NotesGenerateEvent } from "@/lib/study-sheets/generate-client";
 import type { PathGenerateEvent } from "@/lib/paths/generate-client";
 import { CREATING_NOTES_STATUS } from "@/lib/chat/dispatch";
 import type { SetResult } from "@/lib/exercises/session";
+
+const ArtifactPanel = dynamic(
+  () => import("@/components/workspace/artifact-panel").then((module) => module.ArtifactPanel),
+  { ssr: false },
+);
+const ProjectSettingsPane = dynamic(
+  () => import("@/components/workspace/project-settings-pane").then((module) => module.ProjectSettingsPane),
+  { ssr: false },
+);
+const SourcesPane = dynamic(
+  () => import("@/components/workspace/sources-pane").then((module) => module.SourcesPane),
+  { ssr: false, loading: () => <div className="h-full w-full bg-surface" aria-hidden="true" /> },
+);
 
 const MIN_ARTIFACT = 300;
 const MAX_ARTIFACT = 520;
@@ -98,11 +110,13 @@ function focusFromPending(pending: {
 }
 
 export function ProjectView({
+  routeId,
   projectId,
   threadId,
   initialProject,
   initialMessages,
 }: {
+  routeId?: string;
   projectId: string;
   threadId?: string;
   initialProject?: Project;
@@ -125,12 +139,14 @@ export function ProjectView({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [hasOpenedStudio, setHasOpenedStudio] = useState(false);
+  const [hasOpenedSources, setHasOpenedSources] = useState(false);
   const [notebookSettingsOpen, setNotebookSettingsOpen] = useState(false);
   const [panelExpanded, setPanelExpanded] = useState(false);
   const [panelOwnChrome, setPanelOwnChrome] = useState(false);
   const [composerHeight, setComposerHeight] = useState(128);
   const activeRouteProjectId = pathname.match(/^\/(?:p|c)\/([^/]+)/)?.[1] ?? null;
-  const isActiveProjectView = activeRouteProjectId === projectId;
+  const isActiveProjectView = activeRouteProjectId === (routeId ?? projectId);
   const [focus, setFocus] = useState<ArtifactFocus | null>(null);
   const [session, setSession] = useState<{ setId: string; ids: string[]; mode?: "practice" | "exam" } | null>(null);
   const [artifactWidth, setArtifactWidth] = useState(420);
@@ -303,15 +319,17 @@ export function ProjectView({
     listEarlierChatMessages(projectId, threadId || DEFAULT_CHAT_THREAD_ID, beforeId), [projectId, threadId]);
 
   useEffect(() => {
+    if (!isActiveProjectView) return;
     return subscribeMaterials(projectId, setMaterials, (err) => setError(err.message));
-  }, [projectId]);
+  }, [projectId, isActiveProjectView]);
 
   useEffect(() => {
+    if (!isActiveProjectView) return;
     return subscribeChatThreads(projectId, (threads) => {
       const id = threadId || DEFAULT_CHAT_THREAD_ID;
       setThreadTitle(threads.find((item) => item.id === id)?.title);
     });
-  }, [projectId, threadId]);
+  }, [projectId, threadId, isActiveProjectView]);
 
   useEffect(() => {
     const valid = new Set(materials.map((item) => item.id));
@@ -694,6 +712,18 @@ export function ProjectView({
   }
 
   const studioShown = phone ? mobilePane === "studio" : panelOpen;
+  const shouldMountStudio = hasOpenedStudio || studioShown;
+  const shouldMountSources = hasOpenedSources || sourcesOpen || (phone && mobilePane === "sources") || (singlePanel && sidePane === "sources");
+
+  useLayoutEffect(() => {
+    if (studioShown) setHasOpenedStudio(true);
+  }, [studioShown]);
+
+  useLayoutEffect(() => {
+    if (sourcesOpen || (phone && mobilePane === "sources") || (singlePanel && sidePane === "sources")) {
+      setHasOpenedSources(true);
+    }
+  }, [sourcesOpen, phone, mobilePane, singlePanel, sidePane]);
 
   if (!user) return null;
 
@@ -785,34 +815,40 @@ export function ProjectView({
             minWidth: Math.max(0, sourcesWidth - PANEL_OUTER_GAP),
           }}
         >
-          <SourcesPane
-            className="h-full"
-            projectId={project.id}
-            userId={user.uid}
-            items={materials}
-            selectedIds={selectedIds}
-            onSelectedIds={setSelectedIds}
-            onOpenMaterial={openMaterial}
-            readingId={readingId}
-            onCloseReading={() => setReadingId(null)}
-          />
+          {shouldMountSources ? (
+            <SourcesPane
+              active={isActiveProjectView && sourcesOpen}
+              className="h-full"
+              projectId={project.id}
+              userId={user.uid}
+              items={materials}
+              selectedIds={selectedIds}
+              onSelectedIds={setSelectedIds}
+              onOpenMaterial={openMaterial}
+              readingId={readingId}
+              onCloseReading={() => setReadingId(null)}
+            />
+          ) : null}
         </div>
         <button type="button" aria-label="Resize sources" onMouseDown={onSourcesResizeStart} className="absolute inset-y-0 right-0 z-10 hidden w-2 cursor-col-resize md:block" />
       </div>
       )}
       {phone && mobilePane === "sources" ? (
         <div className="mobile-pane-enter absolute inset-0 z-[35] min-w-0 overflow-hidden bg-surface-2">
-          <SourcesPane
-            className="h-full w-full"
-            projectId={project.id}
-            userId={user.uid}
-            items={materials}
-            selectedIds={selectedIds}
-            onSelectedIds={setSelectedIds}
-            onOpenMaterial={openMaterial}
-            readingId={readingId}
-            onCloseReading={() => setReadingId(null)}
-          />
+          {shouldMountSources ? (
+            <SourcesPane
+              active={isActiveProjectView && phone && mobilePane === "sources"}
+              className="h-full w-full"
+              projectId={project.id}
+              userId={user.uid}
+              items={materials}
+              selectedIds={selectedIds}
+              onSelectedIds={setSelectedIds}
+              onOpenMaterial={openMaterial}
+              readingId={readingId}
+              onCloseReading={() => setReadingId(null)}
+            />
+          ) : null}
         </div>
       ) : null}
       <div
@@ -951,47 +987,53 @@ export function ProjectView({
             inert={singlePanel && !panelOpen ? true : undefined}
           >
           <div className={`h-full w-full ${singlePanel && sidePane === "sources" ? "hidden" : ""}`}>
-            <ArtifactPanel
-              projectId={project.id}
-              userId={user.uid}
-              listedProject
-              onStudioCreate={createFromStudio}
-              studioBusy={studioRequest !== null || notesLive != null || pathLive != null}
-              studioJob={studioJob}
-              onStudioRetry={retryStudio}
-              selectedSourceIds={selectedIds}
-              generatingLabel={
-                studioRequest?.label ?? (notesLive != null || pathLive != null ? "Studio" : null)
-              }
-              focus={focus}
-              session={session}
-              onCloseMaterial={closeMaterial}
-              onStartPractice={startPractice}
-              onExitSession={exitSession}
-              onPracticeComplete={setFinishedSet}
-              onViewChange={onPanelViewChange}
-              onActivate={(artifact) => rememberActive(artifact, "open")}
-              onPanelChromeChange={setPanelOwnChrome}
-              hideTopBarOverride={singlePanel}
-              liveNote={notesLive}
-              livePath={pathLive}
-              onLiveSettled={() => setNotesLive(null)}
-              onLivePathSettled={() => setPathLive(null)}
-            />
+            {shouldMountStudio ? (
+              <ArtifactPanel
+                enabled={isActiveProjectView && studioShown}
+                projectId={project.id}
+                userId={user.uid}
+                listedProject
+                onStudioCreate={createFromStudio}
+                studioBusy={studioRequest !== null || notesLive != null || pathLive != null}
+                studioJob={studioJob}
+                onStudioRetry={retryStudio}
+                selectedSourceIds={selectedIds}
+                generatingLabel={
+                  studioRequest?.label ?? (notesLive != null || pathLive != null ? "Studio" : null)
+                }
+                focus={focus}
+                session={session}
+                onCloseMaterial={closeMaterial}
+                onStartPractice={startPractice}
+                onExitSession={exitSession}
+                onPracticeComplete={setFinishedSet}
+                onViewChange={onPanelViewChange}
+                onActivate={(artifact) => rememberActive(artifact, "open")}
+                onPanelChromeChange={setPanelOwnChrome}
+                hideTopBarOverride={singlePanel}
+                liveNote={notesLive}
+                livePath={pathLive}
+                onLiveSettled={() => setNotesLive(null)}
+                onLivePathSettled={() => setPathLive(null)}
+              />
+            ) : null}
           </div>
           <div className={`h-full w-full ${singlePanel && sidePane === "sources" ? "" : "hidden"}`}>
-            <SourcesPane
-              className="h-full w-full"
-              projectId={project.id}
-              userId={user.uid}
-              items={materials}
-              selectedIds={selectedIds}
-              onSelectedIds={setSelectedIds}
-              onOpenMaterial={openMaterial}
-              readingId={readingId}
-              onCloseReading={() => setReadingId(null)}
-              hideTopBar={singlePanel}
-            />
+            {shouldMountSources ? (
+              <SourcesPane
+                active={isActiveProjectView && singlePanel && sidePane === "sources"}
+                className="h-full w-full"
+                projectId={project.id}
+                userId={user.uid}
+                items={materials}
+                selectedIds={selectedIds}
+                onSelectedIds={setSelectedIds}
+                onOpenMaterial={openMaterial}
+                readingId={readingId}
+                onCloseReading={() => setReadingId(null)}
+                hideTopBar={singlePanel}
+              />
+            ) : null}
           </div>
           </div>
         </div>

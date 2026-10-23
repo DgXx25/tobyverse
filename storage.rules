@@ -3,8 +3,8 @@ service firebase.storage {
   match /b/{bucket}/o {
     match /users/{userId}/projects/{projectId}/materials/{materialId}/{fileName} {
       allow read, delete: if request.auth != null && request.auth.uid == userId;
-      allow create, update: if request.auth != null && request.auth.uid == userId
-        && request.resource.size < 201 * 1024 * 1024;
+      // Uploads use authenticated server routes and their quota checks.
+      allow create, update: if false;
     }
   }
 }

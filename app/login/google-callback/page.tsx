@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { consumeGoogleIdTokenFromUrl, POST_LOGIN_PATH } from "@/lib/auth";
+import { consumeGoogleIdTokenFromUrl, consumePostAuthPath } from "@/lib/auth";
 
 export default function GoogleCallbackPage() {
   const [message, setMessage] = useState("Signing in…");
@@ -11,7 +11,7 @@ export default function GoogleCallbackPage() {
     void consumeGoogleIdTokenFromUrl().then(({ credential, error }) => {
       if (!active) return;
       if (credential?.user && !credential.user.isAnonymous) {
-        window.location.replace(POST_LOGIN_PATH);
+        window.location.replace(consumePostAuthPath());
         return;
       }
       if (error) {

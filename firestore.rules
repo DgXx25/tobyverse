@@ -36,7 +36,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return signedIn() && (
-        request.auth.token.email == "davit.gvakharia@gmail.com"
+        (request.auth.token.email == "davit.gvakharia@gmail.com" && request.auth.token.email_verified == true)
         || (exists(/databases/$(database)/documents/users/$(request.auth.uid))
           && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.admin == true)
       );
@@ -229,6 +229,14 @@ service cloud.firestore {
         && (data.updatedAt is timestamp || data.updatedAt is string);
     }
 
+    // Billing state is served by authenticated server APIs, including owner reads.
+    match /billingAccounts/{document=**} { allow read, write: if false; }
+    match /billingConfig/{document=**} { allow read, write: if false; }
+    match /billingWebhooks/{document=**} { allow read, write: if false; }
+    match /billingCheckouts/{document=**} { allow read, write: if false; }
+    match /billingCustomers/{document=**} { allow read, write: if false; }
+    match /billingSubscriptions/{document=**} { allow read, write: if false; }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data) && clientCanCreatePlan();
@@ -343,6 +351,24 @@ service cloud.firestore {
     match /evalSnapshots/{snapshotId} {
       allow read, create: if isAdmin();
       allow update, delete: if false;
+    }
+
+    // Generation job payloads and queue state are only accessible through the
+    // authenticated backend. Admin SDK workers bypass these client rules.
+    match /generationJobs/{jobId} {
+      allow read, write: if false;
+
+      match /events/{eventId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /generationJobLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /generationJobRequests/{requestId} {
+      allow read, write: if false;
     }
   }
 }

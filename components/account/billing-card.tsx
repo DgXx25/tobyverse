@@ -16,7 +16,7 @@ export function BillingCard() {
         <div className="min-w-0">
           <p className="text-[16px] font-medium text-foreground">Free · Beta</p>
           <p className="mt-1 text-[13px] leading-6 text-muted">
-            TobyVerse is free for everyone during beta, with 1 GB of material storage per account.
+            TobyVerse is free for everyone during beta, with 300 MB of material storage per account. Paid plans include more storage and AI models.
           </p>
         </div>
       </div>
