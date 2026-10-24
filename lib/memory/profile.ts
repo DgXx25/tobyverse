@@ -1,7 +1,8 @@
-import { deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc, type Unsubscribe } from "firebase/firestore";
-import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
+import { deleteDoc, doc, getDoc, onSnapshot, type Unsubscribe } from "firebase/firestore";
+import { COLLECTIONS } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { sanitizePersonalization } from "@/lib/memory/normalize";
+import { authHeaders } from "@/lib/api/client";
 
 function learningRef(userId: string) {
   return doc(getFirebaseDb(), COLLECTIONS.users, userId, COLLECTIONS.profile, "learning");
@@ -79,18 +80,12 @@ function watchLocal(userId: string, onChange: LocalListener): () => void {
 }
 
 async function writeRemote(userId: string, text: string): Promise<void> {
-  if (!text) {
-    await deleteDoc(learningRef(userId));
-    return;
-  }
-  await setDoc(
-    learningRef(userId),
-    omitUndefined({
-      text,
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  if (!userId) return;
+  const response = await fetch("/api/memory", { method: "PATCH", headers: await authHeaders(), body: JSON.stringify({ personalization: text }) });
+  if (!response.ok) throw new Error("Could not save memory preferences.");
 }
+
+export function clearCachedLearningProfile(userId: string): void { notifyLocal(userId, ""); }
 
 export async function getLearningProfile(userId: string): Promise<string> {
   if (!userId) return "";
@@ -101,9 +96,8 @@ export async function getLearningProfile(userId: string): Promise<string> {
       writeLocal(userId, remote);
       return remote;
     }
-    const local = readLocal(userId);
-    if (local) void writeRemote(userId, local).catch(() => undefined);
-    return local;
+    notifyLocal(userId, "");
+    return "";
   } catch {
     return readLocal(userId);
   }
@@ -125,12 +119,7 @@ export function subscribeLearningProfile(
         onChange(remote);
         return;
       }
-      const local = readLocal(userId);
-      if (local) {
-        void writeRemote(userId, local).catch(() => undefined);
-        onChange(local);
-        return;
-      }
+      writeLocal(userId, "");
       onChange("");
     },
     (error) => {
@@ -147,12 +136,9 @@ export function subscribeLearningProfile(
 export async function setLearningProfile(userId: string, raw: string): Promise<string> {
   if (!userId) return "";
   const text = sanitizePersonalization(raw);
-  notifyLocal(userId, text);
-  try {
-    await writeRemote(userId, text);
-  } catch {
-    /* rules may not be deployed yet — local cache still teaches this browser */
-  }
+  await writeRemote(userId, text);
+  // Preferences now live as individual facts in the personal summary.
+  notifyLocal(userId, "");
   return text;
 }
 

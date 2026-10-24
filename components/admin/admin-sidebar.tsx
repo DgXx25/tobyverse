@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { useAuth } from "@/components/auth-provider";
-import { useShell } from "@/components/workspace/shell-context";
+import { useMobileNavigation, useShell } from "@/components/workspace/shell-context";
 
 const ITEMS = [
   { href: "/admin/plans", label: "Plans", icon: "billing" as const },
@@ -18,7 +18,8 @@ const ITEMS = [
 export function AdminSidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
-  const { mobileNavOpen, setMobileNavOpen, openAccountSheet, openSettings } = useShell();
+  const { openAccountSheet, openSettings } = useShell();
+  const { mobileNavOpen, setMobileNavOpen } = useMobileNavigation();
   const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && localStorage.getItem("tv.sidebar.collapsed") === "1");
   const name = user?.displayName || user?.email || "Account";
 

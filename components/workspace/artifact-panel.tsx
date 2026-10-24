@@ -321,9 +321,11 @@ export function ArtifactPanel({
               ) : null}
               {tab === "studio" && (
                 <StudioPane
+                  projectId={projectId}
                   sheets={sheets}
                   practiceSets={practiceSets}
                   paths={paths}
+                  materials={materials}
                   studioArtifacts={studioArtifacts}
                   job={studioJob}
                   onRetry={onStudioRetry}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/workspace/project-icons";
 import { notebookTitle } from "@/lib/workspace/title";
 import { positionContextMenu } from "@/lib/workspace/context-menu-position";
+import { NOTEBOOK_CREATE_EVENT } from "@/lib/workspace/ui-events";
 import { useNotebooks } from "@/lib/workspace/use-notebooks";
 import type { Project } from "@/types/project";
 
@@ -80,7 +81,7 @@ export function NotebooksHome() {
     }
   }
 
-  async function create() {
+  const create = useCallback(async () => {
     if (!user || creating) return;
     setCreating(true);
     setError(null);
@@ -91,19 +92,25 @@ export function NotebooksHome() {
       setError(err instanceof Error && err.message.trim() ? err.message : "Could not create a notebook.");
       setCreating(false);
     }
-  }
+  }, [user, creating, activeFolder, router]);
+
+  useEffect(() => {
+    const handleCreate = () => void create();
+    window.addEventListener(NOTEBOOK_CREATE_EVENT, handleCreate);
+    return () => window.removeEventListener(NOTEBOOK_CREATE_EVENT, handleCreate);
+  }, [create]);
 
   if (!user) return null;
 
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-6 pb-16 pt-10 max-[1100px]:px-3 max-[1100px]:pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[28px] font-medium tracking-tight text-foreground max-[1100px]:text-[24px]">Projects</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3 max-[767px]:justify-center">
+        <h1 className="text-[28px] font-medium tracking-tight text-foreground max-[1100px]:text-[24px] max-[767px]:text-center max-[767px]:font-bold">Projects</h1>
         <button
           type="button"
           onClick={() => void create()}
           disabled={creating}
-          className="project-card inline-flex h-10 items-center gap-2 rounded-full bg-foreground px-4 text-[14px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="project-card inline-flex h-10 items-center gap-2 rounded-full bg-foreground px-4 text-[14px] font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-60 max-[767px]:hidden"
         >
           <UiIcon name="plus" size={16} />
           New project
@@ -189,6 +196,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
   const [error, setError] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [folderDraft, setFolderDraft] = useState("");
+  const [iconDraft, setIconDraft] = useState("");
   const [iconQuery, setIconQuery] = useState("");
   const [iconColor, setIconColor] = useState<AccentId>("blue");
   const [packNames, setPackNames] = useState<string[]>([]);
@@ -196,7 +204,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
   const icon = projectIconFor(project);
   const folder = normalizeFolder(project.folder);
   const contextMenuSize = view === "icon"
-    ? { width: 236, height: 330 }
+    ? { width: 236, height: 370 }
     : view === "folder"
       ? { width: 236, height: 210 }
       : view === "rename"
@@ -243,6 +251,7 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
     setError(null);
     setTitleDraft(project.title.trim() === "" ? "" : notebookTitle(project.title));
     setFolderDraft(folder);
+    setIconDraft(icon);
     setIconQuery("");
     const saved = SYMBOL_COLORS.find((id) => accentColor(theme, id) === project.iconColor);
     setIconColor(saved ?? "blue");
@@ -279,13 +288,13 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
       >
         <span className="flex h-12 w-12 shrink-0 items-center justify-center text-foreground max-[1100px]:h-8 max-[1100px]:w-8">
           <ProjectSymbol name={icon} size={38} color={project.iconColor} className={`${project.iconColor ? "" : "accent-symbol"} max-[1100px]:hidden`} />
-          <ProjectSymbol name={icon} size={20} color={project.iconColor} className={`${project.iconColor ? "" : "accent-symbol"} hidden max-[1100px]:block`} />
+          <ProjectSymbol name={icon} size={23} color={project.iconColor} className={`${project.iconColor ? "" : "accent-symbol"} hidden max-[1100px]:block`} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col max-[1100px]:justify-center">
-          <h3 className="mt-4 line-clamp-2 min-h-[2.75em] text-[18px] font-medium leading-snug tracking-tight text-foreground max-[1100px]:mt-0 max-[1100px]:min-h-0 max-[1100px]:text-[14px]">
+          <h3 className="mt-4 line-clamp-2 min-h-[2.75em] text-[18px] font-medium leading-snug tracking-tight text-foreground max-[1100px]:mt-0 max-[1100px]:min-h-0 max-[1100px]:text-[15px] max-[1100px]:font-normal">
             {notebookTitle(project.title)}
           </h3>
-          <p className="mt-auto truncate pt-4 text-[12px] text-muted max-[1100px]:mt-1 max-[1100px]:pt-0 max-[1100px]:text-[11px]">
+          <p className="mt-auto truncate pt-4 text-[12px] text-muted max-[1100px]:mt-1 max-[1100px]:pt-0 max-[1100px]:text-[12px]">
             {projectMeta(project.updatedAt || project.createdAt, sourceCount)}
           </p>
         </span>
@@ -323,14 +332,19 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
 
           {view === "icon" ? (
             <div className="p-1.5">
-              <input
-                autoFocus
-                value={iconQuery}
-                onChange={(event) => setIconQuery(event.target.value)}
-                placeholder="Search symbols"
-                aria-label="Search symbols"
-                className="mb-1.5 h-8 w-full rounded-lg border border-border bg-background px-2 text-[13px] text-foreground outline-none placeholder:text-muted"
-              />
+              <div className="mb-1.5 flex items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-foreground" aria-label="Current symbol">
+                  <ProjectSymbol name={iconDraft || icon} size={20} color={accentColor(theme, iconColor)} />
+                </span>
+                <input
+                  autoFocus
+                  value={iconQuery}
+                  onChange={(event) => setIconQuery(event.target.value)}
+                  placeholder="Search symbols"
+                  aria-label="Search symbols"
+                  className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-[13px] text-foreground outline-none placeholder:text-muted"
+                />
+              </div>
               <div className="mb-2 flex items-center gap-1.5 px-0.5">
                 {SYMBOL_COLORS.map((id) => {
                   const color = accentColor(theme, id);
@@ -356,10 +370,10 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
                     disabled={busy}
                     aria-label={iconSearchLabel(name)}
                     title={iconSearchLabel(name)}
-                    aria-pressed={name === icon}
-                    onClick={() => void run(() => updateProjectMeta(project.id, userId, { icon: name, iconColor: accentColor(theme, iconColor) }))}
+                    aria-pressed={name === iconDraft}
+                    onClick={() => setIconDraft(name)}
                     className={`flex aspect-square w-full items-center justify-center rounded-lg hover:bg-foreground/10 ${
-                      name === icon ? "bg-foreground/10" : ""
+                      name === iconDraft ? "bg-foreground/10" : ""
                     }`}
                   >
                     <ProjectSymbol name={name} size={20} color={accentColor(theme, iconColor)} />
@@ -368,6 +382,17 @@ function NotebookCard({ project, userId, sourceCount }: { project: Project; user
               </div>
               {packNames.length === 0 ? <p className="px-1 pt-1 text-[12px] text-muted">Loading symbols…</p> : null}
               {packNames.length > 0 && iconMatches.length === 0 ? <p className="px-1 pt-1 text-[12px] text-muted">No symbols</p> : null}
+              <div className="mt-2 flex justify-end gap-1.5">
+                <button type="button" onClick={() => setOpen(false)} className="h-8 rounded-lg px-2.5 text-[12px] text-muted hover:bg-foreground/10">Cancel</button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run(() => updateProjectMeta(project.id, userId, { icon: iconDraft || icon, iconColor: accentColor(theme, iconColor) }))}
+                  className="h-8 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background disabled:opacity-50"
+                >
+                  Save
+                </button>
+              </div>
             </div>
           ) : null}
 

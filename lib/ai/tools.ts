@@ -189,7 +189,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "suggest_sheet",
     description:
-      "Offer a Study notes chip when the user expresses interest in educational notes without directly asking you to create them. Teacher may also offer it after a substantial explanation. Do not use on Fast or for a one-line fact. Use create_sheet for an accepted Study notes chip or an explicit educational notes request; use create_note for ordinary jot/save requests and /note.",
+      "Offer a separate Study notes chip only when the user has expressed interest in educational notes without directly asking you to create them. Never offer it just because an explanation is substantial, and do not interrupt an answer to ask whether to use an optional chat block. Do not use on Fast or for a one-line fact. Use create_sheet for an accepted Study notes chip or an explicit educational notes request; use create_note for ordinary jot/save requests and /note.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Topic for the chip." } },
@@ -274,7 +274,7 @@ export const CHAT_TOOL_DEFINITIONS = [
   defineTool({
     name: "create_sheet",
     description:
-      "Create detailed educational Study notes when the user selected the Study notes generator, accepted a study-note chip, or explicitly asked for study notes or a კონსპექტი. Call it immediately when a topic or material exists. Return a card, never the sheet body as chat text. Use create_note for ordinary jot/save note requests and /note.",
+      "Create detailed educational Study notes only when the user selected the Study notes generator, explicitly accepted its chip, or asked for notes/a კონსპექტი. Do not treat an earlier assistant offer, a related follow-up, or an explanation request as acceptance. Call it immediately when a topic or material exists. Return a card, never the sheet body as chat text. Use create_note for ordinary jot/save note requests and /note.",
     parameters: {
       type: "object",
       properties: { topic: { type: "string", description: "Specific sheet topic." } },

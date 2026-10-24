@@ -2,7 +2,7 @@
 
 Regenerate with `node scripts/generate-prompt-examples.cjs`. These complete prompts come from `buildChatSystemPrompt` with the inputs below. No model call is needed. Tool schemas and the latest user message travel separately through the existing API. The static core is identical in all three.
 
-Core word count: 412.
+Core word count: 432.
 
 ## Normal chat
 
@@ -44,7 +44,7 @@ SHOULD let each response land naturally for the moment, with a takeaway, useful 
 <adaptive_formatting>
 MUST avoid repeating information across formats; use a second form only for distinct value. Detailed answers may include needed steps or examples.
 SHOULD choose the clearest main representation: focused prose, a compact comparison table, concise steps, math, code or a relevant visual. Leave breathing room between ideas. Use brief headings, selective **bold** or ==highlights==, and occasional fitting emojis where useful, without a fixed template. Visual parameters must match the question.
-Keep LaTeX symbolic and compact; explain outside. Essential word labels: short subscripts.
+Keep LaTeX symbolic and compact; explain outside. Use dollar-delimited LaTeX for inline math and double-dollar delimiters for equations set apart, only when math is useful or requested. Essential word labels: short subscripts.
 When using Markdown, put headings on separate lines and keep table headers, separators, and each row on their own lines.
 </adaptive_formatting>
 
@@ -111,7 +111,7 @@ SHOULD let each response land naturally for the moment, with a takeaway, useful 
 <adaptive_formatting>
 MUST avoid repeating information across formats; use a second form only for distinct value. Detailed answers may include needed steps or examples.
 SHOULD choose the clearest main representation: focused prose, a compact comparison table, concise steps, math, code or a relevant visual. Leave breathing room between ideas. Use brief headings, selective **bold** or ==highlights==, and occasional fitting emojis where useful, without a fixed template. Visual parameters must match the question.
-Keep LaTeX symbolic and compact; explain outside. Essential word labels: short subscripts.
+Keep LaTeX symbolic and compact; explain outside. Use dollar-delimited LaTeX for inline math and double-dollar delimiters for equations set apart, only when math is useful or requested. Essential word labels: short subscripts.
 When using Markdown, put headings on separate lines and keep table headers, separators, and each row on their own lines.
 </adaptive_formatting>
 
@@ -189,7 +189,7 @@ SHOULD let each response land naturally for the moment, with a takeaway, useful 
 <adaptive_formatting>
 MUST avoid repeating information across formats; use a second form only for distinct value. Detailed answers may include needed steps or examples.
 SHOULD choose the clearest main representation: focused prose, a compact comparison table, concise steps, math, code or a relevant visual. Leave breathing room between ideas. Use brief headings, selective **bold** or ==highlights==, and occasional fitting emojis where useful, without a fixed template. Visual parameters must match the question.
-Keep LaTeX symbolic and compact; explain outside. Essential word labels: short subscripts.
+Keep LaTeX symbolic and compact; explain outside. Use dollar-delimited LaTeX for inline math and double-dollar delimiters for equations set apart, only when math is useful or requested. Essential word labels: short subscripts.
 When using Markdown, put headings on separate lines and keep table headers, separators, and each row on their own lines.
 </adaptive_formatting>
 
@@ -218,7 +218,7 @@ Optional native blocks available this turn (sections, scene). Use one only when 
 ```toby sections
 {...json...}
 ```
-The fence body MUST be JSON only and the type MUST be listed here. A short lead-in can introduce a block; include the fence if you promise one. A table and a block may both appear when each adds useful information.
+The fence body MUST be JSON only and the type MUST be listed here. Place each block where its explanation is being discussed: interleave prose and blocks naturally, and do not collect them at the end. Prefer concise prose around a block; retain useful reasoning and details, and expand when the request calls for it. Do not ask for permission to use an available block; decide from the request whether it helps, and omit it when it does not. A short lead-in can introduce a block; include the fence if you promise one. A table and a block may both appear when each adds distinct value.
 
 Optional sections: one quiet shared frame with symbol, heading and rich text per row. Use for steps, reasoning, criteria, explanations or observations when grouping helps; not limited to solutions. Choose freely; do not turn every response into steps or repeat the same text outside the block. No forced numbering or fixed number of rows.
 Fence: ```toby sections

@@ -1,18 +1,8 @@
 import { authHeaders } from "@/lib/api/client";
-import { appendProjectMemory } from "@/lib/projects";
-import { applyMemoryOperations } from "@/lib/memory/store";
-import {
-  foldLearningSignal,
-  isStudyMethodMemory,
-  parseMemoryOps,
-  parsePersonalizationPatch,
-  shouldExtractMemory,
-} from "@/lib/memory/normalize";
-import { parseProjectFacts } from "@/lib/memory/project";
-import { setLearningProfile } from "@/lib/memory/profile";
+import { shouldExtractMemory } from "@/lib/memory/normalize";
 import { containsSensitiveMemory, isWorkNoteRequest, memorySafeTurns } from "@/lib/memory/privacy";
 import type { ChatTurn } from "@/types/chat";
-import type { ChatMemoryContext, MemoryOp } from "@/types/memory";
+import type { ChatMemoryContext } from "@/types/memory";
 
 export function syncUserMemories(input: {
   userId: string;
@@ -26,38 +16,8 @@ export function syncUserMemories(input: {
 }): Promise<boolean> {
   if (!input.userId || !input.prompt.trim()) return Promise.resolve(false);
   if (containsSensitiveMemory(input.prompt) || isWorkNoteRequest(input.prompt)) return Promise.resolve(false);
-  if (!shouldExtractMemory(input.prompt)) {
-    return migrateStudyMethodMemories(input).then(() => false);
-  }
+  if (!shouldExtractMemory(input.prompt)) return Promise.resolve(false);
   return runMemorySync(input);
-}
-
-async function migrateStudyMethodMemories(input: {
-  userId: string;
-  memories: ChatMemoryContext[];
-  personalization?: string;
-}): Promise<void> {
-  const current = input.personalization ?? "";
-  let nextProfile = current;
-  const drop: string[] = [];
-  for (const mem of input.memories) {
-    if (!isStudyMethodMemory(mem.content)) continue;
-    nextProfile = foldLearningSignal(nextProfile, mem.content);
-    drop.push(mem.id);
-  }
-  try {
-    if (nextProfile.trim() && nextProfile !== current.trim()) {
-      await setLearningProfile(input.userId, nextProfile);
-    }
-    if (drop.length > 0) {
-      await applyMemoryOperations(
-        input.userId,
-        drop.map((id) => ({ op: "delete" as const, id })),
-      );
-    }
-  } catch {
-    return;
-  }
 }
 
 async function runMemorySync(input: {
@@ -76,57 +36,13 @@ async function runMemorySync(input: {
       headers: await authHeaders(),
       body: JSON.stringify({
         prompt: input.prompt,
-        memories: input.memories,
-        personalization: input.personalization ?? "",
         history: memorySafeTurns(input.history ?? []),
-        projectMemory: input.projectMemory ?? [],
       }),
     });
     if (!response.ok) return false;
-    const data = (await response.json()) as {
-      operations?: unknown;
-      personalization?: unknown;
-      projectMemory?: unknown;
-    };
-    const known = new Set(input.memories.map((item) => item.id));
-    const ops = parseMemoryOps(data, known);
-    const current = input.personalization ?? "";
-    const extractProfile = parsePersonalizationPatch(data, current);
-    let nextProfile = extractProfile;
-    const drop = new Set<string>();
-    for (const mem of input.memories) {
-      if (!isStudyMethodMemory(mem.content)) continue;
-      nextProfile = foldLearningSignal(nextProfile ?? current, mem.content);
-      drop.add(mem.id);
-    }
-    const kept: MemoryOp[] = [];
-    for (const op of ops) {
-      if ((op.op === "add" || op.op === "update") && isStudyMethodMemory(op.content)) {
-        nextProfile = foldLearningSignal(nextProfile ?? current, op.content);
-        if (op.op === "update") drop.add(op.id);
-        continue;
-      }
-      if (op.op === "delete") {
-        drop.add(op.id);
-        continue;
-      }
-      if (op.op === "update" && drop.has(op.id)) continue;
-      kept.push(op);
-    }
-    for (const id of drop) kept.push({ op: "delete", id });
-    if (nextProfile && nextProfile !== current.trim()) {
-      await setLearningProfile(input.userId, nextProfile);
-    }
-    if (kept.length > 0) await applyMemoryOperations(input.userId, kept);
-    const projectFacts = parseProjectFacts(data);
-    let projectSaved = false;
-    if (input.projectId && projectFacts.length > 0) {
-      const next = await appendProjectMemory(input.projectId, input.userId, projectFacts);
-      projectSaved = next.length > (input.projectMemory ?? []).length;
-      input.onProjectMemory?.(next);
-    }
-    const userFacingOps = kept.some((op) => op.op === "add" || op.op === "update");
-    return Boolean(extractProfile) || userFacingOps || projectSaved;
+    const data = (await response.json()) as { saved?: boolean };
+    if (data.saved && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tobyverse:memory-changed"));
+    return data.saved === true;
   } catch {
     return false;
   }

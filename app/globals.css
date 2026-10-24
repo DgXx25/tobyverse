@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Special+Gothic+Expanded+One&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -40,16 +42,16 @@ html.light {
 }
 
 html.dark {
-  --bg: #131211;
-  --surface: #201f1d;
-  --surface-2: #181716;
-  --border: #262524;
-  --input-bg: #201f1d;
-  --input-border: #2d2c2a;
-  --panel-bg: #181716;
-  --panel-border: #262524;
-  --panel-item-bg: #151413;
-  --item-active-bg: #242220;
+  --bg: #151515;
+  --surface: #222222;
+  --surface-2: #222222;
+  --border: #2a2a2a;
+  --input-bg: #222222;
+  --input-border: #2a2a2a;
+  --panel-bg: #1b1b1b;
+  --panel-border: #323232;
+  --panel-item-bg: #222222;
+  --item-active-bg: hsl(198 2% 13%);
   --text: #ececec;
   --text-muted: #8e8e93;
   --accent: #0091ff;
@@ -77,16 +79,16 @@ html.dark {
 
 html.marketing,
 html.marketing.dark {
-  --bg: #131211;
-  --surface: #201f1d;
-  --surface-2: #181716;
-  --border: #262524;
-  --input-bg: #201f1d;
-  --input-border: #2d2c2a;
-  --panel-bg: #181716;
-  --panel-border: #262524;
-  --panel-item-bg: #151413;
-  --item-active-bg: #242220;
+  --bg: #181818;
+  --surface: #222222;
+  --surface-2: #222222;
+  --border: #2a2a2a;
+  --input-bg: #222222;
+  --input-border: #2a2a2a;
+  --panel-bg: #1b1b1b;
+  --panel-border: #323232;
+  --panel-item-bg: #222222;
+  --item-active-bg: hsl(198 2% 13%);
   --text: #ececec;
   --text-muted: #8e8e93;
   --accent: #0091ff;
@@ -96,6 +98,18 @@ html.marketing.dark {
   --highlight-border: color-mix(in srgb, #ea7a2f 40%, var(--border));
   --scrollbar: var(--panel-border);
   --overlay: rgba(10, 8, 7, 0.34);
+}
+
+html.dark .sidebar-slot,
+html.marketing.dark .sidebar-slot,
+html.dark .project-nav,
+html.marketing.dark .project-nav {
+  border-color: transparent;
+}
+
+html.dark .project-nav > div:first-child,
+html.marketing.dark .project-nav > div:first-child {
+  border-color: transparent;
 }
 
 html.marketing.light {
@@ -225,16 +239,16 @@ html.marketing.dark .composer-send:not(:disabled) {
 }
 
 html.dark.high-contrast {
-  --bg: #131211;
-  --surface: #201f1d;
-  --surface-2: #181716;
-  --border: #262524;
-  --input-bg: #201f1d;
-  --input-border: #2d2c2a;
-  --panel-bg: #181716;
-  --panel-border: #262524;
-  --panel-item-bg: #151413;
-  --item-active-bg: #242220;
+  --bg: #181818;
+  --surface: #222222;
+  --surface-2: #222222;
+  --border: #2a2a2a;
+  --input-bg: #222222;
+  --input-border: #2a2a2a;
+  --panel-bg: #1b1b1b;
+  --panel-border: #323232;
+  --panel-item-bg: #222222;
+  --item-active-bg: hsl(198 2% 13%);
   --text: #ffffff;
   --text-muted: #c2c2c7;
   --scrollbar: var(--panel-border);
@@ -323,6 +337,82 @@ html.theme-switching *::after {
   background: var(--item-active-bg);
 }
 
+.project-tab-status {
+  position: absolute;
+  top: 50%;
+  right: 30px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  pointer-events: none;
+  transform: translateY(-50%);
+  animation: project-tab-status-reveal 220ms ease-out both;
+}
+
+.project-tab-status-spinner {
+  width: 17px;
+  height: 17px;
+  border: 2px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: project-tab-status-spin 800ms linear infinite;
+}
+
+.project-tab-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: project-tab-status-complete 240ms ease-out both;
+}
+
+@keyframes project-tab-status-reveal {
+  from { opacity: 0; transform: translate(3px, -50%) scale(.82); }
+  to { opacity: 1; transform: translate(0, -50%) scale(1); }
+}
+
+@keyframes project-tab-status-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes project-tab-status-complete {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-tab-status,
+  .project-tab-status-spinner,
+  .project-tab-status-dot {
+    animation: none;
+  }
+}
+
+.chat-prompt-scroll-spacer {
+  flex: 0 0 auto;
+  width: 100%;
+  transition: height 260ms cubic-bezier(.22, 1, .36, 1);
+  will-change: height;
+}
+
+html.dark,
+html.marketing.dark {
+  --item-active-bg: #323236;
+}
+
+html.dark .mobile-topbar,
+html.marketing.dark .mobile-topbar {
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+}
+
+html.light .mobile-topbar,
+html.marketing.light .mobile-topbar,
+html.light .mobile-topbar.is-overlay,
+html.marketing.light .mobile-topbar.is-overlay {
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+}
+
 .project-nav {
   background: var(--panel-bg);
   border-color: var(--panel-border);
@@ -380,14 +470,14 @@ html.marketing.light .single-panel-toggle:hover {
 html.light .topbar-tabs .sidebar-item-active,
 html.light .topbar-tabs .sidebar-item-active:hover,
 html.light .topbar-tabs .sidebar-item-active:has(:focus-visible) {
-  background: var(--panel-bg);
+  background: var(--item-active-bg);
   cursor: default;
 }
 
 html.dark .topbar-tabs .sidebar-item-active,
 html.dark .topbar-tabs .sidebar-item-active:hover,
 html.dark .topbar-tabs .sidebar-item-active:has(:focus-visible) {
-  background: var(--panel-bg);
+  background: var(--item-active-bg);
   cursor: default;
 }
 
@@ -736,11 +826,13 @@ html.nav-lock body {
 .mobile-topbar {
   min-height: 48px;
   padding-top: env(safe-area-inset-top, 0px);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
 }
 
 .mobile-topbar.is-overlay {
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
@@ -768,6 +860,9 @@ html.nav-lock body {
   .mobile-topbar {
     min-width: 0;
   }
+
+  .mobile-phone-hide { display: none !important; }
+  .mobile-project-identity { max-width: clamp(76px, 24vw, 190px); flex: 1 1 auto; }
 
   .topbar-tabs,
   .mobile-search-button,
@@ -824,6 +919,85 @@ html.nav-lock body {
     height: 100%;
     background: var(--panel-bg);
   }
+}
+
+@media (max-width: 767px) {
+  .brand-wordmark-label { display: none; }
+  .mobile-topbar { background: color-mix(in srgb, var(--bg) 90%, transparent); }
+  .mobile-project-identity {
+    position: absolute;
+    left: 50%;
+    width: max-content;
+    max-width: calc(100% - 112px);
+    flex: none;
+    transform: translateX(-50%);
+  }
+  .mobile-project-identity > button { justify-content: flex-start; text-align: left; }
+  .mobile-topbar .brand-link > span:first-child { width: 30px; height: 30px; }
+  .topbar-brand-desktop { display: none; }
+  .topbar-brand-new-mobile { display: flex !important; }
+  .topbar-brand-new-mobile .brand-wordmark-label { display: inline; }
+  .mobile-drawer-trigger { margin-left: -4px; }
+  .mobile-drawer-panel { animation-duration: 220ms !important; transition-duration: var(--mobile-drawer-duration, 220ms) !important; touch-action: pan-y; }
+  /* Vaul keeps drawers on a composited layer by default. That softens text
+     while the drawer is idle on some mobile GPUs; promote it only while swiping. */
+  .mobile-drawer-panel[data-vaul-drawer] { will-change: auto; }
+  .mobile-drawer-panel[data-vaul-drawer].vaul-dragging { will-change: transform; }
+  .mobile-drawer-overlay { animation-duration: 180ms !important; transition-duration: var(--mobile-drawer-overlay-duration, 180ms) !important; }
+  .mobile-drawer-panel .brand-wordmark-label { display: inline; }
+  .mobile-drawer-panel,
+  .mobile-sidebar-content { background: var(--panel-bg); }
+  .mobile-drawer-panel { border-right: 1px solid var(--panel-border); }
+  .mobile-sidebar-switch { overflow: hidden; background: var(--bg); }
+  .mobile-sidebar-switch-indicator {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 2px;
+    width: calc((100% - 4px) / 2);
+    border-radius: 999px;
+    background: var(--item-active-bg);
+    transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1);
+    pointer-events: none;
+  }
+  .mobile-tabbar { min-height: 46px; }
+  .topbar-tabs { overflow: hidden !important; }
+  .topbar-tabs .sidebar-item-rest:hover,
+  .topbar-tabs .sidebar-item-rest:focus-visible { background: transparent; }
+  .topbar-tabs .sidebar-item-active { background: var(--item-active-bg); }
+  .composer-shell { padding: 6px 10px !important; }
+  .composer-shell .composer-draft { min-height: 32px !important; padding-top: 4px !important; padding-bottom: 4px !important; }
+  .composer-draft { font-size: 15px !important; }
+  .composer-pad { padding-left: 6px !important; padding-right: 6px !important; }
+  .page-y-scroll:has(.start-screen) { overflow: hidden !important; background: var(--bg); }
+  .project-list .project-card:hover,
+  .project-card:hover { background: transparent !important; }
+}
+
+@media (min-width: 768px) {
+  /* Match the chat scroller's usable width, which excludes classic scrollbars. */
+  .chat-composer-alignment {
+    width: calc(100% - var(--chat-scrollbar-gutter, 0px));
+  }
+
+  /* Give the composer 3px of extra width on each side of the message column. */
+  .chat-composer-bleed {
+    margin-inline: -3px;
+  }
+}
+
+@media (max-width: 767px) and (prefers-reduced-motion: reduce) {
+  .mobile-sidebar-switch-indicator { transition: none; }
+}
+
+@media (max-width: 767px) {
+  .mobile-sidebar-content .panel-selectable { background: var(--item-active-bg); }
+  .mobile-sidebar-content .studio-generation-button { background: var(--panel-bg); }
+  .mobile-sidebar-content .studio-generation-button:hover,
+  .mobile-sidebar-content .studio-generation-button:focus-visible { background: var(--item-active-bg); }
+  .mobile-sidebar-content .artifact-panel-content { background: var(--panel-bg); }
+  .mobile-sidebar-content .sources-pane { background: var(--panel-bg); }
+  .mobile-sidebar-content .sources-pane .sources-add-button { background: var(--panel-bg); }
 }
 
 /* The app shell can leave the project workspace narrower than the viewport. */
@@ -983,14 +1157,14 @@ html.nav-lock body {
 
 @media (max-width: 767px) {
   .composer-pad {
-    padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
   }
 }
 
 @media (display-mode: standalone), (display-mode: fullscreen) {
   .composer-pad,
   .sheet-pad {
-    padding-bottom: max(34px, env(safe-area-inset-bottom, 0px));
+    padding-bottom: max(26px, env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -1144,6 +1318,14 @@ html.ios-standalone.marketing::before {
 
 [data-vaul-overlay][data-state="closed"] {
   animation: none !important;
+}
+
+/* The mobile navigation drawer should fade its scrim out with the panel.
+   Other Vaul overlays retain the existing no-animation close behavior. */
+@media (max-width: 767px) {
+  .mobile-drawer-overlay[data-state="closed"] {
+    animation: fadeOut 180ms cubic-bezier(0.32, 0.72, 0, 1) both !important;
+  }
 }
 
 :focus,
@@ -2814,17 +2996,15 @@ html:not(.platform-mac) *::-webkit-scrollbar-thumb:hover {
 @keyframes stream-word-in {
   from {
     opacity: 0;
-    filter: blur(4px);
   }
   to {
     opacity: 1;
-    filter: blur(0);
   }
 }
 
 .stream-word {
   display: inline;
-  animation: stream-word-in 200ms ease-out both;
+  animation: stream-word-in 140ms ease-out both;
 }
 
 .chat-msg {
@@ -2926,8 +3106,11 @@ html:not(.platform-mac) *::-webkit-scrollbar-thumb:hover {
   .status-wait-in.status-shimmer,
   .status-wait-out.status-shimmer,
   .chat-body-stream > .chat-stream-block,
-  .stream-word {
+  .stream-word,
+  .chat-prompt-scroll-spacer {
     animation: none;
+    transition: none;
+    will-change: auto;
   }
   .chat-thread > .chat-msg-assistant {
     transition: none;
@@ -2952,6 +3135,10 @@ html:not(.platform-mac) *::-webkit-scrollbar-thumb:hover {
 .brand-link {
   -webkit-user-drag: none;
   user-select: none;
+}
+
+.brand-wordmark {
+  font-family: "Special Gothic Expanded One", sans-serif;
 }
 
 .sidebar-brand-logo,

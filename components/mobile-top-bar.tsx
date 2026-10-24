@@ -2,13 +2,14 @@
 
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
-import { useShell } from "@/components/workspace/shell-context";
+import { useMobileNavigation, useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
 
 export function MobileTopBar() {
   const { user } = useAuth();
   const pathname = usePathname();
-  const { setMobileNavOpen, openAccountSheet, mobileTopActions } = useShell();
+  const { openAccountSheet, mobileTopActions } = useShell();
+  const { setMobileNavOpen } = useMobileNavigation();
   const name = user?.displayName || user?.email || "Account";
   const overlay =
     pathname === "/" ||
@@ -25,6 +26,7 @@ export function MobileTopBar() {
       <button
         type="button"
         onClick={() => setMobileNavOpen(true)}
+        onPointerDown={() => setMobileNavOpen(true)}
         className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-xl text-foreground hover:bg-surface-2"
         aria-label="Open menu"
       >

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, startTransition, type Dispatch, type SetStateAction } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
+import Lenis from "lenis";
+import { MOBILE_MQ } from "@/lib/workspace/media";
 import { useAuth } from "@/components/auth-provider";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
 import { useUserProfile } from "@/components/account/use-user-profile";
@@ -15,6 +17,7 @@ import { upsertToolStatus, type ToolStatusUpdate } from "@/lib/ai/tool-execution
 import { toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { dispatchChatTool, dispatchStatus, analysingStatus, thinkingStatus } from "@/lib/chat/dispatch";
 import { latestOpenAsk, splitTeachingExam } from "@/lib/chat/prompt-ask";
+import { studySheetSuggestedPrompts } from "@/lib/chat/artifact-suggestions";
 import { addChatMessage, allocateChatMessageId, ensureChatThread, patchChatMessage, subscribeChatMessages } from "@/lib/chats";
 import { DEFAULT_CHAT_THREAD_ID, DEFAULT_PROJECT_GOAL } from "@/lib/core/constants";
 import { figureAttachmentsForTurn, pickChatFigures, shouldAttachChatFigures } from "@/lib/materials/figures";
@@ -68,11 +71,13 @@ import { gateGuestChatTool, guestCapReached, GuestCapError, isGuestUser, recordG
 import { recipeForGoal } from "@/lib/core/recipes";
 import { updateProjectActiveArtifact, updateProjectGoal } from "@/lib/projects";
 import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
-import { markProjectActivityComplete } from "@/lib/workspace/project-activity";
+import { markProjectActivityComplete, markProjectGenerationComplete } from "@/lib/workspace/project-activity";
 import {
   MAX_ACTIVE_NAVIGATION_GENERATIONS,
   abortLiveGeneration,
+  beginProjectGeneration,
   beginLiveGeneration,
+  finishProjectGeneration,
   finishLiveGeneration,
   getActiveGenerationCount,
   getLiveGeneration,
@@ -92,7 +97,7 @@ import { usedSources } from "@/lib/rag/sources";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { getStudySheet } from "@/lib/study-sheets/store";
-import { findNode, findNodeByPracticeSet, flattenNodes, hintAskPrompt, leadPathPrompt, markNodeDone, markNodeReady, moveOnPrompt, nodeTeach, pathBriefing, pathIsStarted, resumeAfterWorkPrompt, subscribeStudyPaths } from "@/lib/paths";
+import { findNode, findNodeByPracticeSet, flattenNodes, hintAskPrompt, leadPathPrompt, markNodeDone, markNodeReady, moveOnPrompt, nodeTeach, pathBriefing, pathIsStarted, subscribeStudyPaths } from "@/lib/paths";
 import { patchStudyPath } from "@/lib/paths/store";
 import { submitAssistantDislike } from "@/lib/feedback/store";
 import { stripArtifactMarkup } from "@/lib/composer/memory";
@@ -164,7 +169,6 @@ function processForSource(title: string, ka: boolean): { activity: string; statu
 
 function FollowChips({
   ka: _ka,
-  followup,
   pathStart,
   teaching,
   hintLabel,
@@ -173,7 +177,6 @@ function FollowChips({
   onAction,
 }: {
   ka: boolean;
-  followup: boolean;
   pathStart: boolean;
   teaching: boolean;
   hintLabel: string;
@@ -182,9 +185,7 @@ function FollowChips({
   onAction: (id: string) => void;
 }) {
   const actions: { id: string; label: string; primary?: boolean }[] = [];
-  if (followup) {
-    actions.push({ id: "continue", label: "Continue", primary: true });
-  } else if (pathStart) {
+  if (pathStart) {
     actions.push({ id: "continue", label: "Continue", primary: true });
   } else if (teaching) {
     if (askQuestion) actions.push({ id: "hint", label: hintLabel });
@@ -417,6 +418,10 @@ export function ProjectChat({
   );
   const liveGeneration = useSyncExternalStore(subscribeToGeneration, getGenerationSnapshot, () => null);
   const [messages, setMessages] = useState<ChatMessage[]>(openingUi.messages);
+  const [focusedPromptId, setFocusedPromptId] = useState<string | null>(() =>
+    liveGeneration ? [...openingUi.messages].reverse().find((message) => message.role === "user")?.id ?? null : null,
+  );
+  const [promptScrollSpacer, setPromptScrollSpacer] = useState(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const loadingOlderRef = useRef(false);
   const olderExhaustedRef = useRef(false);
@@ -457,7 +462,6 @@ export function ProjectChat({
   }, [project.id, chatThreadId]);
   const [suggest, setSuggest] = useState<{ messageId: string; kind: "practice" | "exam" | "sheet" | "path" } | null>(null);
   const [suggestedFollowups, setSuggestedFollowups] = useState<{ messageId: string; prompts: string[] } | null>(null);
-  const [followup, setFollowup] = useState<{ kind: "sheet" | "practice"; ka: boolean; since: number } | null>(null);
   const [stoppedIds, setStoppedIds] = useState<Set<string>>(() => new Set());
   const [needGoogle, setNeedGoogle] = useState(false);
   const [path, setPath] = useState<StudyPath | null>(null);
@@ -468,8 +472,8 @@ export function ProjectChat({
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [expandedUserMessages, setExpandedUserMessages] = useState<Record<string, boolean>>({});
-  const pendingPromptScrollRef = useRef<string | null>(openingUi.messages.find((message) => message.role === "user")?.id ?? null);
-  const pendingPromptFollowRef = useRef(false);
+  const pendingPromptScrollRef = useRef<string | null>([...openingUi.messages].reverse().find((message) => message.role === "user")?.id ?? null);
+  const pendingSpacerPromptRef = useRef<string | null>(null);
   const enteringPromptsRef = useRef(new Set(openingUi.messages.filter((message) => message.role === "user").map((message) => message.id)));
   const [historyReady, setHistoryReady] = useState(false);
   const onHistoryReady = useCallback(() => setHistoryReady(true), []);
@@ -654,6 +658,30 @@ export function ProjectChat({
     return () => observer.disconnect();
   }, [onComposerHeightChange]);
 
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const composer = composerBoxRef.current;
+    if (!scroller || !composer) return;
+
+    const syncScrollbarGutter = () => {
+      const style = window.getComputedStyle(scroller);
+      const borders = Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.borderRightWidth);
+      const gutter = Math.max(0, scroller.offsetWidth - scroller.clientWidth - borders);
+      composer.style.setProperty("--chat-scrollbar-gutter", `${gutter}px`);
+    };
+
+    syncScrollbarGutter();
+    const observer = new ResizeObserver(syncScrollbarGutter);
+    observer.observe(scroller);
+    if (scroller.firstElementChild) observer.observe(scroller.firstElementChild);
+    window.addEventListener("resize", syncScrollbarGutter);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncScrollbarGutter);
+      composer.style.removeProperty("--chat-scrollbar-gutter");
+    };
+  }, []);
+
   function keepComposerFocus() {
     composerRef.current?.focus();
   }
@@ -670,6 +698,41 @@ export function ProjectChat({
     lockPageScroll();
     historyViewRef.current?.scrollToEnd();
   }, [lockPageScroll]);
+
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || !isActive) return;
+
+    // Keep the chat's trackpad/wheel treatment on desktop only. Touch scroll
+    // on phones stays fully native so iOS and Android handle momentum.
+    const media = window.matchMedia(MOBILE_MQ);
+    let lenis: Lenis | null = null;
+    const syncLenis = () => {
+      lenis?.destroy();
+      lenis = null;
+      if (media.matches) return;
+
+      lenis = new Lenis({
+        wrapper: scroller,
+        content: scroller.firstElementChild instanceof HTMLElement ? scroller.firstElementChild : scroller,
+        lerp: 0.16,
+        wheelMultiplier: 0.85,
+        smoothWheel: true,
+        syncTouch: false,
+        allowNestedScroll: true,
+        respectReducedMotion: true,
+        autoRaf: true,
+      });
+    };
+
+    syncLenis();
+    media.addEventListener("change", syncLenis);
+
+    return () => {
+      media.removeEventListener("change", syncLenis);
+      lenis?.destroy();
+    };
+  }, [isActive]);
 
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
@@ -699,15 +762,25 @@ export function ProjectChat({
     if (!initialScrollRef.current && messages.length > 0 && !sending && !stream) {
       initialScrollRef.current = true;
       pendingPromptScrollRef.current = null;
-      pendingPromptFollowRef.current = false;
       stickToBottom();
       return;
     }
     const promptId = pendingPromptScrollRef.current;
     if (promptId && messages.some((message) => message.id === promptId)) {
       pendingPromptScrollRef.current = null;
-      historyViewRef.current?.scrollToMessage(promptId, pendingPromptFollowRef.current);
-      pendingPromptFollowRef.current = false;
+      const scroller = scrollerRef.current;
+      const promptStart = historyViewRef.current?.getMessageStart(promptId);
+      if (scroller && promptStart != null) {
+        const targetOffset = promptStart - 24;
+        const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        const spacer = Math.max(0, targetOffset - maxScroll);
+        setPromptScrollSpacer(spacer);
+        if (spacer > 0 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          pendingSpacerPromptRef.current = promptId;
+          return;
+        }
+      }
+      requestAnimationFrame(() => historyViewRef.current?.scrollToMessage(promptId, "smooth"));
     }
   }, [loading, historyReady, messages, stream, sending, stickToBottom]);
 
@@ -1015,7 +1088,7 @@ export function ProjectChat({
             : current,
         );
       });
-    }, { deltaMode: "append" });
+    }, { deltaMode: "append", revealMode: "frame" });
     try {
       const result = await readChatSse(response, {
         onDelta: (delta) => {
@@ -1237,11 +1310,8 @@ export function ProjectChat({
     sendingRef.current = true;
     const savedUserMessageId = options?.userMessageId ?? allocateChatMessageId(project.id, chatThreadId);
     if (!options?.skipUser && !options?.studio) {
-      const scroller = scrollerRef.current;
-      pendingPromptFollowRef.current = Boolean(
-        scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 96,
-      );
       pendingPromptScrollRef.current = savedUserMessageId;
+      setFocusedPromptId(savedUserMessageId);
       enteringPromptsRef.current.add(savedUserMessageId);
     }
     abortRef.current = controller;
@@ -1264,7 +1334,6 @@ export function ProjectChat({
     setCanRetry(true);
     setSuggest(null);
     setSuggestedFollowups(null);
-    setFollowup(null);
     setStream(initialStream);
     initialScrollRef.current = !options?.studio;
 
@@ -1621,9 +1690,6 @@ export function ProjectChat({
       if (!options?.studio && responseFollowups.length > 0) {
         setSuggestedFollowups({ messageId: id, prompts: responseFollowups });
       }
-      if (!options?.studio && !guest && dispatched.artifact?.kind === "sheet" && tool.name !== "create_note" && tool.name !== "edit_note") {
-        setFollowup({ kind: "sheet", ka: promptIsKa(modelPrompt), since: Date.now() });
-      }
       if (dispatched.openThreadId && pathRef.current) {
         const opened = { ...pathRef.current, started: true, threadId: dispatched.openThreadId };
         pathRef.current = opened;
@@ -1677,9 +1743,12 @@ export function ProjectChat({
       sendingRef.current = false;
       setSending(false);
       setStoppable(false);
+      pendingSpacerPromptRef.current = null;
+      setFocusedPromptId(null);
+      setPromptScrollSpacer(0);
       finishLiveGeneration(liveGenerationKey, controller);
       keepComposerFocus();
-      markProjectActivityComplete(project.id);
+      markProjectGenerationComplete(project.id);
     }
     if (followTopic) {
       void sendPrompt(leadPathPrompt(followTopic, followTeach, pathRef.current?.kind), { skipUser: true, leadPath: true });
@@ -1777,25 +1846,6 @@ export function ProjectChat({
     void sendPrompt(moveOnPrompt(nextTitle), { skipUser: true });
   }
 
-  async function continueFollowup() {
-    const kind = followup?.kind ?? "sheet";
-    setFollowup(null);
-    const current = pathRef.current;
-    if (current && !pathIsStarted(current)) {
-      await beginPath();
-      return;
-    }
-    const loc = current ? findNode(current, current.currentNodeId) : null;
-    void sendPrompt(
-      resumeAfterWorkPrompt({
-        kind,
-        nodeTitle: loc?.node.title,
-        teach: loc ? nodeTeach(loc.node) : undefined,
-      }),
-      { skipUser: true, leadPath: Boolean(current && pathIsStarted(current)) },
-    );
-  }
-
   async function confirmSuggestion(kind: "practice" | "exam" | "sheet" | "path") {
     if (guest) return;
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
@@ -1839,6 +1889,8 @@ export function ProjectChat({
     studioHandledRef.current = studioRequest.id;
     const request = studioRequest;
     const controller = new AbortController();
+    const projectGenerationId = `studio:${request.id}`;
+    beginProjectGeneration(project.id, projectGenerationId);
     sendingRef.current = true;
     abortRef.current = controller;
     setSending(true);
@@ -1863,14 +1915,18 @@ export function ProjectChat({
           onStatus: (status) => onStudioProgress?.(request.id, status),
         });
       },
-      save: (artifact) => waitForChatStep("Saving Studio output", () => saveStudioArtifact(project.id, request.type, artifact), { signal: controller.signal, timeoutMs: 15_000 }),
+      save: (artifact) => waitForChatStep("Saving Studio output", () => saveStudioArtifact(project.id, request.type, artifact, {
+        prompt: request.prompt,
+        sourceMaterialIds: request.sourceIds,
+      }), { signal: controller.signal, timeoutMs: 15_000 }),
     }).then((result) => onStudioRequestHandled?.(request.id, result)).finally(() => {
       controller.abort();
       if (abortRef.current === controller) abortRef.current = null;
       sendingRef.current = false;
       setSending(false);
       setStoppable(false);
-      markProjectActivityComplete(project.id);
+      finishProjectGeneration(project.id, projectGenerationId);
+      markProjectGenerationComplete(project.id);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studioRequest, sending, loading]);
@@ -1957,37 +2013,29 @@ export function ProjectChat({
       !guest &&
       !sending &&
       chatMode !== "fast";
+    const renderedSuggestedFollowups =
+      suggestedFollowups?.messageId === message.id
+        ? suggestedFollowups.prompts
+        : artifact?.kind === "sheet"
+          ? studySheetSuggestedPrompts(ka)
+          : null;
     const memorized = Boolean(live?.memorized || message.memorized || memorizedIds.has(message.id))
       && isExplicitMemoryRequest(prev?.role === "user" ? prev.content : "");
     const likeActive = turnReaction[message.id] === "like";
     const dislikeActive = turnReaction[message.id] === "dislike";
     const dislikeHighlighted = dislikeActive || dislikeOpen === message.id;
     const responseStatus = message.responseStatus ?? (stoppedIds.has(message.id) ? "stopped" : undefined);
-    const waiting =
-      Boolean(followup) &&
-      !sending &&
-      !live &&
-      history.lastAssistantId === message.id &&
-      ((followup?.kind === "sheet" && artifact?.kind === "sheet") ||
-        (followup?.kind === "practice" && artifact?.kind === "practice"));
-    const waitLabel =
-      followup?.kind === "practice"
-        ? "Have a look…"
-        : "Looking this over…";
-
     return (
       <ChatExerciseProvider priorPapers={priorPapers} interactive={exerciseOpen} images={images ?? []}
         onReply={!sending ? sendFormReply : undefined}>
       <div className="flex w-full flex-col">
         <div className="flex flex-col gap-4">
           {showToolActivity ? <ToolActivity rows={live?.toolActivity ?? []} status={live?.status} startedAt={live?.startedAt} /> : null}
-          {memorized || (live?.status && !showToolActivity) || waiting || responseStatus || workedMs[message.id] != null ? (
+          {memorized || (live?.status && !showToolActivity) || responseStatus || workedMs[message.id] != null ? (
             <div className="flex flex-col gap-2">
               {memorized ? <MemorizedMark onOpen={() => openSettings("memory")} /> : null}
               {live?.status && !showToolActivity ? (
                 <StatusWait label={live.status} />
-              ) : waiting ? (
-                <StatusWait label={waitLabel} since={followup?.since} timer />
               ) : responseStatus ? (
                 <StatusWait
                   label={responseStatus === "stopped"
@@ -2007,7 +2055,7 @@ export function ProjectChat({
           ) : null}
           {artifact ? (
             <>
-              {!waiting && taught.trim() ? (
+              {taught.trim() ? (
                 <div className="chat-body text-foreground">
                   <p>{taught.trim()}</p>
                 </div>
@@ -2102,7 +2150,6 @@ export function ProjectChat({
           {!live && !sending && history.lastAssistantId === message.id && !guest ? (
             <FollowChips
               ka={ka}
-              followup={Boolean(followup)}
               pathStart={Boolean(isMainThread && path && !pathIsStarted(path))}
               teaching={teachingHere}
               hintLabel="Hint"
@@ -2110,10 +2157,6 @@ export function ProjectChat({
               options={[]}
               onAction={(id) => {
                 if (id === "continue") {
-                  if (followup) {
-                    void continueFollowup();
-                    return;
-                  }
                   if (path && !pathIsStarted(path)) {
                     void beginPath();
                     return;
@@ -2130,9 +2173,9 @@ export function ProjectChat({
               }}
             />
           ) : null}
-          {!live && !sending && history.lastAssistantId === message.id && suggestedFollowups?.messageId === message.id ? (
+          {!live && !sending && history.lastAssistantId === message.id && renderedSuggestedFollowups?.length ? (
             <SuggestedFollowups
-              prompts={suggestedFollowups.prompts}
+              prompts={renderedSuggestedFollowups}
               onPick={(prompt) => {
                 setSuggestedFollowups(null);
                 keepComposerFocus();
@@ -2260,11 +2303,11 @@ export function ProjectChat({
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
         ref={scrollerRef}
-        className="chat-thread-viewport min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
-        onWheel={() => { pendingPromptScrollRef.current = null; }}
-        onTouchStart={() => { pendingPromptScrollRef.current = null; }}
-        onPointerDown={() => { pendingPromptScrollRef.current = null; }}
-        onKeyDown={() => { pendingPromptScrollRef.current = null; }}
+        className="chat-thread-viewport min-h-0 flex-1 overflow-y-auto overscroll-contain pt-12 [overflow-anchor:none]"
+        onWheel={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
+        onTouchStart={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
+        onPointerDown={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
+        onKeyDown={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
       >
         <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
             {loadingOlder ? <span role="status" className="pointer-events-none absolute top-2 z-10 rounded-full bg-background px-3 py-1 text-xs text-muted">Loading older messages…</span> : null}
@@ -2277,6 +2320,13 @@ export function ProjectChat({
               handleRef={historyViewRef}
               onReady={onHistoryReady}
               bottomInset={composerH}
+              trailingSpacer={focusedPromptId ? promptScrollSpacer : 0}
+              onTrailingSpacerEnd={() => {
+                const promptId = pendingSpacerPromptRef.current;
+                if (!promptId) return;
+                pendingSpacerPromptRef.current = null;
+                historyViewRef.current?.scrollToMessage(promptId, "smooth");
+              }}
               active={isActive}
               renderMessage={(message) => {
               const index = history.indexById.get(message.id) ?? messages.length;
@@ -2341,7 +2391,7 @@ export function ProjectChat({
       ) : null}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background from-[28px] via-background/95 to-transparent">
-        <div ref={composerBoxRef} className="pointer-events-auto mx-auto w-full max-w-[calc(48rem-2px)] px-8 pt-10 max-md:px-4">
+        <div ref={composerBoxRef} className="chat-composer-alignment pointer-events-auto mx-auto w-full max-w-3xl px-8 pt-10 max-md:px-2.5">
           <div>
             <ChatComposer
               ref={composerRef}
@@ -2359,7 +2409,7 @@ export function ProjectChat({
               allowAttach={!guest}
               placeholder={undefined}
               pad={false}
-              className="composer-pad"
+              className="composer-pad chat-composer-bleed"
               onRemoveChip={(id) => {
                 const chip = chips.find((item) => item.id === id);
                 removedChipIds.current.add(id);

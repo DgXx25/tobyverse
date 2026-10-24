@@ -40,25 +40,8 @@ export function buildChatSystemPrompt(context: ChatGenerationContext): string {
   const memory: string[] = [];
   const known = formatKnownUserBlock({
     memories: pickMemoriesForAsk(context.memories ?? [], context.prompt ?? ""),
-    personalization: context.personalization ?? "",
-    adaptiveContext: context.adaptiveContext,
   });
   if (known) memory.push(known);
-
-  const projectFacts = pickMemoriesForAsk(
-    (context.projectMemory ?? []).map((content, index) => ({ id: `p${index}`, content })),
-    context.prompt ?? "",
-    4,
-  );
-  if (projectFacts.length > 0) {
-    memory.push(
-      [
-        "Known about this subject:",
-        ...projectFacts.map((item) => `- ${item.content}`),
-        "Use as background only when relevant to the current request.",
-      ].join("\n"),
-    );
-  }
 
   if (context.knowledgeItems.length > 0) {
     const facts = context.knowledgeItems

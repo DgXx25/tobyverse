@@ -58,14 +58,22 @@ export function parsePersonalizationPatch(value: unknown, current: string): stri
   return next === current.trim() ? undefined : next;
 }
 
-const LEARNING_OR_MEMORY_SIGNAL =
-  /remember|never forget|from now on|\balways\b|never (do|use|say|write)|დამიმახსოვრ|დაიმახსოვრ|ყოველთვის|არასდროს|დავიბენ|ვიბენ|მიჭირს|გაამარტივე|confused|overwhelmed|too (hard|abstract|long|fast)|simpler|slower|მაგალით|\bexamples?\b|ცხრილ|\btables?\b|ისტორი|\bstor(y|ies)\b|დამილისტ|don't just list|how I learn|როგორ ვსწავლ|clicked|helped me/i;
-
 const DURABLE_FACT =
-  /მე მქვია|my name is|ვმუშაობ|i work as|i(?:['’]m| am) an?\b|ფინალ.{0,48}(\d|რიცხვ)|exam.{0,24}(\d|on |date)|always (answer|write|reply) in|წერე? ქართულ|preferred language|B[12]\b|C[12]\b|A[12]\b|დონე|struggles with|მიჭირს|lecturer|ლექტორ|მანქიუ|mankiw|textbook|წიგნი|exam on|გამოცდა/i;
+  /მე მქვია|მე ვარ|მე ვსწავლობ|ჩემი (?:მიზან|გამოცდ|პროფეს|დონე|სახელ)|ვმუშაობ|my name is|\bi work as\b|\bi (?:study|speak|live in|learn|prefer)\b|\bi(?:['’]m| am) (?:an? |studying|learning|based in)|\bmy (?:goal|exam|course|preferred|learning|accessibility|device|name)\b|always (answer|write|reply) in|წერე? ქართულ|preferred language|მირჩევნია|ვსწავლობ|გამოცდა (?:მაქვს|მექნება)/i;
 
 const PREFERENCE_MARKER = /\bi (?:prefer|like)\b|my prefer(?:red|ence)|მირჩევნია|მომწონს/i;
 const COMMUNICATION_STYLE = /answers?|responses?|replies|paragraphs?|notes?|concise|detailed|emojis?|tone|format|bold|highlights?|მიპასუხ|პასუხებ|აბზაც|ჩანაწერ|მოკლე|ვრცელი|ემოჯ|გამუქ|სტილ/i;
+
+/** Direct response rules and durable style preferences apply across topics. */
+export function isStandingResponseInstruction(value: unknown): boolean {
+  const text = sanitizeMemoryContent(value);
+  if (!text) return false;
+  if (/^(?:prefers?|preferred|speaks?)\b.*(?:answers?|responses?|language|paragraph|georgian|english|concise|detailed)/i.test(text)) return true;
+  if (PREFERENCE_MARKER.test(text) && COMMUNICATION_STYLE.test(text)) return true;
+  const englishDirective = /^(?:always\s+|never\s+|from now on\s+)?(?:reply|answer|respond|write|keep|use)\b/i.test(text);
+  const georgianDirective = /^(?:ყოველთვის\s+|არასდროს\s+)?(?:მიპასუხ|პასუხ|წერე|გამოიყენე|არ გამოიყენო)/i.test(text);
+  return (englishDirective || georgianDirective) && COMMUNICATION_STYLE.test(text);
+}
 
 function looksLikeQuestionOnly(prompt: string): boolean {
   const text = prompt.trim();
@@ -78,9 +86,21 @@ function isDocumentTask(prompt: string): boolean {
 }
 
 /** Automatic learning stays quiet; a confirmation belongs only to a deliberate remember request. */
+export function isForgetAllMemoryRequest(prompt: string): boolean {
+  const text = prompt.replace(/\s+/g, " ").trim();
+  return /^(?:please[, ]+)?(?:forget (?:everything (?:you (?:know|remember) )?about me|all (?:my |your )?memories)|(?:clear|delete|remove) (?:all )?(?:my |your )?(?:personal )?memor(?:y|ies))[.!?]*$/i.test(text)
+    || /^(?:გთხოვ[,\s]+)?(?:ჩემი )?(?:მთელი|ყველა) (?:პირადი )?მეხსიერებ[ა-ჰ]* (?:წაშალე|გაასუფთავე)[.!?]*$/.test(text);
+}
+
 export function isExplicitMemoryRequest(prompt: string): boolean {
   if (containsSensitiveMemory(prompt) || isWorkNoteRequest(prompt) || isDocumentTask(prompt)) return false;
-  return /\bremember\b|დაიმახსოვრ|დამიმახსოვრ/i.test(prompt);
+  const text = prompt.replace(/\s+/g, " ").trim();
+  if (isForgetAllMemoryRequest(text)) return true;
+  if (/\bremember\b|\bforget\b|\bclear (?:all )?(?:my |your )?memory\b|დაიმახსოვრ|დამიმახსოვრ|დაივიწყე|მეხსიერებ.{0,20}(?:წაშალე|გაასუფთავე)/i.test(text)) return true;
+  const persistent = /\bfrom now on\b|\balways\b|\bnever\b|ამიერიდან|ყოველთვის|არასდროს/i.test(text);
+  const generalPreference = PREFERENCE_MARKER.test(text) && COMMUNICATION_STYLE.test(text)
+    && !/\bfor this (?:answer|reply|question|comparison|explanation|task)\b|ამ (?:პასუხ|შედარებ|ახსნ|კითხვ)[^\n]{0,24}(?:თვის|ში)/i.test(text);
+  return (persistent && COMMUNICATION_STYLE.test(text)) || generalPreference;
 }
 
 /** Notes / practice / path requests have no signal — skip extract so they never show Memorized. */
@@ -88,8 +108,8 @@ export function shouldExtractMemory(prompt: string): boolean {
   if (containsSensitiveMemory(prompt) || isWorkNoteRequest(prompt) || isDocumentTask(prompt)) return false;
   const text = prompt.replace(/\s+/g, " ").trim();
   if (!text) return false;
-  if (LEARNING_OR_MEMORY_SIGNAL.test(text)) return true;
-  if (PREFERENCE_MARKER.test(text) && COMMUNICATION_STYLE.test(text)) return true;
+  if (isExplicitMemoryRequest(text)) return true;
+  if (/\bfor this (?:answer|reply|question|comparison|explanation|task)\b|ამ (?:პასუხ|შედარებ|ახსნ|კითხვ)[^\n]{0,24}(?:თვის|ში)/i.test(text)) return false;
   if (looksLikeQuestionOnly(text)) return false;
   return DURABLE_FACT.test(text);
 }
@@ -114,7 +134,7 @@ export function foldLearningSignal(current: string, signal: string): string {
   return sanitizePersonalization(`${base} ${next}`);
 }
 
-export function parseMemoryOps(value: unknown, knownIds: Set<string>): MemoryOp[] {
+export function parseMemoryOps(value: unknown, knownIds: Set<string>, maxOperations = MEMORY_OPS_PER_TURN): MemoryOp[] {
   if (!value || typeof value !== "object") return [];
   const row = value as { operations?: unknown };
   if (!Array.isArray(row.operations)) return [];
@@ -123,7 +143,7 @@ export function parseMemoryOps(value: unknown, knownIds: Set<string>): MemoryOp[
   const seen = new Set<string>();
 
   for (const item of row.operations) {
-    if (ops.length >= MEMORY_OPS_PER_TURN) break;
+    if (ops.length >= maxOperations) break;
     if (!item || typeof item !== "object") continue;
     const next = item as { op?: unknown; id?: unknown; content?: unknown };
     if (next.op === "add") {

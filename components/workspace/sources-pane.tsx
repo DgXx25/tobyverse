@@ -508,20 +508,32 @@ export function SourcesPane({
       ) : null}
 
       <div className="shrink-0 px-3 pt-3">
-        <button
-          type="button"
-          onClick={() => {
-            setAdding(null);
-            setAdderOpen(true);
-          }}
-          className="sources-add-button flex h-10 w-full items-center justify-center gap-2 rounded-full bg-surface-2 text-[14px] text-foreground"
-        >
-          <UiIcon name="plus" size={16} />
-          Add sources
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setAdding(null);
+              setAdderOpen(true);
+            }}
+            className="sources-add-button flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-surface-2 text-[14px] text-foreground"
+          >
+            <UiIcon name="plus" size={16} />
+            Add sources
+          </button>
+          <button
+            type="button"
+            disabled={folderBusy}
+            aria-label="New folder"
+            title="New folder"
+            onClick={() => { setError(null); setFolderDialog({ name: "" }); }}
+            className="flex h-10 w-10 shrink-0 items-center justify-center gap-0.5 rounded-full text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-40 md:hidden"
+          >
+            <UiIcon name="folderPlus" size={19} />
+          </button>
+        </div>
 
         <div className="mt-2 flex items-center justify-between gap-2 text-[12px] text-muted">
-          <button type="button" disabled={folderBusy} onClick={() => { setError(null); setFolderDialog({ name: "" }); }} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-1 hover:text-foreground disabled:opacity-40"><UiIcon name="projectFolder" size={15} />New folder</button>
+          <button type="button" disabled={folderBusy} onClick={() => { setError(null); setFolderDialog({ name: "" }); }} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-1 hover:text-foreground disabled:opacity-40 max-md:hidden"><UiIcon name="projectFolder" size={15} />New folder</button>
           {items.length ? <button type="button" onClick={() => { setOrganizing(!organizing); setManagedIds([]); }} className="h-8 rounded-lg px-1 hover:text-foreground">{organizing ? "Done" : "Select"}</button> : null}
         </div>
         {organizing ? <div className="mb-1 rounded-xl bg-background p-2 text-[12px]">

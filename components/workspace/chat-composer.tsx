@@ -301,7 +301,11 @@ export const ChatComposer = forwardRef<
     }
     if (locked || !canSend) return;
     onSend();
-    requestAnimationFrame(() => areaRef.current?.focus({ preventScroll: true }));
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      areaRef.current?.blur();
+    } else {
+      requestAnimationFrame(() => areaRef.current?.focus({ preventScroll: true }));
+    }
   }
 
   function onKey(event: KeyboardEvent<HTMLTextAreaElement>) {

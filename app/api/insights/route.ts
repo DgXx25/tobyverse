@@ -1,36 +1,27 @@
 import { z } from "zod";
-import { assertAccountRequest, authErrorResponse, AuthError } from "@/lib/api/assert";
-import { generateText } from "@/lib/ai/gemini";
-import { startAiUsageSession } from "@/lib/billing/server";
-import { parseJsonLoose } from "@/lib/schema/json";
-import { observationSample, observationSchema } from "@/lib/adaptation/model";
-import { OBSERVATION_SYSTEM, observationPrompt } from "@/lib/adaptation/prompt";
-import { PERSONALIZATION_MAX } from "@/lib/memory/constants";
-import { controlAdaptiveState, insightHash, listKnowledgeProjects, publicAdaptiveState, readAdaptiveState, readKnowledgeGraph, requireOwnedProject, reserveObservation, saveObservation } from "@/lib/adaptation/server";
+import { assertAccountRequest, authErrorResponse } from "@/lib/api/assert";
+import { controlAdaptiveState, listKnowledgeProjects, publicAdaptiveState, readAdaptiveState, readKnowledgeGraph, requireOwnedProject } from "@/lib/adaptation/server";
+import { readAccountAccess } from "@/lib/billing/account-server";
+import { memoryLimitsForPlan } from "@/lib/memory/limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const controlSchema = z.object({
-  clear: z.boolean().optional(), removeKey: z.string().max(220).optional(),
+  clear: z.boolean().optional(), removeKey: z.string().max(220).optional(), removeTopicKey: z.string().max(64).optional(),
   projectId: z.string().max(150).optional(), clearGraph: z.boolean().optional(),
 }).strict();
-const batchSchema = z.object({
-  projectId: z.string().min(1).max(150), threadId: z.string().min(1).max(150),
-  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(1000) })).max(14),
-  memories: z.array(z.object({ id: z.string().max(150), content: z.string().max(200) })).max(4).optional(),
-  personalization: z.string().max(PERSONALIZATION_MAX).optional(),
-});
 
 export async function GET(request: Request) {
   try {
     const { uid } = await assertAccountRequest(request);
     const projectId = new URL(request.url).searchParams.get("projectId");
     if (projectId) await requireOwnedProject(uid, projectId);
-    const state = await readAdaptiveState(uid);
+    const [state, access] = await Promise.all([readAdaptiveState(uid), readAccountAccess(uid)]);
     const graph = projectId ? await readKnowledgeGraph(uid, projectId) : undefined;
     const projects = projectId ? undefined : await listKnowledgeProjects(uid);
-    return Response.json({ ...publicAdaptiveState(state), graph, projects }, { headers: { "Cache-Control": "private, no-store" } });
+    const limits = memoryLimitsForPlan(access.plan);
+    return Response.json({ ...publicAdaptiveState(state), graph, projects, plan: access.plan, limits, usage: { inferredPatterns: state.patterns.length, topics: graph?.nodes.length ?? 0 } }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return authErrorResponse(error); }
 }
 
@@ -40,7 +31,7 @@ export async function PATCH(request: Request) {
     const raw = await request.text();
     if (raw.length > 2000) return Response.json({ error: "Request too large." }, { status: 413 });
     const input = controlSchema.safeParse(JSON.parse(raw));
-    if (!input.success || (input.data.clearGraph && !input.data.projectId)) return Response.json({ error: "Invalid change." }, { status: 400 });
+    if (!input.success || ((input.data.clearGraph || input.data.removeTopicKey) && !input.data.projectId)) return Response.json({ error: "Invalid change." }, { status: 400 });
     if (input.data.projectId) await requireOwnedProject(uid, input.data.projectId);
     const state = await controlAdaptiveState(uid, input.data);
     return Response.json(publicAdaptiveState(state));
@@ -48,43 +39,10 @@ export async function PATCH(request: Request) {
 }
 
 export async function POST(request: Request) {
-  let usage: Awaited<ReturnType<typeof startAiUsageSession>> | undefined;
   try {
-    const { uid } = await assertAccountRequest(request);
-    const raw = await request.text();
-    if (raw.length > 18_000) return Response.json({ error: "Request too large." }, { status: 413 });
-    const parsed = batchSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) return Response.json({ error: "Invalid conversation sample." }, { status: 400 });
-    const { projectId, threadId } = parsed.data;
-    await requireOwnedProject(uid, projectId);
-    const conversation = observationSample(parsed.data.history, "");
-    if (conversation.filter(t => t.role === "user").length < 4) return Response.json({ updated: false });
-    const sample = conversation.map(t => ({
-      ...t, id: insightHash(`${projectId}:${threadId}:${t.role}:${t.content}`),
-    }));
-    const batch = insightHash(sample.filter(t => t.role === "user").map(t => t.id).join(":"));
-    const state = await reserveObservation(uid, batch);
-    if (!state) return Response.json({ updated: false });
-    const graph = await readKnowledgeGraph(uid, projectId);
-    usage = await startAiUsageSession(uid);
-    // One bounded call. Optional analysis never invokes a repair loop or the user's expensive model.
-    const result = await generateText(observationPrompt(sample, state.patterns.filter(p => !p.projectId || p.projectId === projectId), graph, { memories: parsed.data.memories ?? [], personalization: parsed.data.personalization ?? "" }), {
-      json: true, systemInstruction: OBSERVATION_SYSTEM, maxOutputTokens: 3072, usage: usage.report,
-    });
-    const patch = observationSchema.safeParse(parseJsonLoose(result));
-    if (!patch.success) {
-      console.warn("[insights] invalid observation shape", patch.error.issues.map(issue => issue.path.join(".")).join(", "));
-      return Response.json({ updated: false });
-    }
-    const updated = await saveObservation(uid, projectId, state.revision, patch.data, sample);
-    return Response.json({ updated });
-  } catch (error) {
-    if (error instanceof AuthError) return authErrorResponse(error);
-    if (error instanceof SyntaxError) return Response.json({ error: "Invalid JSON." }, { status: 400 });
-    // A failed optional observer neither blocks nor alters the completed answer.
-    console.warn("[insights] observation skipped", error instanceof Error ? error.message : "unknown error");
+    await assertAccountRequest(request);
+    // Old clients may still call this endpoint. Personal memory now captures only
+    // clearly shared lasting facts; no project map or behavioral observer runs.
     return Response.json({ updated: false });
-  } finally {
-    await usage?.commit().catch(error => console.error("[ai-usage] insights commit failed", error));
-  }
+  } catch (error) { return authErrorResponse(error); }
 }

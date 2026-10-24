@@ -1,6 +1,6 @@
 # Extending chat blocks
 
-Native blocks are optional formatting capabilities. The model chooses whether they help; registering a block must not require a lesson, a fixed response structure or a duplicate prose explanation.
+Native blocks are optional formatting capabilities. The model chooses whether they help; registering a block must not require a lesson, a fixed response structure or a duplicate prose explanation. When a block helps, place it beside the prose that explains it and interleave multiple blocks with the answer instead of collecting them at the end. Prefer concise surrounding prose while keeping useful reasoning and details; expand when the request calls for it. The model decides without asking permission to use an available block.
 
 ## Grouped sections
 

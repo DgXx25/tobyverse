@@ -50,7 +50,7 @@ export function snapToWord(text: string, index: number, lookahead = 14): number 
  */
 export function createChunkBuffer(
   onUpdate: (text: string) => void,
-  options?: { scheduler?: Scheduler; deltaMode?: "append" },
+  options?: { scheduler?: Scheduler; deltaMode?: "append"; revealMode?: "paced" | "frame" },
 ) {
   const scheduler = options?.scheduler ?? browserScheduler;
   let full = "";
@@ -79,6 +79,13 @@ export function createChunkBuffer(
   function tick() {
     frame = 0;
     const text = target();
+    if (options?.revealMode === "frame") {
+      shown = text.length;
+      emit(text);
+      last = 0;
+      settle();
+      return;
+    }
     // Markup stripping can shorten the target; never reveal past it.
     if (shown > text.length) shown = text.length;
     const time = scheduler.now();

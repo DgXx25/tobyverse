@@ -14,6 +14,7 @@ type StreamUpdate<T> = T | null | ((current: T | null) => T | null);
 // Keep active responses outside route component trees so SPA navigation can
 // unmount a project view without losing its stream or abort controller.
 const activeGenerations = new Map<string, LiveGeneration<unknown>>();
+const projectGenerations = new Map<string, string>();
 const conversationListeners = new Map<string, Set<Listener>>();
 const activeListeners = new Set<Listener>();
 let activeProjectIdsSnapshot: readonly string[] = [];
@@ -42,6 +43,18 @@ export function getActiveGenerationProjectIds(): readonly string[] {
 
 export function getActiveGenerationCount(): number {
   return activeGenerations.size;
+}
+
+export function beginProjectGeneration(projectId: string, operationId: string): void {
+  if (!projectId || !operationId) return;
+  projectGenerations.set(JSON.stringify([projectId, operationId]), projectId);
+  refreshActiveProjectIds();
+}
+
+export function finishProjectGeneration(projectId: string, operationId: string): void {
+  if (!projectId || !operationId) return;
+  projectGenerations.delete(JSON.stringify([projectId, operationId]));
+  refreshActiveProjectIds();
 }
 
 export function subscribeActiveGenerations(listener: Listener): () => void {
@@ -99,7 +112,10 @@ function notifyConversation(key: string) {
 }
 
 function refreshActiveProjectIds() {
-  const next = [...new Set([...activeGenerations.values()].map(({ projectId }) => projectId))];
+  const next = [...new Set([
+    ...[...activeGenerations.values()].map(({ projectId }) => projectId),
+    ...projectGenerations.values(),
+  ])];
   if (next.length === activeProjectIdsSnapshot.length && next.every((id, index) => id === activeProjectIdsSnapshot[index])) return;
   activeProjectIdsSnapshot = next;
   for (const listener of activeListeners) listener();

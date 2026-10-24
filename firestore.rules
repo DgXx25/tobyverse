@@ -254,17 +254,15 @@ service cloud.firestore {
 
     match /memories/{memoryId} {
         allow read: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidMemory(memoryId, request.resource.data);
-        allow update: if isOwner(userId)
-          && isValidMemory(memoryId, request.resource.data)
-          && request.resource.data.id == resource.data.id
-          && request.resource.data.createdAt == resource.data.createdAt;
+        // Memory writes go through the authenticated server, which applies the effective plan quota.
+        allow create, update: if false;
         allow delete: if isOwner(userId);
       }
 
       match /profile/{docId} {
         allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && docId == "learning" && isValidLearning(request.resource.data);
+        // Learning profile writes go through the authenticated server.
+        allow create, update: if false;
         allow delete: if isOwner(userId);
       }
     }
@@ -290,7 +288,8 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if signedIn()
         && (resource.data.userId == request.auth.uid || resource.data.ownerId == request.auth.uid)
-        && request.resource.data.userId == request.auth.uid;
+        && request.resource.data.userId == request.auth.uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["projectMemory"]);
 
       match /chats/{threadId} {
         allow read: if ownsProject(projectId) || sharedThread(projectId, threadId);

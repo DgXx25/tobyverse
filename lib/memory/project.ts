@@ -1,7 +1,8 @@
 import { stripArtifactMarkup } from "@/lib/composer/memory";
 import { memoryKey, sanitizeMemoryContent } from "@/lib/memory/normalize";
 
-export const PROJECT_MEMORY_MAX = 12;
+// Absolute storage bound. Effective plan caps are checked by the trusted API.
+export const PROJECT_MEMORY_MAX = 500;
 
 const JUNK =
   /\[artifact\b|chip_|<\/?(?:tool|function)|```toby|"op"\s*:\s*"(?:add|update)"|correct answer|quiz answer/i;

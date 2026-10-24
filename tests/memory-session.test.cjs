@@ -23,7 +23,7 @@ const input = { userId: 'u', projectId: 'p', threadId: 't', prompt: 'Explain thi
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const privacy = { containsSensitiveMemory: () => false, isWorkNoteRequest: () => false };
 
-test('observation proceeds when direct memory storage stalls', async t => {
+test('completed answers do not create project maps or inferred personal profiles', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const observed = [];
   const { createMemorySession } = load('lib/memory/session.ts', {
@@ -37,8 +37,7 @@ test('observation proceeds when direct memory storage stalls', async t => {
   assert.equal(observed.length, 0);
   t.mock.timers.tick(1500);
   await settle();
-  assert.equal(observed.length, 1);
-  assert.equal(observed[0].personalization, input.personalization);
+  assert.equal(observed.length, 0);
 });
 
 test('guest sessions skip both memory paths', async () => {
@@ -54,27 +53,30 @@ test('guest sessions skip both memory paths', async () => {
   await settle();
 });
 
-test('shared preferences remain usable without local storage and deletion stays empty', async () => {
+test('authoritative deletion clears legacy preference caches without writing them back', async () => {
   const originalWindow = global.window;
   let storageListener;
   global.window = { addEventListener: (name, listener) => { if (name === 'storage') storageListener = listener; }, localStorage: { getItem() { throw new Error('Blocked'); }, setItem() { throw new Error('Quota'); }, removeItem() { throw new Error('Blocked'); } } };
   try {
     const profile = load('lib/memory/profile.ts', {
-      'firebase/firestore': { doc: () => ({}), deleteDoc: async () => {}, setDoc: async () => {}, serverTimestamp: () => 0 },
+      'firebase/firestore': { doc: () => ({}), deleteDoc: async () => {}, getDoc: async () => ({ exists: () => false }) },
       '@/lib/firestore': { COLLECTIONS: { users: 'users', profile: 'profile' }, omitUndefined: value => value },
       '@/lib/firebase': { getFirebaseDb: () => ({}) },
       '@/lib/memory/normalize': { sanitizePersonalization: value => typeof value === 'string' ? value.trim() : '' },
+      '@/lib/api/client': { authHeaders: async () => ({}) },
     });
     assert.equal(profile.cachedLearningProfile('u', 'Loaded preference'), 'Loaded preference');
-    await profile.setLearningProfile('u', 'Updated preference');
+    storageListener({ key: 'tobyverse.learning.u', newValue: 'Updated preference' });
     assert.equal(profile.cachedLearningProfile('u', 'Loaded preference'), 'Updated preference');
     // No Settings subscription is mounted: another tab's removal still invalidates chat's cache.
     storageListener({ key: 'tobyverse.learning.u', newValue: null });
     assert.equal(profile.cachedLearningProfile('u', 'Loaded preference'), '');
-    await profile.setLearningProfile('u', 'Another preference');
+    storageListener({ key: 'tobyverse.learning.u', newValue: 'Another preference' });
+    assert.equal(await profile.getLearningProfile('u'), '');
+    assert.equal(profile.cachedLearningProfile('u', 'Loaded preference'), '');
     await profile.deleteLearningProfile('u');
     assert.equal(profile.cachedLearningProfile('u', 'Loaded preference'), '');
-    await profile.setLearningProfile('u', 'Preference before storage clear');
+    storageListener({ key: 'tobyverse.learning.u', newValue: 'Preference before storage clear' });
     storageListener({ key: null, newValue: null });
     assert.equal(profile.cachedLearningProfile('u', 'Loaded preference'), '');
   } finally {

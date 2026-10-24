@@ -5,7 +5,7 @@ import type { ChatMemoryContext } from "@/types/memory";
 import { pickMemoriesForAsk } from "@/lib/memory/prompt";
 import { containsSensitiveMemory, isWorkNoteRequest } from "@/lib/memory/privacy";
 
-export type InsightsView = { patterns: AdaptivePattern[]; updatedAt: number; graph?: KnowledgeGraph; projects?: { id: string; title: string }[] };
+export type InsightsView = { patterns: AdaptivePattern[]; updatedAt: number; graph?: KnowledgeGraph; projects?: { id: string; title: string; projectMemory: string[] }[]; plan?: string; limits?: { savedFacts: number | null; inferredPatterns: number | null; projectFacts: number | null; topicsPerProject: number | null }; usage?: { inferredPatterns: number; topics: number } };
 export const INSIGHTS_CHANGED = "tobyverse:insights-changed";
 const running = new Set<string>();
 const schedules = new Map<string, ObservationSchedule>();
@@ -19,7 +19,7 @@ export async function getInsights(projectId?: string): Promise<InsightsView> {
   if (!response.ok) throw new Error("Could not load observations. Try again.");
   return response.json();
 }
-export async function changeInsights(input: { clear?: boolean; removeKey?: string; projectId?: string; clearGraph?: boolean }): Promise<InsightsView> {
+export async function changeInsights(input: { clear?: boolean; removeKey?: string; removeTopicKey?: string; projectId?: string; clearGraph?: boolean }): Promise<InsightsView> {
   const response = await fetch("/api/insights", { method: "PATCH", headers: await authHeaders(), body: JSON.stringify(input) });
   if (!response.ok) throw new Error("Could not save this change. Try again.");
   const state: InsightsView = await response.json();

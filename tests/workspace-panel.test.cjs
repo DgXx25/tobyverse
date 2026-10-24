@@ -27,6 +27,16 @@ test("project chat keeps stopped output quiet and renders bounded follow-up prom
   assert.match(source, /What topics interest you\?/);
 });
 
+test("study sheets use ordinary suggested prompts instead of a Looking this over Continue gate", () => {
+  const source = read("components/project-chat.tsx");
+
+  assert.doesNotMatch(source, /Looking this over/);
+  assert.doesNotMatch(source, /const \[followup, setFollowup\]/);
+  assert.match(source, /studySheetSuggestedPrompts/);
+  assert.match(source, /artifact\?\.kind === "sheet"\s*\?\s*studySheetSuggestedPrompts\(ka\)/);
+  assert.match(source, /renderedSuggestedFollowups\?\.length/);
+});
+
 test("library cards use a barely brighter background on hover", () => {
   const source = read("components/library-page.tsx");
 

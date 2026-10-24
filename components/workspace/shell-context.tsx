@@ -32,8 +32,6 @@ type ShellContextValue = {
   setProjectShare: (value: ProjectShareBridge | null) => void;
   sidebarHidden: boolean;
   setSidebarHidden: (value: boolean) => void;
-  mobileNavOpen: boolean;
-  setMobileNavOpen: (value: boolean) => void;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
   openSettings: (section?: SettingsSection) => void;
@@ -54,6 +52,15 @@ type ShellContextValue = {
 };
 
 const ShellContext = createContext<ShellContextValue | null>(null);
+
+type MobileNavigationValue = {
+  mobileNavOpen: boolean;
+  setMobileNavOpen: (value: boolean) => void;
+  mobileSidebarContent: ReactNode;
+  setMobileSidebarContent: (value: ReactNode) => void;
+};
+
+const MobileNavigationContext = createContext<MobileNavigationValue | null>(null);
 
 function blurActive() {
   if (typeof document === "undefined") return;
@@ -90,6 +97,7 @@ function readSelectedProject(): string | null {
 export function ShellProvider({ children }: { children: ReactNode }) {
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpenState] = useState(false);
+  const [mobileSidebarContent, setMobileSidebarContent] = useState<ReactNode>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const [accountSheetOpen, setAccountSheetOpen] = useState(false);
@@ -114,6 +122,11 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     if (!value) blurActive();
     setMobileNavOpenState(value);
   }, []);
+
+  const mobileNavigationValue = useMemo(
+    () => ({ mobileNavOpen, setMobileNavOpen, mobileSidebarContent, setMobileSidebarContent }),
+    [mobileNavOpen, setMobileNavOpen, mobileSidebarContent],
+  );
 
   const closeAccountSheet = useCallback(() => {
     blurActive();
@@ -166,8 +179,6 @@ export function ShellProvider({ children }: { children: ReactNode }) {
       setProjectShare,
       sidebarHidden,
       setSidebarHidden,
-      mobileNavOpen,
-      setMobileNavOpen,
       settingsOpen,
       settingsSection,
       openSettings,
@@ -189,8 +200,6 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     [
       projectShare,
       sidebarHidden,
-      mobileNavOpen,
-      setMobileNavOpen,
       settingsOpen,
       settingsSection,
       openSettings,
@@ -207,11 +216,23 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;
+  return (
+    <ShellContext.Provider value={value}>
+      <MobileNavigationContext.Provider value={mobileNavigationValue}>
+        {children}
+      </MobileNavigationContext.Provider>
+    </ShellContext.Provider>
+  );
 }
 
 export function useShell() {
   const value = useContext(ShellContext);
   if (!value) throw new Error("useShell must be used inside ShellProvider.");
+  return value;
+}
+
+export function useMobileNavigation() {
+  const value = useContext(MobileNavigationContext);
+  if (!value) throw new Error("useMobileNavigation must be used inside ShellProvider.");
   return value;
 }

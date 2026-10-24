@@ -47,6 +47,37 @@ test('no-memory instructions exclude direct extraction in both languages', () =>
   assert.equal(normalize.shouldExtractMemory('Translate this: My name is Avery.'), false);
 });
 
+test('one-off corrections, explanations and local formats are not durable memory', () => {
+  for (const text of [
+    'This answer is too long.',
+    'I like examples for this explanation.',
+    'I prefer a table for this comparison.',
+    'ეს პასუხი ძალიან გრძელია.',
+    'ამ ახსნაში მაგალითები მინდა.',
+    'ამ შედარებისთვის ცხრილი მირჩევნია.',
+  ]) assert.equal(normalize.shouldExtractMemory(text), false, text);
+  assert.equal(normalize.shouldExtractMemory('From now on, keep my answers concise.'), true);
+  assert.equal(normalize.isExplicitMemoryRequest('From now on, keep my answers concise.'), true);
+  assert.equal(normalize.isExplicitMemoryRequest('ამ პროექტში ყოველთვის გამოიყენე მოკლე აბზაცები.'), true);
+});
+
+test('memory retrieval never fills empty relevance slots with unrelated recent facts', () => {
+  const recent = [{ id: 'recent', content: 'The user is studying economics this term.' }];
+  assert.deepEqual(memory.pickMemoriesForAsk(recent, 'How does photosynthesis work?'), []);
+  assert.deepEqual(memory.pickMemoriesForAsk(recent, 'რას ნიშნავს ფოტოსინთეზი?'), []);
+});
+
+test('standing response instructions survive retrieval while relevant facts use Georgian word stems', () => {
+  const memories = [
+    { id: 'instruction', content: 'Always answer in Georgian.' },
+    { id: 'preference', content: 'I prefer plain paragraphs.' },
+    { id: 'topic', content: 'The project studies ფოტოსინთეზის ეტაპები.' },
+    { id: 'unrelated', content: 'The user is studying economics this term.' },
+  ];
+  const selected = memory.pickMemoriesForAsk(memories, 'ფოტოსინთეზს რა ეტაპები აქვს?');
+  assert.deepEqual(selected.map(item => item.id), ['instruction', 'preference', 'topic']);
+});
+
 const privateFacts = [
   'Email: avery@example.test', 'Phone: +1 (202) 555-0198', 'Personal ID: 01012345678',
   'IBAN: GE00ZZ0000000000000000', 'My salary is 4200 GEL.', 'Address: 17 Cedar Road',

@@ -5,25 +5,20 @@ import {
   getDocs,
   getDocsFromCache,
   onSnapshot,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
   writeBatch,
   type Unsubscribe,
 } from "firebase/firestore";
-import { FREE_CAPS } from "@/lib/account/plan";
-import { COLLECTIONS, omitUndefined } from "@/lib/firestore";
+import { COLLECTIONS } from "@/lib/firestore";
 import { getFirebaseDb } from "@/lib/firebase";
 import { sanitizeMemoryContent, memoryKey } from "@/lib/memory/normalize";
 import { asString, toIsoDate } from "@/lib/timestamps";
 import type { MemoryOp, UserMemory } from "@/types/memory";
+import { authHeaders } from "@/lib/api/client";
+
+const MAX_STORED_MEMORIES = 320;
 
 function memoriesRef(userId: string) {
   return collection(getFirebaseDb(), COLLECTIONS.users, userId, COLLECTIONS.memories);
-}
-
-function memoryDoc(userId: string, memoryId: string) {
-  return doc(getFirebaseDb(), COLLECTIONS.users, userId, COLLECTIONS.memories, memoryId);
 }
 
 function mapMemory(id: string, data: Record<string, unknown>): UserMemory | null {
@@ -52,7 +47,7 @@ export async function listMemories(userId: string, cached = false): Promise<User
     const mapped = mapMemory(item.id, item.data());
     return mapped ? [mapped] : [];
   });
-  return sortMemories(items).slice(0, FREE_CAPS.memories);
+  return sortMemories(items).slice(0, MAX_STORED_MEMORIES);
 }
 
 export function subscribeMemories(
@@ -67,7 +62,7 @@ export function subscribeMemories(
         const mapped = mapMemory(item.id, item.data());
         return mapped ? [mapped] : [];
       });
-      onChange(sortMemories(items).slice(0, FREE_CAPS.memories));
+      onChange(sortMemories(items).slice(0, MAX_STORED_MEMORIES));
     },
     (error) => onError?.(error),
   );
@@ -76,36 +71,31 @@ export function subscribeMemories(
 export async function addMemory(userId: string, raw: string): Promise<UserMemory | null> {
   const content = sanitizeMemoryContent(raw);
   if (!userId || !content) return null;
-  const ref = doc(memoriesRef(userId));
-  await setDoc(
-    ref,
-    omitUndefined({
-      id: ref.id,
-      content,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }),
-  );
+  const response = await fetch("/api/memory", { method: "PATCH", headers: await authHeaders(), body: JSON.stringify({ operation: "add", content }) });
+  const result = await response.json().catch(() => ({})) as { id?: string; error?: string };
+  if (!response.ok || !result.id) throw new Error(result.error || "Could not save memory.");
+  const now = new Date().toISOString();
   return {
-    id: ref.id,
+    id: result.id,
     content,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
 export async function updateMemory(userId: string, memoryId: string, raw: string): Promise<void> {
   const content = sanitizeMemoryContent(raw);
   if (!userId || !memoryId || !content) return;
-  await updateDoc(memoryDoc(userId, memoryId), {
-    content,
-    updatedAt: serverTimestamp(),
-  });
+  const response = await fetch("/api/memory", { method: "PATCH", headers: await authHeaders(), body: JSON.stringify({ operation: "update", id: memoryId, content }) });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(result.error || "Could not update memory.");
+  }
 }
 
 export async function deleteMemory(userId: string, memoryId: string): Promise<void> {
   if (!userId || !memoryId) return;
-  await deleteDoc(memoryDoc(userId, memoryId));
+  await deleteDoc(doc(getFirebaseDb(), COLLECTIONS.users, userId, COLLECTIONS.memories, memoryId));
 }
 
 export async function deleteAllMemories(userId: string): Promise<void> {
@@ -119,15 +109,6 @@ export async function deleteAllMemories(userId: string): Promise<void> {
     }
     await batch.commit();
   }
-}
-
-function oldestMemory(items: UserMemory[]): UserMemory | null {
-  if (items.length === 0) return null;
-  return items.reduce((oldest, item) => {
-    const left = oldest.createdAt || oldest.updatedAt || "";
-    const right = item.createdAt || item.updatedAt || "";
-    return right < left ? item : oldest;
-  });
 }
 
 export async function applyMemoryOperations(userId: string, ops: MemoryOp[]): Promise<boolean> {
@@ -164,15 +145,10 @@ export async function applyMemoryOperations(userId: string, ops: MemoryOp[]): Pr
     const content = sanitizeMemoryContent(op.content);
     if (!content) continue;
     if (items.some((item) => memoryKey(item.content) === memoryKey(content))) continue;
-    while (items.length >= FREE_CAPS.memories) {
-      const drop = oldestMemory(items);
-      if (!drop) break;
-      await deleteMemory(userId, drop.id);
-      items = items.filter((item) => item.id !== drop.id);
-    }
+    if (items.length >= MAX_STORED_MEMORIES) continue;
     const created = await addMemory(userId, content);
     if (created) {
-      items = [created, ...items].slice(0, FREE_CAPS.memories);
+      items = [created, ...items].slice(0, MAX_STORED_MEMORIES);
       saved = true;
     }
   }

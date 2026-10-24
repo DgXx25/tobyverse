@@ -43,6 +43,35 @@ test('one-off evidence stays tentative, repeated distinct evidence becomes usabl
   assert.match(formatAdaptiveContext(second.patterns, second.graph, 'Explain the mechanism', 'p', now), /concrete case/);
 });
 
+test('general patterns stay project-scoped until independent projects support them', () => {
+  const { mergeObservations, formatAdaptiveContext } = load();
+  const globalPatch = patch(['u1']);
+  globalPatch.patterns[0].scope = 'general';
+  const a = mergeObservations([], { nodes: [], links: [] }, globalPatch, sample, 'project-a', now, 'chat-a');
+  assert.equal(a.patterns[0].projectId, 'project-a');
+  assert.equal(formatAdaptiveContext(a.patterns, a.graph, 'Explain the mechanism', 'project-b', now), null);
+
+  const second = patch(['u2']);
+  second.patterns[0].scope = 'general';
+  const b = mergeObservations(a.patterns, { nodes: [], links: [] }, second, sample, 'project-b', now + 1, 'chat-b');
+  assert.equal(b.patterns[0].projectId, null);
+  assert.deepEqual(b.patterns[0].supportProjects.sort(), ['project-a', 'project-b']);
+  assert.match(formatAdaptiveContext(b.patterns, b.graph, 'Explain the mechanism', 'project-c', now + 2), /concrete case/);
+});
+
+test('memory quota blocks new inferred records without evicting existing records', () => {
+  const { mergeObservations } = load();
+  const firstPatch = patch(['u1']);
+  firstPatch.topics = [{ key: 'old-topic', label: 'Old topic', summary: 'Original subject', status: 'explored', evidence: ['u1'] }];
+  const first = mergeObservations([], { nodes: [], links: [] }, firstPatch, sample, 'p', now, { patterns: 1, topics: 1 });
+  const another = patch(['u2']);
+  another.patterns[0].key = 'second-pattern';
+  another.topics = [{ key: 'new-topic', label: 'New topic', summary: 'Another subject', status: 'explored', evidence: ['u2'] }];
+  const second = mergeObservations(first.patterns, first.graph, another, sample, 'p', now + 1, { patterns: 1, topics: 1 });
+  assert.deepEqual(second.patterns.map(item => item.key), ['concrete-first']);
+  assert.deepEqual(second.graph.nodes.map(item => item.key), ['old-topic']);
+});
+
 test('duplicate or invented evidence cannot inflate support', () => {
   const { mergeObservations } = load();
   const first = mergeObservations([], { nodes: [], links: [] }, patch(['u1', 'fake']), sample, 'p', now);
@@ -117,6 +146,17 @@ test('unrelated tasks do not receive a project-specific explanation pattern', ()
   const { patterns, graph } = mergeObservations([], { nodes: [], links: [] }, patch(['u1', 'u2']), sample, 'p', now);
   assert.equal(formatAdaptiveContext(patterns, graph, 'Translate this invitation into French', 'p', now), null);
   assert.equal(formatAdaptiveContext(patterns, graph, '2+2', 'p', now), null);
+});
+
+test('a project with several topics retrieves only the topic matching the current request', () => {
+  const { formatAdaptiveContext } = load();
+  const graph = { nodes: [
+    { key: 'photosynthesis', label: 'Photosynthesis', summary: 'Light reactions and carbon fixation', status: 'explored', support: ['a'], updatedAt: now },
+    { key: 'economics', label: 'Interest rates', summary: 'Investment and cost of capital', status: 'developing', support: ['b'], updatedAt: now + 1 },
+  ], links: [] };
+  const context = formatAdaptiveContext([], graph, 'Explain the photosynthesis light reactions', 'p', now + 2);
+  assert.match(context, /Photosynthesis/);
+  assert.doesNotMatch(context, /Interest rates/);
 });
 
 test('task applicability carries an observation across different wording', () => {

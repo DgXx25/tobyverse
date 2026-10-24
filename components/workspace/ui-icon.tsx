@@ -30,6 +30,7 @@ import FireIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Fir
 import Flag01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Flag01Icon.js";
 import FlaskConicalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FlaskConicalIcon.js";
 import Folder01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Folder01Icon.js";
+import FolderPlusIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/FolderPlusIcon.js";
 import Globe02Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Globe02Icon.js";
 import HeartCheckIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/HeartCheckIcon.js";
 import HelpCircleIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/HelpCircleIcon.js";
@@ -41,6 +42,7 @@ import Logout01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm
 import LungsIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/LungsIcon.js";
 import Maximize01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Maximize01Icon.js";
 import Medicine01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Medicine01Icon.js";
+import Menu01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Menu01Icon.js";
 import MenuIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/MenuIcon.js";
 import MoreVerticalIcon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/MoreVerticalIcon.js";
 import Message01Icon from "../../node_modules/@hugeicons/core-free-icons/dist/esm/Message01Icon.js";
@@ -86,6 +88,7 @@ const ICONS = {
   sidebarRight: PanelRightIcon,
   close: Cancel01Icon,
   materials: Folder01Icon,
+  folderPlus: FolderPlusIcon,
   notes: Notebook01Icon,
   practice: Atom01Icon,
   spark: SparklesIcon,
@@ -95,6 +98,7 @@ const ICONS = {
   projectFolder: Folder01Icon,
   attach: PaperclipIcon,
   menu: MenuIcon,
+  menu01: Menu01Icon,
   ellipsis: MenuIcon,
   back: ArrowRight01Icon,
   forward: ArrowRight01Icon,

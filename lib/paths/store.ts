@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -177,4 +178,8 @@ export async function patchStudyPath(
       updatedAt: serverTimestamp(),
     }),
   );
+}
+
+export async function deleteStudyPath(projectId: string, pathId: string): Promise<void> {
+  await deleteDoc(doc(pathsRef(projectId), pathId));
 }

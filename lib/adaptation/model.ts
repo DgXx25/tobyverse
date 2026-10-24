@@ -3,9 +3,10 @@ import { stripArtifactMarkup } from "@/lib/composer/memory";
 import type { ChatTurn } from "@/types/chat";
 import { containsSensitiveMemory, isWorkNoteRequest, memorySafeTurns } from "@/lib/memory/privacy";
 
-export const PATTERN_CAP = 6;
-export const TOPIC_CAP = 20;
-export const LINK_CAP = 30;
+// Storage safety ceilings; plan quotas are lower for paid/free accounts.
+export const PATTERN_CAP = 500;
+export const TOPIC_CAP = 1000;
+export const LINK_CAP = 2000;
 export const PATTERN_TTL = 90 * 86400000;
 export const OBSERVATION_COOLDOWN = 90_000;
 export const OBSERVATION_DAILY_CAP = 12;
@@ -32,7 +33,7 @@ export type ObservationPatch = z.infer<typeof observationSchema>;
 export type ObservationTurn = { id: string; role?: "user" | "assistant"; content: string };
 export type AdaptivePattern = {
   key: string; projectId: string | null; when: string; observation: string; approach: string;
-  support: string[]; updatedAt: number;
+  support: string[]; supportProjects: string[]; updatedAt: number;
   tasks?: TaskKind[];
 };
 export type KnowledgeNode = {
@@ -70,7 +71,11 @@ export function asAdaptiveState(value: unknown): AdaptiveState {
       const key = bounded(p.key, 64), when = bounded(p.when, 120), observation = bounded(p.observation, 180), approach = bounded(p.approach, 180);
       if (!key || !when || !observation || !approach) return [];
       const tasks = Array.isArray(p.tasks) ? p.tasks.filter((v): v is TaskKind => taskKinds.includes(v as TaskKind)).slice(0, 3) : [];
-      return [{ key, when, observation, approach, tasks, projectId: typeof p.projectId === "string" ? p.projectId : null, support: refs(p.support), updatedAt: number(p.updatedAt) }];
+      const projectId = typeof p.projectId === "string" ? p.projectId : null;
+      const supportProjects = refs(p.supportProjects).filter(id => id.length <= 150);
+      // A legacy project pattern has a known scope; a legacy global pattern has no cross-project proof.
+      if (projectId && !supportProjects.includes(projectId)) supportProjects.push(projectId);
+      return [{ key, when, observation, approach, tasks, projectId, support: refs(p.support), supportProjects: supportProjects.slice(0, 8), updatedAt: number(p.updatedAt) }];
     }).slice(0, PATTERN_CAP),
   };
 }
@@ -125,7 +130,7 @@ function questionOnly(value: string): boolean {
   return /[?؟]\s*$/.test(value) || startsQuestion(value);
 }
 
-export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeGraph, patch: ObservationPatch, sample: ObservationTurn[], projectId: string, now = Date.now()) {
+export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeGraph, patch: ObservationPatch, sample: ObservationTurn[], projectId: string, now = Date.now(), caps: { patterns?: number | null; topics?: number | null } = {}) {
   patterns = asAdaptiveState({ patterns }).patterns;
   graph = asKnowledgeGraph(graph);
   const userTurns = new Map(memorySafeTurns(sample).filter(t => t.role !== "assistant" && !isWorkNoteRequest(t.content)).map(t => [t.id, t.content]));
@@ -135,14 +140,29 @@ export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeG
     if ([p.key, p.when, p.observation, p.approach].some(containsSensitiveMemory)) continue;
     const ids = support(p.evidence);
     if (!ids.length) continue;
-    const scope = p.scope === "project" ? projectId : null;
-    const index = nextPatterns.findIndex(old => old.key === p.key && old.projectId === scope);
-    const old = nextPatterns[index];
+    const related = nextPatterns.flatMap((old, index) => old.key === p.key
+      && (p.scope === "general" || old.projectId === projectId || old.projectId === null)
+      ? [{ old, index }] : []);
+    const old = related.find(row => row.old.projectId === projectId)?.old
+      ?? related.find(row => row.old.projectId === null)?.old
+      ?? related[0]?.old;
+    const priorProjects = p.revise ? [] : related.flatMap(row => row.old.supportProjects?.length
+      ? row.old.supportProjects
+      : row.old.projectId ? [row.old.projectId] : []);
+    const supportProjects = [...new Set([...priorProjects, projectId])].slice(-8);
+    const requestedGeneral = p.scope === "general";
+    const hasExistingGlobalProof = !p.revise && related.some(row => row.old.projectId === null && (row.old.supportProjects?.length ?? 0) >= 2);
+    const scope = requestedGeneral && supportProjects.length >= 2 || hasExistingGlobalProof ? null : projectId;
+    const priorEvidence = p.revise ? [] : related.flatMap(row => row.old.support);
+    const supportIds = [...new Set([...priorEvidence, ...ids])].slice(-8);
     // Replaying an old batch must not refresh its age or rewrite a prior observation.
-    if (old && ids.every(id => old.support.includes(id))) continue;
-    const next = { key: p.key, projectId: scope, when: p.when, observation: p.observation, approach: p.approach, tasks: p.tasks ?? old?.tasks ?? [], support: [...new Set([...(p.revise ? [] : old?.support ?? []), ...ids])].slice(-8), updatedAt: now };
-    if (index >= 0) nextPatterns[index] = next;
-    else nextPatterns.push(next);
+    if (related.length && ids.every(id => priorEvidence.includes(id)) && supportProjects.every(id => priorProjects.includes(id))) continue;
+    const patternLimit = caps.patterns == null ? PATTERN_CAP : caps.patterns;
+    if (!old && patternLimit !== null && nextPatterns.length >= patternLimit) continue;
+    const next = { key: p.key, projectId: scope, when: p.when, observation: p.observation, approach: p.approach, tasks: p.tasks ?? old?.tasks ?? [], support: supportIds, supportProjects, updatedAt: now };
+    const indexes = related.map(row => row.index);
+    for (const index of indexes.sort((a, b) => b - a)) nextPatterns.splice(index, 1);
+    nextPatterns.push(next);
   }
   const nodes = [...graph.nodes];
   for (const n of patch.topics) {
@@ -151,6 +171,8 @@ export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeG
     if (!ids.length) continue;
     const index = nodes.findIndex(old => old.key === n.key);
     const old = nodes[index];
+    const topicLimit = caps.topics == null ? TOPIC_CAP : caps.topics;
+    if (!old && topicLimit !== null && nodes.length >= topicLimit) continue;
     if (old && ids.every(id => old.support.includes(id))) continue;
     const onlyQuestions = ids.every(id => questionOnly(userTurns.get(id) ?? ""));
     const explicitDifficulty = ids.some(id => /confus|unclear|struggl|cannot understand|can't understand|არ მესმის|ვერ გავიგე|მიჭირს|ვერ ვხვდები/i.test(userTurns.get(id) ?? ""));
@@ -160,12 +182,12 @@ export function mergeObservations(patterns: AdaptivePattern[], graph: KnowledgeG
     if (index >= 0) nodes[index] = node;
     else nodes.push(node);
   }
-  const kept = nodes.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, TOPIC_CAP);
+  const kept = nodes;
   const keys = new Set(kept.map(n => n.key));
   const links = new Map(graph.links.map(l => [`${l.from}:${l.to}`, l]));
   for (const link of patch.links) if (![link.from, link.to, link.label].some(containsSensitiveMemory) && link.from !== link.to && keys.has(link.from) && keys.has(link.to)) links.set(`${link.from}:${link.to}`, link);
   return {
-    patterns: nextPatterns.sort((a, b) => b.support.length - a.support.length || b.updatedAt - a.updatedAt).slice(0, PATTERN_CAP),
+    patterns: nextPatterns.sort((a, b) => b.support.length - a.support.length || b.updatedAt - a.updatedAt),
     graph: { nodes: kept, links: [...links.values()].filter(l => keys.has(l.from) && keys.has(l.to)).slice(-LINK_CAP) },
   };
 }
@@ -190,7 +212,8 @@ export function formatAdaptiveContext(patterns: AdaptivePattern[], graph: Knowle
   graph = asKnowledgeGraph(graph);
   if (/^[\d\s+*/=().,?−–-]+$/.test(prompt.trim())) return null;
   const tasks = currentTasks(prompt);
-  const active = patterns.filter(p => p.support.length >= 2 && now - p.updatedAt < PATTERN_TTL && (!p.projectId || p.projectId === projectId))
+  const active = patterns.filter(p => p.support.length >= 2 && now - p.updatedAt < PATTERN_TTL
+    && (p.projectId ? p.projectId === projectId : (p.supportProjects?.length ?? 0) >= 2))
     .filter(p => overlap(`${p.when} ${p.observation}`, prompt) > 0 || p.tasks?.some(task => task === "general" || tasks.includes(task)))
     .sort((a, b) => overlap(`${b.when} ${b.observation}`, prompt) - overlap(`${a.when} ${a.observation}`, prompt) || b.support.length - a.support.length).slice(0, 3);
   const topics = graph.nodes.filter(n => overlap(`${n.label} ${n.summary}`, prompt) > 0).slice(0, 3);

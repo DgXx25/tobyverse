@@ -62,7 +62,7 @@ export function estimateChatMessageHeight(message: ChatMessage): number {
   return Math.min(1200, 80 + Math.ceil(message.content.length / 65) * 28);
 }
 
-export function chatVirtualizerOptions(messages: ChatMessage[], bottomInset: number, followOutput = false) {
+export function chatVirtualizerOptions(messages: ChatMessage[], bottomInset: number) {
   return {
     count: messages.length,
     getItemKey: (index: number) => messages[index].id,
@@ -71,10 +71,10 @@ export function chatVirtualizerOptions(messages: ChatMessage[], bottomInset: num
     paddingStart: 32,
     paddingEnd: bottomInset,
     anchorTo: "end" as const,
-    followOnAppend: followOutput,
-    // Follow streamed growth only for conversations that were already pinned
-    // when the user sent a prompt. A reader in older history keeps their view.
-    scrollEndThreshold: followOutput ? 96 : -1,
+    // Keep new output anchored to the submitted prompt while streamed text grows.
+    followOnAppend: false,
+    scrollEndThreshold: -1,
+    scrollPaddingStart: 24,
     scrollPaddingEnd: bottomInset,
   };
 }

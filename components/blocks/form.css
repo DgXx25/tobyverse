@@ -1,4 +1,8 @@
 .toby-form {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin: 24px 0;
   padding: 18px;
   border: 1px solid var(--panel-border);
@@ -44,4 +48,7 @@
 .toby-form-status { color: var(--text-muted); font-size: .8em; }
 .toby-form .toby-form-error { margin: 7px 0 0; color: var(--palette-red, var(--text)); font-size: .8em; line-height: 1.5; }
 .toby-form-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-@media (max-width: 480px) { .toby-form { padding: 14px; } }
+@media (max-width: 480px) {
+  .toby-form { padding: 12px; }
+  .toby-form input[type="text"], .toby-form textarea { margin-top: 7px; padding: 8px 10px; }
+}

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -10,6 +11,7 @@ const meteredRoutes = [
   "app/api/exercises/generate/route.ts",
   "app/api/exercises/feedback/route.ts",
   "app/api/memory/route.ts",
+  "app/api/memory/edit/route.ts",
   "app/api/projects/title/route.ts",
   "app/api/images/search/route.ts",
   "app/api/materials/extract/route.ts",

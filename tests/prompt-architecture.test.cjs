@@ -80,11 +80,19 @@ test('path metadata cannot activate instructions or block cards in parent chats'
   assert.doesNotMatch(prompt, /short useful talk, a table|columns Form \/ Use \/ Example/);
 });
 
-test('memory is optional, separate, and usable in Fast too; turn data comes last', () => {
-  const prompt = buildChatSystemPrompt({ ...base, mode: 'fast', personalization: 'Prefer Georgian', memories: [{ id: 'm', content: 'Name: Nino' }], materials: [{ id: 'f', name: 'Notes', excerpt: 'Fallback material' }] });
-  assert.match(prompt, /<user_memory>[\s\S]*Name: Nino[\s\S]*Prefer Georgian/);
+test('memory is optional, relevant, and usable in Fast too; turn data comes last', () => {
+  const prompt = buildChatSystemPrompt({ ...base, mode: 'fast', personalization: 'Unreviewed legacy preference', memories: [{ id: 'm', content: 'Name: Nino' }, { id: 'language', content: 'Prefers Georgian.' }], materials: [{ id: 'f', name: 'Notes', excerpt: 'Fallback material' }] });
+  assert.match(prompt, /<user_memory>[\s\S]*Prefers Georgian/);
+  assert.doesNotMatch(prompt, /Unreviewed legacy preference/);
+  assert.doesNotMatch(prompt, /Name: Nino/);
   assert.ok(prompt.indexOf('<user_memory>') < prompt.indexOf('<turn_materials>'));
   assert.match(prompt, /Fallback material/);
+});
+
+test('legacy project maps, project memory and inferred profiles do not enter chat prompts', () => {
+  const prompt = buildChatSystemPrompt({ ...base, prompt: 'Explain photosynthesis', projectMemory: ['Legacy photosynthesis project fact'], adaptiveContext: 'Legacy inferred photosynthesis behavior', personalization: 'Legacy inferred response style' });
+  assert.doesNotMatch(prompt, /Legacy|Known about this subject|<user_memory>/);
+  assert.match(prompt, /Project: Workspace/);
 });
 
 test('RAG takes precedence over excerpts and retains numbered source text', () => {
@@ -108,6 +116,52 @@ test('native fences stay available and optional in every reply style', () => {
   const parsed = parseTobyFence('toby dialogue', JSON.stringify(body));
   assert.equal(parsed.type, 'dialogue');
   assert.equal(parsed.data.lines[0].text, 'Hello');
+});
+
+test('native blocks can be interleaved at the point they explain, without an opt-in question', () => {
+  const { chatBlockDefs, formatTobyBlockCards, parseTobyFence } = require('../lib/blocks/registry.ts');
+  const { matchChatBlocks, tobyCardsForTurn } = require('../lib/blocks/match.ts');
+  const { CHAT_TOOL_DEFINITIONS } = require('../lib/ai/tools.ts');
+  const cards = formatTobyBlockCards(chatBlockDefs().filter(({ id }) => ['sections', 'scene', 'image-list'].includes(id)));
+  assert.match(cards, /optional/i);
+  assert.match(cards, /Place each block where its explanation is being discussed/i);
+  assert.match(cards, /interleave prose and blocks naturally/i);
+  assert.match(cards, /do not collect them at the end/i);
+  assert.match(cards, /do not ask for permission to use an available block/i);
+  assert.match(cards, /Prefer concise prose around a block; retain useful reasoning and details, and expand when the request calls for it/i);
+  assert.match(cards, /only when it helps/i);
+
+  for (const prompt of [
+    'Explain the stages of photosynthesis',
+    'Compare two approaches to solving this equation',
+    'Show me photos of these places in a useful list',
+  ]) {
+    const context = { ...base, prompt };
+    assert.ok(matchChatBlocks(context).length > 0, prompt);
+    assert.match(tobyCardsForTurn(context), /interleave prose and blocks naturally/i, prompt);
+  }
+
+  const { layoutImageGalleries } = require('../lib/images/galleries.ts');
+  const mixed = [
+    'First explanation.',
+    '```toby scene\n{"id":"photosynthesis","locale":"ka"}\n```',
+    'Explanation that connects the next idea.',
+    '```toby sections\n{"items":[{"symbol":"idea","title":"Core idea","text":"Useful detail."}]}\n```',
+    'Closing thought.',
+  ].join('\n\n');
+  const segments = layoutImageGalleries(mixed).segments;
+  assert.deepEqual(segments.map((part) => part.kind === 'fence' ? part.lang : part.kind), [
+    'md', 'toby', 'md', 'toby', 'md',
+  ]);
+  for (const part of segments.filter(({ kind }) => kind === 'fence')) {
+    assert.ok(parseTobyFence(part.lang, part.text));
+  }
+
+  const sheet = CHAT_TOOL_DEFINITIONS.find(({ name }) => name === 'suggest_sheet');
+  assert.ok(sheet);
+  assert.match(sheet.description, /express(?:es|ed) interest/i);
+  assert.doesNotMatch(sheet.description, /after a substantial explanation/i);
+  assert.match(sheet.description, /Never offer it just because an explanation is substantial/i);
 });
 
 test('legacy voice wrappers use the same core without a second format contract', () => {

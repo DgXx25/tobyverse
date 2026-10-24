@@ -2,7 +2,6 @@ import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/
 import { eligibleChatToolNames, isInternalTool, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { toolStatusText, withToolTimeout, type ToolExecutionStatus } from "@/lib/ai/tool-execution";
 import { DEFAULT_AI_PROVIDER, DEFAULT_GEMINI_MODEL, isPaidOnlyAiModel, isKnownAiModel, isEnabledProvider } from "@/lib/ai/catalog";
-import { FREE_CAPS } from "@/lib/account/plan";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
@@ -11,7 +10,6 @@ import { parseChatArtifact } from "@/lib/artifacts/active";
 import { fallbackToolAfterProvider, forcedToolForRequest } from "@/lib/chat/tool-routing";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
 import { asMemoryFacts, sanitizePersonalization } from "@/lib/memory/normalize";
-import { adaptiveContextForChat } from "@/lib/adaptation/server";
 import { asChatMode, chatModeSendsToolDeclarations, chatModeTools } from "@/lib/core/chat-modes";
 import { retrieveChunks } from "@/lib/rag/server";
 import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
@@ -136,7 +134,7 @@ function asContext(value: unknown, mode: ChatMode): ChatGenerationContext {
     hasPath: row.hasPath === true,
     inPathThread: row.inPathThread === true,
     path: asPathBriefing(row.path),
-    memories: asMemoryFacts(row.memories, FREE_CAPS.memories),
+    memories: asMemoryFacts(row.memories, 320),
     personalization: sanitizePersonalization(row.personalization) || undefined,
     hintAsk: row.hintAsk === true,
     examAsk: row.examAsk === true,
@@ -315,7 +313,6 @@ export async function POST(request: Request) {
       heartbeat();
       const heartbeatTimer = setInterval(heartbeat, 10_000);
       try {
-        const adaptiveContext = session.anonymous ? Promise.resolve(undefined) : adaptiveContextForChat(session.uid, context.projectId, prompt);
         const linkedPages = session.anonymous ? Promise.resolve([]) : readChatLinkedPages(prompt,
           body.context && typeof body.context === "object" ? (body.context as Record<string, unknown>).linkUrls : [], signal).catch(() => []);
         const threadPaper = context.threadPaper || papersInTurns(history).length > 0;
@@ -342,7 +339,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const withPrompt = { ...context, prompt, threadPaper, sources, adaptiveContext: await adaptiveContext, linkedPages: await linkedPages };
+  const withPrompt = { ...context, prompt, threadPaper, sources, linkedPages: await linkedPages };
   const guestContext = session.anonymous
     ? { ...withPrompt, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
     : withPrompt;

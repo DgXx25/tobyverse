@@ -102,6 +102,12 @@ test("only explicit slash or chip choices bypass the provider", () => {
   );
 });
 
+test("a study sheet is not created from an earlier assistant offer or a related explanation request", () => {
+  const tool = CHAT_TOOL_DEFINITIONS.find(({ name }) => name === "create_sheet");
+  assert.ok(tool);
+  assert.match(tool.description, /Do not treat an earlier assistant offer, a related follow-up, or an explanation request as acceptance/i);
+});
+
 test("forced note clarifies only when both topic and materials are empty", () => {
   assert.equal(
     forcedToolForRequest({ accepted: "create_sheet", prompt: "", mode: "auto", hasMaterials: false }).name,

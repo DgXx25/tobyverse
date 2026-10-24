@@ -28,6 +28,7 @@ import { PROJECT_GOALS, type ActiveArtifact, type CreateProjectInput, type Proje
 import type { ChatMode } from "@/types/chat";
 import type { LessonRecipe } from "@/types/lesson";
 import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
+import { authHeaders } from "@/lib/api/client";
 
 function asGoal(value: unknown): ProjectGoal {
   if (typeof value === "string" && (PROJECT_GOALS as readonly string[]).includes(value)) {
@@ -235,12 +236,16 @@ export async function updateProjectMemory(
 ): Promise<string[]> {
   await getOwnedProject(projectId, userId);
   const projectMemory = asProjectMemory(lines);
-  await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), {
-    projectMemory,
-    updatedAt: serverTimestamp(),
+  const response = await fetch("/api/memory/project", {
+    method: "PUT",
+    headers: await authHeaders(),
+    body: JSON.stringify({ projectId, lines: projectMemory }),
   });
+  const payload = await response.json().catch(() => ({})) as { projectMemory?: unknown; error?: string };
+  if (!response.ok) throw new Error(payload.error || "Could not save notebook instructions.");
+  const saved = asProjectMemory(payload.projectMemory);
   clearUntouchedNotebook(projectId);
-  return projectMemory;
+  return saved;
 }
 
 export async function appendProjectMemory(
@@ -251,12 +256,7 @@ export async function appendProjectMemory(
   const project = await getOwnedProject(projectId, userId);
   const projectMemory = mergeProjectMemory(project.projectMemory, additions);
   if (projectMemory.length === project.projectMemory.length) return projectMemory;
-  await updateDoc(doc(getFirebaseDb(), COLLECTIONS.projects, projectId), {
-    projectMemory,
-    updatedAt: serverTimestamp(),
-  });
-  clearUntouchedNotebook(projectId);
-  return projectMemory;
+  return updateProjectMemory(projectId, userId, projectMemory);
 }
 
 export async function updateProjectGoal(

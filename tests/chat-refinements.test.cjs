@@ -51,3 +51,11 @@ test('chat checks require an explicit request rather than Continue or a path lea
   assert.equal(requestedChatExercise('აქ გამომცადე'), true);
   assert.equal(requestedChatExercise('Current exercise', true), true);
 });
+
+test('study sheet actions are offered as concise ordinary follow-up prompts', () => {
+  const { studySheetSuggestedPrompts } = require('../lib/chat/artifact-suggestions.ts');
+  const ka = studySheetSuggestedPrompts(true);
+  const en = studySheetSuggestedPrompts(false);
+  assert.deepEqual(ka, ['ამ ჩანაწერში ყველაზე მნიშვნელოვანი რა არის?', 'შეგიძლია ამ თემაზე ქვიზი შემიქმნა?']);
+  assert.deepEqual(en, ['What are the key ideas in these notes?', 'Can you make a quiz on this topic?']);
+});

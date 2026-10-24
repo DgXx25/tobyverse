@@ -22,15 +22,17 @@ export async function readKnowledgeGraph(uid: string, projectId: string): Promis
   return asKnowledgeGraph((await graphRef(uid, projectId).get()).data());
 }
 
-export async function listKnowledgeProjects(uid: string): Promise<{ id: string; title: string }[]> {
+export async function listKnowledgeProjects(uid: string): Promise<{ id: string; title: string; projectMemory: string[] }[]> {
   const db = getAdminFirestore();
-  const maps = await db.collection("users").doc(uid).collection("knowledgeMaps").limit(30).select().get();
-  if (!maps.docs.length) return [];
-  const projects = await db.getAll(...maps.docs.map(map => db.collection("projects").doc(map.id)));
-  return projects.flatMap(project => {
+  const [ownedByUserId, ownedByOwnerId] = await Promise.all([
+    db.collection("projects").where("userId", "==", uid).limit(100).get(),
+    db.collection("projects").where("ownerId", "==", uid).limit(100).get(),
+  ]);
+  const unique = new Map([...ownedByUserId.docs, ...ownedByOwnerId.docs].map(project => [project.id, project]));
+  return [...unique.values()].flatMap(project => {
     const row = project.data();
-    if (!row || (row.userId !== uid && row.ownerId !== uid)) return [];
-    return [{ id: project.id, title: typeof row.title === "string" ? row.title.slice(0, 160) : "Untitled project" }];
+    const projectMemory = Array.isArray(row.projectMemory) ? row.projectMemory.filter((line): line is string => typeof line === "string").slice(0, 500) : [];
+    return [{ id: project.id, title: typeof row.title === "string" ? row.title.slice(0, 160) : "Untitled project", projectMemory }];
   });
 }
 
@@ -65,7 +67,7 @@ export async function reserveObservation(uid: string, batch: string): Promise<Ad
   return state;
 }
 
-export async function saveObservation(uid: string, projectId: string, revision: number, patch: ObservationPatch, sample: ObservationTurn[]): Promise<boolean> {
+export async function saveObservation(uid: string, projectId: string, revision: number, patch: ObservationPatch, sample: ObservationTurn[], caps: { patterns?: number | null; topics?: number | null } = {}): Promise<boolean> {
   const result = await getAdminFirestore().runTransaction(async tx => {
     const pRef = profileRef(uid), gRef = graphRef(uid, projectId);
     const [pSnap, gSnap, project] = await Promise.all([tx.get(pRef), tx.get(gRef), tx.get(getAdminFirestore().collection("projects").doc(projectId))]);
@@ -73,7 +75,7 @@ export async function saveObservation(uid: string, projectId: string, revision: 
     const owner = project.data();
     if (state.revision !== revision || !owner || (owner.userId !== uid && owner.ownerId !== uid)) return null;
     const now = Date.now();
-    const merged = mergeObservations(state.patterns, asKnowledgeGraph(gSnap.data()), patch, sample, projectId, now);
+    const merged = mergeObservations(state.patterns, asKnowledgeGraph(gSnap.data()), patch, sample, projectId, now, caps);
     const next = { ...state, patterns: merged.patterns, updatedAt: now };
     tx.set(pRef, next);
     tx.set(gRef, merged.graph);
@@ -83,16 +85,25 @@ export async function saveObservation(uid: string, projectId: string, revision: 
   return true;
 }
 
-export async function controlAdaptiveState(uid: string, input: { clear?: boolean; removeKey?: string; projectId?: string; clearGraph?: boolean }) {
+export async function controlAdaptiveState(uid: string, input: { clear?: boolean; removeKey?: string; removeTopicKey?: string; projectId?: string; clearGraph?: boolean }) {
   const next = await getAdminFirestore().runTransaction(async tx => {
-    const ref = profileRef(uid), state = asAdaptiveState((await tx.get(ref)).data());
+    const ref = profileRef(uid);
+    const targetGraph = input.projectId ? graphRef(uid, input.projectId) : null;
+    const [profileSnap, graphSnap] = await Promise.all([tx.get(ref), targetGraph ? tx.get(targetGraph) : Promise.resolve(null)]);
+    const state = asAdaptiveState(profileSnap.data());
     const next: AdaptiveState = {
       ...state, revision: state.revision + 1,
       patterns: input.clear ? [] : state.patterns.filter(p => !input.removeKey || `${p.projectId ?? "general"}:${p.key}` !== input.removeKey),
       updatedAt: Date.now(),
     };
     tx.set(ref, next);
-    if (input.clearGraph && input.projectId) tx.delete(graphRef(uid, input.projectId));
+    if (targetGraph && input.clearGraph) tx.delete(targetGraph);
+    else if (targetGraph && input.removeTopicKey && graphSnap?.exists) {
+      const graph = asKnowledgeGraph(graphSnap.data());
+      const nodes = graph.nodes.filter(node => node.key !== input.removeTopicKey);
+      const keys = new Set(nodes.map(node => node.key));
+      tx.set(targetGraph, { nodes, links: graph.links.filter(link => keys.has(link.from) && keys.has(link.to)) });
+    }
     return next;
   });
   return next;

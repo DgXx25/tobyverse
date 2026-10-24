@@ -162,7 +162,7 @@ export function LandingPreview() {
       <div className={styles.vignette} aria-hidden="true" />
 
       <header className={styles.header}>
-        <Link href="/" className={styles.brand} aria-label="TobyVerse მთავარი გვერდი"><span className={styles.brandMark} aria-hidden="true" /><span>TobyVerse</span></Link>
+        <Link href="/" className={`${styles.brand} brand-wordmark`} aria-label="TobyVerse მთავარი გვერდი"><span className={styles.brandMark} aria-hidden="true" /><span>TobyVerse</span></Link>
         <nav className={styles.chapters} aria-label="სცენები">
           <svg className={styles.chapterThread} viewBox="0 0 340 34" preserveAspectRatio="none" aria-hidden="true"><path d="M17 17 H323" /></svg>
           {CHAPTERS.map((item, index) => <button key={item.id} type="button" className={styles.chapterButton} data-active={active === index} data-visited={index < active} aria-label={item.label} aria-current={active === index ? "step" : undefined} onClick={() => goTo(index)}><span>{item.letter}</span><small>{item.label}</small></button>)}

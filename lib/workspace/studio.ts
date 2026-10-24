@@ -26,7 +26,14 @@ export type StudioJob = {
   error?: string;
 };
 
-export type StudioSavedArtifact = { type: StudioTool; artifact: ChatArtifact; createdAt: string };
+export type StudioSavedArtifact = {
+  type: StudioTool;
+  artifact: ChatArtifact;
+  createdAt: string;
+  prompt?: string;
+  sourceMaterialIds?: string[];
+  removed?: boolean;
+};
 
 /** Hidden instruction for a Studio click. The chat thread does not show it. */
 export const STUDIO_ASK: Record<StudioTool, string> = {

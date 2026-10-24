@@ -51,10 +51,10 @@ export function SettingsModal() {
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
-        className="popup-surface relative flex h-[min(640px,86vh)] w-full max-w-[860px] overflow-hidden rounded-2xl bg-surface shadow-2xl"
+        className="popup-surface relative flex h-[min(640px,86vh)] w-full max-w-[860px] overflow-hidden rounded-2xl border border-[var(--input-border)] bg-background shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <aside className="flex w-[220px] shrink-0 flex-col px-2 py-3">
+        <aside className="flex w-[220px] shrink-0 flex-col border-r border-[var(--input-border)] px-2 py-3">
           {GROUPS.map((group) => (
             <div key={group} className="mb-4">
               <p className="px-2.5 pb-1.5 text-[11px] text-muted">{group}</p>
