@@ -56,6 +56,13 @@ test('valid Markdown, literal pipes, math, and fenced examples keep their struct
   assert.ok(splitMarkdownTables(prepareChatMarkdown(afterFence)).some((part) => part.kind === 'table'));
 });
 
+test('chat Markdown omits horizontal dividers after quotes while preserving the quote and following content', () => {
+  const html = renderToStaticMarkup(React.createElement(RichContent, { text: '> Quote callout\n\n---\n\nFollowing paragraph.' }));
+  assert.match(html, /<blockquote class="note-highlight my-5 px-3\.5 py-2\.5">/);
+  assert.match(html, /Following paragraph\./);
+  assert.doesNotMatch(html, /<hr\b/);
+});
+
 test('arbitrary UTF-8 network boundaries preserve opening Georgian words and Markdown through storage cleanup', async () => {
   const answer = 'ფოტოსინთეზი არის მნიშვნელოვანი პროცესი.\n\n### კომპონენტები\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
   const encoder = new TextEncoder();

@@ -51,6 +51,20 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
       version: "gemini-argon-2026-12-01",
     },
   },
+  // Anthropic API list rates effective at the current Claude 5.5 model launch.
+  "claude-haiku-5-5": {
+    inputMicrosPerMillion: 100_000,
+    outputMicrosPerMillion: 500_000,
+    largePromptThreshold: 100_000,
+    inputMicrosPerMillionAboveThreshold: 500_000,
+    outputMicrosPerMillionAboveThreshold: 2_500_000,
+    version: "anthropic-2026-10-claude-5.5",
+  },
+  "claude-sonnet-5-5": {
+    inputMicrosPerMillion: 2_000_000,
+    outputMicrosPerMillion: 10_000_000,
+    version: "anthropic-2026-10-claude-5.5",
+  },
 };
 
 export class UnknownModelPriceError extends Error {

@@ -5,6 +5,7 @@ import { useShell, type SettingsSection } from "@/components/workspace/shell-con
 import { ThemePicker } from "@/components/workspace/theme-picker";
 import { PlanUsage } from "@/components/account/plan-usage";
 import { AccountDataControls } from "@/components/account/data-controls";
+import { StorageUsage } from "@/components/account/storage-usage";
 import { MemoriesPanel } from "@/components/account/memories-panel";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
@@ -13,11 +14,11 @@ const NAV: { id: SettingsSection; label: string; group: string; icon: UiIconName
   { id: "account", label: "Account", group: "General", icon: "user" },
   { id: "appearance", label: "Appearance", group: "General", icon: "appearance" },
   { id: "planUsage", label: "Plan & usage", group: "Payments", icon: "usage" },
-  { id: "memory", label: "Memory", group: "Data & Information", icon: "brain" },
-  { id: "data", label: "Data", group: "Data & Information", icon: "data" },
+  { id: "memory", label: "Memory", group: "Data", icon: "brain" },
+  { id: "storage", label: "Storage", group: "Data", icon: "data" },
 ];
 
-const GROUPS = ["General", "Payments", "Data & Information"];
+const GROUPS = ["General", "Payments", "Data"];
 
 export function SettingsModal() {
   const { settingsOpen, settingsSection, openSettings, closeSettings } = useShell();
@@ -129,10 +130,11 @@ export function SettingsModal() {
             </div>
           )}
 
-          {settingsSection === "data" && (
+          {settingsSection === "storage" && (
             <div>
-              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Data</h2>
-              <div className="mt-6">
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Storage</h2>
+              <div className="mt-6 max-w-2xl"><StorageUsage profile={profile} /></div>
+              <div className="mt-8 max-w-2xl">
                 <AccountDataControls />
               </div>
             </div>

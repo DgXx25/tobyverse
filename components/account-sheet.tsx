@@ -11,6 +11,7 @@ import { useTheme } from "@/components/workspace/theme-provider";
 import { ThemePicker } from "@/components/workspace/theme-picker";
 import { PlanUsage } from "@/components/account/plan-usage";
 import { AccountDataControls } from "@/components/account/data-controls";
+import { StorageUsage } from "@/components/account/storage-usage";
 import { MemoriesPanel } from "@/components/account/memories-panel";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import {
@@ -97,7 +98,7 @@ export function AccountSheet() {
                 onClick={() => setAccountSheetPage("planUsage")}
               />
 
-              <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Data & Information</p>
+              <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Data</p>
               <SheetRow
                 icon={<UiIcon name="brain" size={18} />}
                 label="Memory"
@@ -105,8 +106,8 @@ export function AccountSheet() {
               />
               <SheetRow
                 icon={<UiIcon name="data" size={18} />}
-                label="Data"
-                onClick={() => setAccountSheetPage("data")}
+                label="Storage"
+                onClick={() => setAccountSheetPage("storage")}
               />
 
               <button
@@ -138,9 +139,10 @@ export function AccountSheet() {
                   <MemoriesPanel />
                 </div>
               )}
-              {accountSheetPage === "data" && (
+              {accountSheetPage === "storage" && (
                 <div className="px-4 pb-8">
-                  <AccountDataControls />
+                  <StorageUsage profile={profile} />
+                  <div className="mt-8"><AccountDataControls /></div>
                 </div>
               )}
             </NestedPage>
@@ -155,7 +157,7 @@ function pageTitle(page: AccountSheetPage): string {
   if (page === "appearance") return "Appearance";
   if (page === "planUsage" || page === "billing" || page === "usage") return "Plan & usage";
   if (page === "memory") return "Memory";
-  if (page === "data") return "Data";
+  if (page === "storage") return "Storage";
   return "Account";
 }
 

@@ -1,6 +1,6 @@
-import type { AiModelId, AiModelSelection } from "./catalog.js";
+import { DEFAULT_CLAUDE_MODEL, isAllowedAiModel, type AiModelId, type AiModelSelection } from "./catalog";
 
-const DEFAULT_GEMINI_MODEL: AiModelId = "gemini-3.5-flash";
+const DEFAULT_HAIKU_MODEL: AiModelId = DEFAULT_CLAUDE_MODEL;
 
 export type ComplexityTier = "SIMPLE" | "COMPLEX";
 export type RoutingMethod = "heuristic";
@@ -87,19 +87,19 @@ export function createComplexityScorer(overrides: Partial<ComplexityScorerConfig
 
 export const scorePrompt = createComplexityScorer();
 
-/** Deterministic, local-only routing. The Auto branch is intentionally limited to Flash and Pro. */
-export function selectModel(prompt: string, mode: AiModelSelection | string = "auto"): RoutingResult {
+/** Deterministic, local-only routing. Auto stays on enabled Claude models and respects plan access. */
+export function selectModel(prompt: string, mode: AiModelSelection | string = "auto", planOrAdmin: import("@/types/billing").EffectivePlanId | boolean = "free_beta"): RoutingResult {
   if (mode !== "auto") {
-    if (mode !== "gemini-3.5-flash" && mode !== "gemini-3.1-pro-preview" && mode !== "gemini-4-argon") {
+    if (mode !== "claude-haiku-5-5" && mode !== "claude-sonnet-5-5") {
       throw new Error(`Unknown model selection: ${mode}`);
     }
-    const tier: ComplexityTier = mode === "gemini-3.5-flash" ? "SIMPLE" : "COMPLEX";
+    const tier: ComplexityTier = mode === "claude-haiku-5-5" ? "SIMPLE" : "COMPLEX";
     return { model: mode, tier, score: 0, method: "heuristic", signals: ["explicit-model"] };
   }
   const result = scorePrompt(prompt);
   return {
     ...result,
-    model: result.tier === "COMPLEX" ? "gemini-3.1-pro-preview" : DEFAULT_GEMINI_MODEL,
+    model: result.tier === "COMPLEX" && isAllowedAiModel("claude-sonnet-5-5", planOrAdmin) ? "claude-sonnet-5-5" : DEFAULT_HAIKU_MODEL,
     method: "heuristic",
   };
 }

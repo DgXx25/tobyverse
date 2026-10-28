@@ -22,21 +22,22 @@ test("mobile sheet exposes the same destination", () => {
   assert.match(sheet, /<PlanUsage/);
 });
 
-test("plan surface shows plan cards, metered usage by model, and billing controls", () => {
+test("plan surface shows plan cards, shared pooled usage, and billing controls", () => {
   const component = read("components/account/plan-usage.tsx");
   assert.match(component, /PlanOptions/);
-  assert.match(component, /Usage by model/);
+  assert.doesNotMatch(component, /Usage by model|byModel/);
+  assert.match(component, /AI usage this week/);
   assert.match(component, /Included in/);
   assert.match(component, /storageBytes/);
   assert.match(component, /Billing history/);
   const cards = read("components/account/plan-options.tsx");
   assert.match(cards, /Tobyverse/);
   assert.match(cards, /Premium/);
-  assert.match(cards, /Current usage/);
+  assert.doesNotMatch(cards, /Current usage/);
   assert.equal(component.includes("`$${"), false);
   assert.equal(cards.includes("`$${"), false);
   assert.match(component, /% used/);
-  assert.match(cards, /usagePercent/);
+  assert.doesNotMatch(cards, /usagePercent|Current usage/);
 });
 
 test("model options use plan access and persist through the account API", () => {
@@ -65,7 +66,7 @@ test("storage, AI, and model limits open the plan upgrade dialog", () => {
   const ai = read("lib/ai/sse.ts");
   assert.match(dialog, /role="dialog"/);
   assert.match(dialog, /View plans/);
-  assert.match(dialog, /Gemini 4 Argon is a Premium model/);
+  assert.match(dialog, /This is a Premium model/);
   assert.match(providers, /<PlanLimitDialog/);
   assert.match(storage, /remainingBytes/);
   assert.match(storage, /requestPlanUpgrade\("storage"\)/);
@@ -79,7 +80,7 @@ test("server enforces Premium-only models and supports account-aware routing", (
   const model = read("components/account/use-preferred-model.tsx");
   assert.match(chat, /readAccountAccess/);
   assert.match(chat, /premium_model_required/);
-  assert.match(chat, /selectModel\(prompt, requestedSelection\)/);
+  assert.match(chat, /selectModel\(prompt, requestedSelection, plan\)/);
   assert.match(model, /availableAiModels\(modelPlan\)/);
 });
 

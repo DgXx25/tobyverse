@@ -181,6 +181,7 @@ const MarkdownBody = memo(function MarkdownBody({
           ol: ({ children }) => <ol>{children}</ol>,
           li: ({ children }) => <li>{rich(children)}</li>,
           br: () => <br />,
+          hr: () => null,
           blockquote: ({ children }) => <blockquote className="note-highlight my-5 px-3.5 py-2.5">{children}</blockquote>,
           code: ({ className, children }) => {
             const inline = !className;

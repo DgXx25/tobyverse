@@ -2,11 +2,18 @@ import type { EffectivePlanId } from "@/types/billing";
 
 export const AI_PROVIDER_OPTIONS = [
   {
+    id: "anthropic",
+    name: "Anthropic Claude",
+    model: "claude-haiku-5-5",
+    enabled: true,
+    note: null,
+  },
+  {
     id: "gemini",
     name: "Gemini",
     model: "gemini-3.5-flash",
-    enabled: true,
-    note: null,
+    enabled: false,
+    note: "temporarily disabled",
   },
   {
     id: "grok",
@@ -27,26 +34,26 @@ export const AI_PROVIDER_OPTIONS = [
 export type AiProviderId = (typeof AI_PROVIDER_OPTIONS)[number]["id"];
 export type AiProviderOption = (typeof AI_PROVIDER_OPTIONS)[number];
 
-export const DEFAULT_AI_PROVIDER: AiProviderId = "gemini";
+export const DEFAULT_AI_PROVIDER: AiProviderId = "anthropic";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash" as const;
+export const DEFAULT_CLAUDE_MODEL = "claude-haiku-5-5" as const;
 export const DEFAULT_MODEL_SELECTION = "auto" as const;
 
-/** Gemini 3.1 Pro is exposed under its preview API id; labels use the product name. */
-export const GEMINI_MODEL_OPTIONS = [
-  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", paidOnly: false },
-  { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", paidOnly: false },
-  { id: "gemini-4-argon", name: "Gemini 4 Argon", paidOnly: true },
+/** Only chat models currently enabled in the user-facing picker. */
+export const AI_MODEL_OPTIONS = [
+  { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", paidOnly: false },
+  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", paidOnly: true },
 ] as const;
 
-export type AiModelId = (typeof GEMINI_MODEL_OPTIONS)[number]["id"];
-export type AiModelOption = (typeof GEMINI_MODEL_OPTIONS)[number];
+export type AiModelId = (typeof AI_MODEL_OPTIONS)[number]["id"];
+export type AiModelOption = (typeof AI_MODEL_OPTIONS)[number];
 export type AiModelSelection = AiModelId | typeof DEFAULT_MODEL_SELECTION;
 export type AiModelSelectionOption = AiModelOption | { id: "auto"; name: "Auto"; paidOnly: false };
 const AUTO_MODEL_OPTION: AiModelSelectionOption = { id: "auto", name: "Auto", paidOnly: false };
 
-const KNOWN_MODEL_IDS = new Set<string>(GEMINI_MODEL_OPTIONS.map((item) => item.id));
-const PREMIUM_MODEL_IDS = new Set<string>(GEMINI_MODEL_OPTIONS.filter((item) => item.paidOnly).map((item) => item.id));
+const KNOWN_MODEL_IDS = new Set<string>(AI_MODEL_OPTIONS.map((item) => item.id));
+const PREMIUM_MODEL_IDS = new Set<string>(AI_MODEL_OPTIONS.filter((item) => item.paidOnly).map((item) => item.id));
 
 function hasPaidModelAccess(planOrAdmin: EffectivePlanId | boolean): boolean {
   if (typeof planOrAdmin === "boolean") return planOrAdmin;
@@ -68,7 +75,7 @@ export function isPaidOnlyAiModel(id: string): boolean {
 export const isAdminOnlyAiModel = isPaidOnlyAiModel;
 
 export function availableAiModels(planOrAdmin: EffectivePlanId | boolean): AiModelSelectionOption[] {
-  return [AUTO_MODEL_OPTION, ...GEMINI_MODEL_OPTIONS]
+  return [AUTO_MODEL_OPTION, ...AI_MODEL_OPTIONS]
     .filter((item) => !item.paidOnly || hasPaidModelAccess(planOrAdmin));
 }
 
@@ -86,7 +93,7 @@ export function isAllowedModelSelection(id: string, planOrAdmin: EffectivePlanId
 
 export function parsePreferredModel(value: unknown): AiModelSelection | null {
   if (typeof value !== "string") return null;
-  if (value === "gemini-3.1-flash-lite" || value === "gemini-3.5-flash-lite") return "auto";
+  if (value.startsWith("gemini-")) return "auto";
   return isKnownModelSelection(value) ? value : null;
 }
 
@@ -97,7 +104,7 @@ export function resolveAiModel(id: string | null | undefined, planOrAdmin: Effec
 
 export function aiModelDisplayName(id: AiModelSelection): string {
   if (id === "auto") return "Auto";
-  return GEMINI_MODEL_OPTIONS.find((item) => item.id === id)?.name ?? "Auto";
+  return AI_MODEL_OPTIONS.find((item) => item.id === id)?.name ?? "Auto";
 }
 
 const KNOWN_IDS = new Set<string>(AI_PROVIDER_OPTIONS.map((item) => item.id));
@@ -110,7 +117,7 @@ export function isEnabledProvider(id: string): boolean {
   return AI_PROVIDER_OPTIONS.some((item) => item.id === id && item.enabled);
 }
 
-/** Models the picker may show. Flip `enabled` to add Grok or GPT later. */
+/** Models the picker may show. Model IDs also identify their provider at runtime. */
 export function availableAiProviders(): AiProviderOption[] {
   return AI_PROVIDER_OPTIONS.filter((item) => item.enabled);
 }
@@ -121,6 +128,6 @@ export function resolveAiProvider(id: string | null | undefined): AiProviderId {
 }
 
 export function providerDisplayName(id: AiProviderId): string {
-  return AI_PROVIDER_OPTIONS.find((item) => item.id === id)?.name ?? "Gemini";
+  return AI_PROVIDER_OPTIONS.find((item) => item.id === id)?.name ?? "Anthropic Claude";
 }
 

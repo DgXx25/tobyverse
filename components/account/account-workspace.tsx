@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { useUserProfile } from "@/components/account/use-user-profile";
 import { AccountDataControls } from "@/components/account/data-controls";
+import { StorageUsage } from "@/components/account/storage-usage";
 import { MemoriesPanel } from "@/components/account/memories-panel";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { firstNameFromUser, initialsFromName, signInMethodsFromProviderData } from "@/lib/account/providers";
@@ -12,7 +13,7 @@ import { planLabel } from "@/lib/account/plan";
 import { resolveEffectivePlan } from "@/lib/billing/plans";
 import { PlanUsage } from "@/components/account/plan-usage";
 
-type AccountTab = "account" | "planUsage" | "memory" | "data";
+type AccountTab = "account" | "planUsage" | "memory" | "storage";
 
 export function AccountWorkspace() {
   const { user } = useAuth();
@@ -77,10 +78,10 @@ export function AccountWorkspace() {
               onClick={() => setTab("memory")}
             />
             <NavItem
-              active={tab === "data"}
+              active={tab === "storage"}
               icon={<UiIcon name="data" size={18} />}
-              label="Data"
-              onClick={() => setTab("data")}
+              label="Storage"
+              onClick={() => setTab("storage")}
             />
           </nav>
 
@@ -139,7 +140,7 @@ export function AccountWorkspace() {
           ) : tab === "planUsage" ? (
             <div>
               <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Plan & usage</h2>
-              <p className="mt-1 text-[14px] text-muted">Manage your plan and keep track of AI and storage usage.</p>
+              <p className="mt-1 text-[14px] text-muted">Manage your plan and usage.</p>
               <div className="mt-6"><PlanUsage profile={profile} /></div>
             </div>
           ) : tab === "memory" ? (
@@ -152,9 +153,9 @@ export function AccountWorkspace() {
             </div>
           ) : (
             <div>
-              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Data</h2>
-              <p className="mt-1 text-[14px] text-muted">Export metadata or delete your account.</p>
-              <div className="mt-6">
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Storage</h2>
+              <div className="mt-6 max-w-2xl"><StorageUsage profile={profile} /></div>
+              <div className="mt-8 max-w-2xl">
                 <AccountDataControls />
               </div>
             </div>

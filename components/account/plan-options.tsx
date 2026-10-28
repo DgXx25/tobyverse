@@ -4,14 +4,12 @@ import { useEffect, useState } from "react";
 import { ArrowRight, Check, LockKeyhole } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { openPaddleCheckout } from "@/lib/billing/paddle-client";
-import { formatBytes } from "@/lib/format";
-import { storageLimitForPlan } from "@/lib/account/plan";
 import type { EffectivePlanId } from "@/types/billing";
 import type { BillingSubscription, GrantPlanId } from "@/types/billing-admin";
 
 const PLAN_OPTIONS = [
-  { id: "lite", publicName: "Tobyverse", description: "Gemini 3.5 Flash, Gemini 3.1 Pro, and Auto mode.", current: (plan: EffectivePlanId) => plan === "free_beta" || plan === "lite", tint: false },
-  { id: "pro", publicName: "Premium", description: "Everything in Tobyverse plus Gemini 4 Argon and higher weekly limits.", current: (plan: EffectivePlanId) => plan === "pro" || plan === "max" || plan === "team" || plan === "admin", tint: true },
+  { id: "lite", publicName: "Tobyverse", description: "Claude Haiku and Auto mode.", current: (plan: EffectivePlanId) => plan === "free_beta" || plan === "lite", tint: false },
+  { id: "pro", publicName: "Premium", description: "Everything in Tobyverse plus Claude Sonnet and higher weekly limits.", current: (plan: EffectivePlanId) => plan === "pro" || plan === "max" || plan === "team" || plan === "admin", tint: true },
 ] as const satisfies ReadonlyArray<{ id: GrantPlanId; publicName: string; description: string; current: (plan: EffectivePlanId) => boolean; tint: boolean }>;
 
 type Availability = {
@@ -19,7 +17,6 @@ type Availability = {
   environment: "sandbox" | "production" | string;
   plans: Partial<Record<GrantPlanId, boolean>>;
   allowances: Partial<Record<GrantPlanId, number | null>>;
-  storageLimits: Partial<Record<GrantPlanId, number | null>>;
 };
 
 export function PlanOptions({
@@ -27,13 +24,11 @@ export function PlanOptions({
   subscriptions,
   onManageSubscription,
   managingSubscription,
-  usagePercent,
 }: {
   currentPlan: EffectivePlanId;
   subscriptions: BillingSubscription[];
   onManageSubscription: () => void;
   managingSubscription: boolean;
-  usagePercent?: number;
 }) {
   const { user } = useAuth();
   const signedIn = !!user && !user.isAnonymous;
@@ -115,21 +110,16 @@ export function PlanOptions({
   );
 
   return (
-    <section className="mt-8">
-      <div className="flex flex-wrap items-end justify-between gap-2 px-1">
-        <div>
-          <h3 className="text-[15px] font-medium text-foreground">Plans</h3>
-          <p className="mt-1 text-[12px] text-muted">Choose the model access and usage limit that fit your work.</p>
-        </div>
-      </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+    <section>
+      <div className="grid gap-3 md:grid-cols-2">
         {PLAN_OPTIONS.map((option) => {
           const isCurrent = option.current(currentPlan);
           const available = availability?.plans[option.id] === true;
-          const storage = availability?.storageLimits?.[option.id] ?? storageLimitForPlan(option.id);
           let action: React.ReactNode;
           if (isCurrent) {
-            action = <span className="inline-flex items-center gap-1.5 text-[12px] text-muted"><Check size={14} aria-hidden="true" />Current plan</span>;
+            action = hasCurrentSubscription
+              ? <button type="button" onClick={onManageSubscription} disabled={managingSubscription || pending !== null} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{managingSubscription ? "Opening…" : "Manage plan"}<ArrowRight size={13} aria-hidden="true" /></button>
+              : <span className="inline-flex items-center gap-1.5 text-[12px] text-muted"><Check size={14} aria-hidden="true" />Current plan</span>;
           } else if (hasCurrentSubscription) {
             action = <button type="button" onClick={onManageSubscription} disabled={managingSubscription || pending !== null} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{managingSubscription ? "Opening…" : "Manage subscription"}<ArrowRight size={13} aria-hidden="true" /></button>;
           } else if (available) {
@@ -143,15 +133,13 @@ export function PlanOptions({
           }
 
           return (
-            <article key={option.id} className={`flex min-h-48 flex-col justify-between rounded-2xl border p-5 ${option.tint ? "border-sky-400/40 bg-sky-400/[0.06]" : "border-border bg-surface-2"}`}>
+            <article key={option.id} className={`flex min-h-[148px] flex-col justify-between rounded-xl border p-4 ${option.tint ? "border-sky-400/40 bg-sky-400/[0.06]" : "border-border bg-surface-2"}`}>
               <div>
-                <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted">{isCurrent ? "Current plan" : "Upgrade available"}</p>
-                <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <h4 className="text-[17px] font-semibold text-foreground">{option.publicName}</h4>
+                <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted">{isCurrent ? "Current plan" : "Upgrade available"}</p>
+                <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <h4 className="text-[16px] font-semibold text-foreground">{option.publicName}</h4>
                 </div>
                 <p className="mt-2 text-[12px] leading-5 text-muted">{option.description}</p>
-                <p className="mt-2 text-[11px] text-muted">{isCurrent && currentPlan === "free_beta" ? "Beta access" : "Weekly AI usage included"} · {storage == null ? "Unlimited" : formatBytes(storage)} storage</p>
-                {option.id === "lite" ? <p className="mt-1 text-[11px] text-muted">Current usage: {usagePercent == null ? "Loading…" : `${usagePercent}% this week`}</p> : null}
               </div>
               <div className="mt-4 flex items-center">{action}</div>
             </article>

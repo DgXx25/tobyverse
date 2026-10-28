@@ -3,8 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { isMobileWidth, MOBILE_MQ } from "@/lib/workspace/media";
 
-export type SettingsSection = "account" | "appearance" | "planUsage" | "billing" | "usage" | "data" | "memory";
-export type AccountSheetPage = "root" | "appearance" | "planUsage" | "billing" | "usage" | "data" | "memory";
+export type SettingsSection = "account" | "appearance" | "planUsage" | "billing" | "usage" | "storage" | "memory";
+export type AccountSheetPage = "root" | "appearance" | "planUsage" | "billing" | "usage" | "storage" | "memory";
 
 export type PendingPanel = {
   projectId: string;
@@ -57,7 +57,9 @@ type MobileNavigationValue = {
   mobileNavOpen: boolean;
   setMobileNavOpen: (value: boolean) => void;
   mobileSidebarContent: ReactNode;
-  setMobileSidebarContent: (value: ReactNode) => void;
+  mobileDrawerMode: "sidebar" | "artifact" | "quiz";
+  setMobileDrawerMode: (value: "sidebar" | "artifact" | "quiz") => void;
+  setMobileSidebarContent: (value: ReactNode, mode?: "sidebar" | "artifact" | "quiz") => void;
 };
 
 const MobileNavigationContext = createContext<MobileNavigationValue | null>(null);
@@ -73,7 +75,7 @@ function sectionToSheetPage(section?: SettingsSection): AccountSheetPage {
     section === "planUsage" ||
     section === "billing" ||
     section === "usage" ||
-    section === "data" ||
+    section === "storage" ||
     section === "memory"
   ) {
     return section === "billing" || section === "usage" ? "planUsage" : section;
@@ -96,7 +98,8 @@ function readSelectedProject(): string | null {
 export function ShellProvider({ children }: { children: ReactNode }) {
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpenState] = useState(false);
-  const [mobileSidebarContent, setMobileSidebarContent] = useState<ReactNode>(null);
+  const [mobileSidebarContent, setMobileSidebarContentState] = useState<ReactNode>(null);
+  const [mobileDrawerMode, setMobileDrawerMode] = useState<MobileNavigationValue["mobileDrawerMode"]>("sidebar");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const [accountSheetOpen, setAccountSheetOpen] = useState(false);
@@ -122,9 +125,24 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     setMobileNavOpenState(value);
   }, []);
 
+  // Keep the context setter stable: ProjectView calls it from an effect that
+  // installs the drawer content. Recreating it on every drawer-content update
+  // makes that effect rerun forever.
+  const setMobileSidebarContent = useCallback((content: ReactNode, mode: MobileNavigationValue["mobileDrawerMode"] = "sidebar") => {
+    setMobileSidebarContentState(content);
+    setMobileDrawerMode(content == null ? "sidebar" : mode);
+  }, []);
+
   const mobileNavigationValue = useMemo(
-    () => ({ mobileNavOpen, setMobileNavOpen, mobileSidebarContent, setMobileSidebarContent }),
-    [mobileNavOpen, setMobileNavOpen, mobileSidebarContent],
+    () => ({
+      mobileNavOpen,
+      setMobileNavOpen,
+      mobileSidebarContent,
+      mobileDrawerMode,
+      setMobileDrawerMode,
+      setMobileSidebarContent,
+    }),
+    [mobileNavOpen, setMobileNavOpen, mobileSidebarContent, mobileDrawerMode, setMobileSidebarContent],
   );
 
   const closeAccountSheet = useCallback(() => {

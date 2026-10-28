@@ -5,7 +5,7 @@
  *   displayName, email, photoURL, plan ("free" in beta; not client-writable to other values),
  *   usage { weekStart, chatTurns, practiceGenerated, notesGenerated, storageBytes },
  *     storageBytes is capped according to the server-resolved plan (materials).
- *   preferredModel (optional Gemini model id; admin-only models are authorized by the server),
+ *   preferredModel (optional AI model id; plan-restricted models are authorized by the server),
  *   chatMode (optional: auto | fast | teacher), theme (optional: light | dark),
  *   themeAccents (optional: light/dark accent ids), highContrast (optional: boolean),
  *   createdAt, updatedAt

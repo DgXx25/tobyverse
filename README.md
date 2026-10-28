@@ -1,6 +1,6 @@
 # TobyVerse
 
-Next.js 15 app (App Router, TypeScript, Tailwind CSS 3.4) with Firebase Auth/Firestore and Gemini.
+Next.js 15 app (App Router, TypeScript, Tailwind CSS 3.4) with Firebase Auth/Firestore and Anthropic Claude for text generation. Gemini is used only for photo understanding and saved-material embeddings; it is not selectable as a chat model.
 
 ## Setup
 
@@ -13,7 +13,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Fill `.env.local` with your Firebase web app keys and `GOOGLE_GENERATIVE_AI_API_KEY`.
+Fill `.env.local` with your Firebase web app keys, `ANTHROPIC_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` (Gemini photo understanding and saved-material embeddings).
 
 ## Run
 
@@ -78,4 +78,5 @@ Env vars the host must have:
 - `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
 - `NEXT_PUBLIC_FIREBASE_APP_ID`
 - `GOOGLE_GENERATIVE_AI_API_KEY`
+- `ANTHROPIC_API_KEY` (required for Claude Haiku and Sonnet)
 - `FIREBASE_SERVICE_ACCOUNT_JSON`

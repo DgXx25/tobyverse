@@ -16,7 +16,7 @@ export const FUTURE_MODELS_CHAPTER = {
   id: "models",
   label: "AI მოდელები",
   title: ["შეარჩიე მოდელი", "შენი ამოცანისთვის."],
-  description: "ამჟამად TobyVerse იყენებს Gemini-ის მოდელებს; მომავალში Grok-ისა და სხვა მოდელების არჩევანიც დაემატება.",
+  description: "ტექსტურ პასუხებს Claude ამუშავებს, ხოლო ფოტოების გააზრებას Gemini 3.1 Flash Lite.",
 } as const;
 
 const CHAPTERS = [

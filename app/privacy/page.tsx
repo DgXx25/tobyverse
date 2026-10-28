@@ -69,31 +69,30 @@ export default function PrivacyPage() {
         <li>Respond to support, legal, and data-rights requests.</li>
       </ul>
 
-      <h2>AI processing, including an important Google setting</h2>
+      <h2>AI processing</h2>
       <p>
-        TobyVerse currently sends requests to Google&apos;s Gemini API. Depending on your request,
-        that may include your prompt, relevant conversation context, selected project text, and an
-        image or other material needed to answer. The model may also receive TobyVerse instructions
-        and relevant saved preferences. Google processes these inputs under its Gemini API terms.
+        TobyVerse sends text prompts, relevant conversation context, selected project text, and
+        TobyVerse instructions to Anthropic&apos;s Claude API to generate responses. When a request
+        includes an image that needs visual understanding, TobyVerse sends that image and request
+        to Google&apos;s Gemini 3.1 Flash Lite API. Saved-material search also sends text to Google&apos;s
+        Gemini embeddings API. Each provider processes inputs under its applicable terms.
       </p>
       <p>
-        Google&apos;s terms distinguish paid and unpaid Gemini API usage. For unpaid quota, Google
-        says it may use submitted content and generated responses to improve its products and that
-        human reviewers may process them. For paid API usage through a Cloud project with active
-        billing, Google says it does not use prompts or responses to improve its products and
-        processes them under its data-processing terms. The billing mode for TobyVerse&apos;s Google
-        API project is not shown in the app. Until the project&apos;s billing configuration is verified,
-        treat anything sent to TobyVerse AI as potentially subject to Google&apos;s unpaid-service
-        data practices. Do not submit confidential, highly sensitive, or third-party information
-        unless you have the right to do so and accept that processing.
+        Do not submit confidential, highly sensitive, or third-party information unless you have
+        the right to do so and accept the processing described here. Gemini&apos;s API terms may
+        distinguish between paid and unpaid usage; TobyVerse does not show the billing status of
+        its Google API project in the app.
       </p>
       <p>
         Read{" "}
+        <a href="https://www.anthropic.com/legal" target="_blank" rel="noreferrer">
+          Anthropic&apos;s legal terms and policies
+        </a>{" "}
+        and{" "}
         <a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noreferrer">
           Google&apos;s Gemini API terms
         </a>{" "}
-        and its linked privacy and data-processing terms for the details that apply to the request.
-        TobyVerse does not currently route requests to Grok or OpenAI models.
+        for the details that apply to provider processing.
       </p>
 
       <h2>Uploads, OCR, and storage</h2>
@@ -101,8 +100,8 @@ export default function PrivacyPage() {
         <li>
           <strong>Photos:</strong> TobyVerse compresses and re-encodes supported photos before
           storing them. It keeps the compressed image and an extracted-text file for OCR results;
-          that text file can be empty when no text is readable. A photo may be sent to Gemini when
-          needed for text extraction or when you ask a question that needs visual analysis.
+          that text file can be empty when no text is readable. When visual understanding is
+          requested, the image is sent to Google Gemini 3.1 Flash Lite as described above.
         </li>
         <li>
           <strong>Other documents:</strong> the original file is used for processing and is normally
@@ -146,11 +145,11 @@ export default function PrivacyPage() {
       <h2>Service providers and international processing</h2>
       <p>
         TobyVerse shares information with Google services for sign-in, hosting, database and file
-        storage, and Gemini AI processing. Each service is governed by its applicable provider
-        terms, including the different Gemini API handling described above. Infrastructure and
-        model processing may occur in the United States or other countries where Google operates.
-        The protections for an international transfer depend on the service and the terms that
-        apply to it. We do not sell personal
+        storage, Gemini image understanding, and Gemini embeddings, and with Anthropic for Claude
+        text generation. Each service is governed by its applicable provider terms. Processing
+        may occur in the United States or other countries where these providers operate. The
+        protections for an international transfer depend on the service and the terms that apply
+        to it. We do not sell personal
         information or use it for targeted advertising.
       </p>
 

@@ -46,36 +46,3 @@ export function CitationMark({ n }: { n: number }) {
     </button>
   );
 }
-
-/** Where the answer came from, under the message. Only the passages the answer used. */
-export function CitedSources({
-  sources,
-  onOpen,
-}: {
-  sources: ChatSourceRef[];
-  onOpen?: (materialId: string) => void;
-}) {
-  if (sources.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5" aria-label="Sources">
-      {sources.map((source) => {
-        const locator = sourceLocator(source);
-        return (
-          <button
-            key={source.n}
-            type="button"
-            onClick={() => onOpen?.(source.materialId)}
-            title={source.snippet || describe(source)}
-            className="inline-flex h-7 max-w-[min(100%,260px)] items-center gap-1.5 rounded-full bg-surface px-2 text-[12px] leading-none text-muted transition-colors hover:text-foreground"
-          >
-            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-surface text-[10px] font-medium text-foreground">
-              {source.n}
-            </span>
-            <span className="min-w-0 truncate">{source.title}</span>
-            {locator ? <span className="shrink-0 text-muted/80">{locator}</span> : null}
-          </button>
-        );
-      })}
-    </div>
-  );
-}

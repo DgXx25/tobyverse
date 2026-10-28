@@ -46,6 +46,7 @@ export function ArtifactPanel({
   onExitSession,
   onPracticeComplete,
   onViewChange,
+  onMobileArtifactLayerChange,
   onActivate,
   onPanelChromeChange,
   hideTopBarOverride = false,
@@ -71,6 +72,7 @@ export function ArtifactPanel({
   onExitSession: () => void;
   onPracticeComplete?: (result: SetResult) => void;
   onViewChange?: (view: TabId) => void;
+  onMobileArtifactLayerChange?: (open: boolean) => void;
   onActivate?: (artifact: ChatArtifact) => void;
   onPanelChromeChange?: (ownsChrome: boolean) => void;
   hideTopBarOverride?: boolean;
@@ -335,6 +337,7 @@ export function ArtifactPanel({
                   generatingLabel={generatingLabel}
                   onCreate={(tile, run) => onStudioCreate?.(tile, run)}
                   onOpenSheet={(id) => {
+                    onMobileArtifactLayerChange?.(true);
                     setSheetError(null);
                     setTab("sheets");
                     setSheetId(id);
@@ -351,7 +354,10 @@ export function ArtifactPanel({
                     const found = practiceSets.find((item) => item.id === id);
                     if (found) onStartPractice(found);
                   }}
-                  onOpenPath={() => setTab("path")}
+                  onOpenPath={() => {
+                    onMobileArtifactLayerChange?.(true);
+                    setTab("path");
+                  }}
                 />
               )}
               {enabled && tab === "materials" && (
@@ -382,6 +388,7 @@ export function ArtifactPanel({
                   liveNote={liveNote}
                   error={sheetError}
                   onSelect={(id) => {
+                    onMobileArtifactLayerChange?.(true);
                     setSheetError(null);
                     setSheetId(id);
                     const sheet = sheets.find((item) => item.id === id);
@@ -394,6 +401,7 @@ export function ArtifactPanel({
                     }
                   }}
                   onBack={() => {
+                    onMobileArtifactLayerChange?.(false);
                     setSheetId(null);
                     setTab("studio");
                     onLiveSettled?.();

@@ -40,7 +40,7 @@ export function AiPromptPanel({ projectTitle }: { projectTitle: string }) {
   return (
     <section className="rounded-lg border border-border bg-surface p-5">
       <div className="mb-4">
-        <h2 className="text-sm font-medium text-foreground">Gemini</h2>
+        <h2 className="text-sm font-medium text-foreground">Claude</h2>
         <p className="mt-1 text-xs text-muted">Ask the model about this project.</p>
       </div>
 

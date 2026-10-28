@@ -64,7 +64,9 @@ export function Topbar() {
   const router = useRouter();
   const pathname = usePathname();
   const { openSettings, openAccountSheet, setSelectedProjectId, setPendingPanel, projectShare } = useShell();
-  const { mobileNavOpen, setMobileNavOpen, mobileSidebarContent } = useMobileNavigation();
+  const { mobileNavOpen, setMobileNavOpen, mobileSidebarContent, mobileDrawerMode } = useMobileNavigation();
+  const artifactDrawer = mobileDrawerMode === "artifact";
+  const quizDrawer = mobileDrawerMode === "quiz";
   const { notebooks } = useNotebooks(user?.uid);
   const generatingProjects = useSyncExternalStore(
     subscribeActiveGenerations,
@@ -542,17 +544,32 @@ export function Topbar() {
           )
         : null}
     </header>
-    <VelocityDrawer open={mobileNavOpen} onOpenChange={setMobileNavOpen} direction="left" modal>
+    <VelocityDrawer open={mobileNavOpen} onOpenChange={setMobileNavOpen} direction={artifactDrawer || quizDrawer ? "bottom" : "left"} dismissible={!quizDrawer} modal>
       <VaulDrawer.Portal>
         <VaulDrawer.Overlay className="mobile-drawer-overlay fixed inset-0 z-[99] bg-black/45" />
         <VaulDrawer.Content
-          aria-label="Navigation"
-          className="mobile-drawer-panel fixed inset-y-0 left-0 z-[100] flex h-dvh w-[min(82vw,320px)] max-w-[calc(100vw-56px)] flex-col overflow-hidden bg-[var(--panel-bg)] px-0 pb-[max(16px,env(safe-area-inset-bottom))] pt-[max(8px,env(safe-area-inset-top))] outline-none"
+          aria-label={quizDrawer ? "Quiz" : artifactDrawer ? "Study material" : "Navigation"}
+          className={`mobile-drawer-panel fixed z-[100] flex flex-col overflow-hidden bg-[var(--panel-bg)] px-0 pb-[max(16px,env(safe-area-inset-bottom))] pt-[max(8px,env(safe-area-inset-top))] outline-none ${
+            quizDrawer
+              ? "mobile-quiz-drawer inset-x-0 top-0 h-dvh max-h-dvh w-full max-w-none rounded-none"
+              : artifactDrawer
+                ? "mobile-artifact-drawer inset-x-0 bottom-0 h-[95dvh] max-h-[95dvh] w-full max-w-none rounded-t-[22px]"
+                : "inset-y-0 left-0 h-dvh w-screen max-w-none"
+          }`}
         >
-          <VaulDrawer.Title className="sr-only">Navigation</VaulDrawer.Title>
-          <div className="flex h-12 shrink-0 items-center px-3"><BrandMark href="/new" onClick={() => closeMobileDrawer()} /></div>
+          <VaulDrawer.Title className="sr-only">{quizDrawer ? "Quiz" : artifactDrawer ? "Study material" : "Navigation"}</VaulDrawer.Title>
+          {quizDrawer ? null : artifactDrawer ? (
+            <div className="mobile-artifact-drawer-bar relative flex h-9 shrink-0 items-center justify-center px-4">
+              <VaulDrawer.Handle className="mobile-artifact-drawer-handle" />
+              <button type="button" aria-label="Close study material" onClick={closeMobileDrawer} className="absolute right-3 top-0 flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-surface-2 hover:text-foreground">
+                <UiIcon name="close" size={17} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex h-12 shrink-0 items-center px-3"><BrandMark href="/new" onClick={() => closeMobileDrawer()} /></div>
+          )}
           <div className="mobile-sidebar-content min-h-0 flex-1 overflow-hidden">{mobileSidebarContent}</div>
-          <div className="shrink-0 px-3 pt-2"><button type="button" onClick={() => openAccountSheet("root")} className="flex h-12 w-full items-center gap-3 rounded-xl px-2 text-left hover:bg-surface-2"><Avatar src={user?.photoURL} name={name} /><span className="min-w-0 flex-1 truncate text-sm text-foreground">{name}</span></button></div>
+          {artifactDrawer || quizDrawer ? null : <div className="shrink-0 px-3 pt-2"><button type="button" onClick={() => openAccountSheet("root")} className="flex h-12 w-full items-center gap-3 rounded-xl px-2 text-left hover:bg-surface-2"><Avatar src={user?.photoURL} name={name} /><span className="min-w-0 flex-1 truncate text-sm text-foreground">{name}</span></button></div>}
         </VaulDrawer.Content>
       </VaulDrawer.Portal>
     </VelocityDrawer>

@@ -64,7 +64,7 @@ export function AdminSidebar() {
     <aside className={`sidebar-slot relative z-[2] hidden h-dvh shrink-0 overflow-hidden border-r border-border bg-surface transition-[width] duration-200 ease-out md:block ${collapsed ? "w-16" : "w-[273px]"}`}>{content()}</aside>
     {mobileNavOpen ? <>
       <button type="button" aria-label="Close menu" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-40 bg-black/50 md:hidden" />
-      <aside className="fixed left-0 top-0 z-50 h-dvh w-[min(85vw,320px)] bg-surface shadow-2xl md:hidden">{content(true)}</aside>
+      <aside className="fixed inset-0 z-50 h-dvh w-screen max-w-none bg-surface shadow-2xl md:hidden">{content(true)}</aside>
     </> : null}
   </>;
 }

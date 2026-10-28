@@ -9,6 +9,7 @@ export {
   setAIProvider,
   geminiCallUsage,
 } from "@/lib/ai/gemini";
+export { AnthropicProvider, anthropicCallUsage } from "@/lib/ai/anthropic";
 export { generateJson, validateOrRepairJson } from "@/lib/ai/json";
 export {
   ASK_WRITING_CONTRACT,
@@ -26,9 +27,10 @@ export {
   type ChatToolName,
 } from "@/lib/ai/tools";
 export {
+  DEFAULT_CLAUDE_MODEL,
   DEFAULT_GEMINI_MODEL,
   DEFAULT_MODEL_SELECTION,
-  GEMINI_MODEL_OPTIONS,
+  AI_MODEL_OPTIONS,
   availableAiModels,
   isKnownAiModel,
   isAllowedAiModel,

@@ -490,7 +490,7 @@ export function toAnthropicTools(defs: ChatToolDefinition[] = eligibleChatToolDe
   }));
 }
 
-/** Gemini functionDeclarations mapper. GeminiProvider is the only live provider. */
+/** Gemini functionDeclarations mapper used for the photo understanding provider. */
 export function toGeminiTools(defs: ChatToolDefinition[] = eligibleChatToolDefinitions("auto")) {
   return defs.map((def) => ({
     name: def.name,

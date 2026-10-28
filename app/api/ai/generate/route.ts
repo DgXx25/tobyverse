@@ -1,5 +1,5 @@
 import { assertAdminRequest, adminErrorResponse } from "@/lib/admin/assert";
-import { generateText } from "@/lib/ai/gemini";
+import { generateText, getAIProvider } from "@/lib/ai/gemini";
 
 export const runtime = "nodejs";
 
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 
   try {
     const text = await generateText(prompt, { systemInstruction });
-    return Response.json({ text, provider: "gemini" });
+    return Response.json({ text, provider: getAIProvider().id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Generation failed.";
     return Response.json({ error: message }, { status: 500 });

@@ -32,7 +32,7 @@ export function PlanLimitDialog() {
   const copy = reason === "storage"
     ? { title: "Storage is full", body: "Upgrade your plan for more room to add materials." }
     : reason === "model"
-      ? { title: "Gemini 4 Argon is a Premium model", body: "Upgrade to Premium to use Gemini 4 Argon. Auto mode stays within your current plan." }
+      ? { title: "This is a Premium model", body: "Upgrade to Premium to use this model. Auto mode stays within your current plan." }
       : { title: "AI usage is used up", body: "Your weekly AI allowance renews on Monday. Upgrade for a larger allowance." };
 
   return (

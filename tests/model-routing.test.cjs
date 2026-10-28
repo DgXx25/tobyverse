@@ -7,22 +7,28 @@ const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 const resolve = Module._resolveFilename;
 Module._resolveFilename = function (name, ...args) {
-  return resolve.call(this, name.startsWith('@/') ? path.join(root, name.slice(2)) : name, ...args);
+  const parent = args[0];
+  if (name.startsWith('@/')) return resolve.call(this, path.join(root, name.slice(2)), ...args);
+  if (parent?.filename && name.startsWith('.') && name.endsWith('.js')) {
+    const tsSibling = path.resolve(path.dirname(parent.filename), `${name.slice(0, -3)}.ts`);
+    if (fs.existsSync(tsSibling)) return tsSibling;
+  }
+  return resolve.call(this, name, ...args);
 };
 require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, filename);
 
-test('simple factual questions stay on Flash in English and Georgian', () => {
+test('simple factual questions use Haiku in English and Georgian', () => {
   const { scorePrompt, selectModel } = require('../lib/ai/model-routing.ts');
   for (const prompt of ['What is photosynthesis?', 'Define recursion.', 'Translate hello into Georgian.', 'Who wrote Hamlet?', 'რა არის ფოტოსინთეზი?', 'თარგმნე hello ქართულად.', '2 + 2', '']) {
     const result = scorePrompt(prompt);
     assert.equal(result.tier, 'SIMPLE', prompt);
-    assert.equal(selectModel(prompt, 'auto').model, 'gemini-3.5-flash', prompt);
+    assert.equal(selectModel(prompt, 'auto').model, 'claude-haiku-5-5', prompt);
   }
 });
 
-test('multi-step solutions, code and deep analysis route to Pro', () => {
+test('complex prompts use Sonnet on Premium and stay on Haiku for free plans', () => {
   const { scorePrompt, selectModel } = require('../lib/ai/model-routing.ts');
   for (const prompt of [
     'Solve 2x + 3 = 7 and verify the result step by step.',
@@ -32,32 +38,36 @@ test('multi-step solutions, code and deep analysis route to Pro', () => {
   ]) {
     const result = scorePrompt(prompt);
     assert.equal(result.tier, 'COMPLEX', prompt);
-    assert.equal(selectModel(prompt, 'auto').model, 'gemini-3.1-pro-preview', prompt);
+    assert.equal(selectModel(prompt, 'auto', 'pro').model, 'claude-sonnet-5-5', prompt);
+    assert.equal(selectModel(prompt, 'auto', 'free_beta').model, 'claude-haiku-5-5', prompt);
   }
 });
 
-test('Auto never chooses Argon and explicit model selections bypass scoring', () => {
+test('Auto selects only enabled Claude models; Gemini is disabled and explicit Claude choices bypass scoring', () => {
   const { selectModel } = require('../lib/ai/model-routing.ts');
   const veryComplex = 'analyze prove code compare solve '.repeat(1000);
-  assert.equal(selectModel(veryComplex, 'auto').model, 'gemini-3.1-pro-preview');
-  assert.equal(selectModel(veryComplex, 'gemini-3.5-flash').model, 'gemini-3.5-flash');
-  assert.equal(selectModel('What is 2+2?', 'gemini-4-argon').model, 'gemini-4-argon');
+  assert.equal(selectModel(veryComplex, 'auto', 'pro').model, 'claude-sonnet-5-5');
+  assert.equal(selectModel(veryComplex, 'auto', 'free_beta').model, 'claude-haiku-5-5');
+  assert.equal(selectModel('What is 2+2?', 'claude-haiku-5-5').model, 'claude-haiku-5-5');
+  assert.equal(selectModel('What is 2+2?', 'claude-sonnet-5-5').model, 'claude-sonnet-5-5');
   assert.equal(selectModel('What is 2+2?', 'auto').method, 'heuristic');
+  assert.throws(() => selectModel('Question', 'gemini-3.5-flash'), /Unknown model/);
   assert.throws(() => selectModel('hello', 'unknown'), /Unknown model/);
 });
 
-test('plan gating keeps Argon Premium-only while Tobyverse includes Flash, Pro and Auto', () => {
+test('plan gating exposes Haiku on all plans and Sonnet only on Premium; Gemini is unavailable', () => {
   const { availableAiModels, isAllowedAiModel } = require('../lib/ai/catalog.ts');
   for (const plan of ['free_beta', 'lite']) {
-    assert.equal(isAllowedAiModel('gemini-3.5-flash', plan), true);
-    assert.equal(isAllowedAiModel('gemini-3.1-pro-preview', plan), true);
-    assert.equal(isAllowedAiModel('gemini-4-argon', plan), false);
+    assert.equal(isAllowedAiModel('claude-haiku-5-5', plan), true);
+    assert.equal(isAllowedAiModel('claude-sonnet-5-5', plan), false);
+    assert.equal(isAllowedAiModel('gemini-3.5-flash', plan), false);
     assert.ok(availableAiModels(plan).some((model) => model.id === 'auto'));
-    assert.ok(!availableAiModels(plan).some((model) => model.id === 'gemini-4-argon'));
+    assert.ok(!availableAiModels(plan).some((model) => model.id.startsWith('gemini-')));
   }
   for (const plan of ['pro', 'max', 'team', 'admin']) {
-    assert.equal(isAllowedAiModel('gemini-4-argon', plan), true);
-    assert.ok(availableAiModels(plan).some((model) => model.id === 'gemini-4-argon'));
+    assert.equal(isAllowedAiModel('claude-sonnet-5-5', plan), true);
+    assert.ok(availableAiModels(plan).some((model) => model.id === 'claude-sonnet-5-5'));
+    assert.ok(!availableAiModels(plan).some((model) => model.id.startsWith('gemini-')));
   }
 });
 

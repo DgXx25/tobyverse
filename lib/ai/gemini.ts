@@ -23,6 +23,7 @@ import {
 } from "@/lib/ai/tools";
 import { runToolLoop } from "@/lib/ai/tool-loop";
 import { toolFallbackText } from "@/lib/ai/tool-execution";
+import { AnthropicProvider } from "@/lib/ai/anthropic";
 
 type GeminiUsageMetadata = {
   promptTokenCount?: number;
@@ -346,10 +347,27 @@ export class GeminiProvider implements AIProvider {
   }
 }
 
-let currentProvider: AIProvider = new GeminiProvider();
+const geminiProvider = new GeminiProvider();
+const anthropicProvider = new AnthropicProvider();
+let currentProvider: AIProvider = anthropicProvider;
+/** Gemini stays out of chat model selection; this ID is reserved for photo understanding. */
+export const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite" as const;
 
-export function getAIProvider(): AIProvider {
+export function getAIProvider(model?: string): AIProvider {
+  if (model?.startsWith("gemini-")) {
+    throw new Error("Gemini is temporarily disabled. Choose a Claude model.");
+  }
+  if (model?.startsWith("claude-")) return anthropicProvider;
   return currentProvider;
+}
+
+export function resolveAIRequest(model?: string, images?: GenerateOptions["images"]): { provider: AIProvider; model?: string } {
+  // Image-bearing prompts are the only requests that continue using Gemini. Text requests
+  // always honor the selected Claude model and never fall back to Gemini.
+  const hasPhoto = images?.some((image) => image.data && image.mimeType.startsWith("image/")) ?? false;
+  return hasPhoto
+    ? { provider: geminiProvider, model: GEMINI_IMAGE_MODEL }
+    : { provider: getAIProvider(model), model };
 }
 
 export function setAIProvider(provider: AIProvider): void {
@@ -364,23 +382,26 @@ export function getGenerateTextCallCount(): number {
 
 export async function generateText(prompt: string, options?: GenerateOptions): Promise<string> {
   generateTextCalls += 1;
-  return getAIProvider().generateText(prompt, options);
+  const request = resolveAIRequest(options?.model, options?.images);
+  return request.provider.generateText(prompt, { ...options, model: request.model });
 }
 
 export async function* generateTextStream(
   prompt: string,
   options?: GenerateOptions,
 ): AsyncIterable<string> {
-  yield* getAIProvider().generateTextStream(prompt, options);
+  const request = resolveAIRequest(options?.model, options?.images);
+  yield* request.provider.generateTextStream(prompt, { ...options, model: request.model });
 }
 
 export async function* generateToolStream(
   prompt: string,
   options?: GenerateOptions,
 ): AsyncIterable<ChatStreamPart> {
-  const provider = getAIProvider();
+  const request = resolveAIRequest(options?.model, options?.images);
+  const provider = request.provider;
   if (!provider.generateToolStream) {
     throw new Error("This provider has no tools.");
   }
-  yield* provider.generateToolStream(prompt, options);
+  yield* provider.generateToolStream(prompt, { ...options, model: request.model });
 }

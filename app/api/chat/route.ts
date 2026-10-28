@@ -1,4 +1,4 @@
-import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/gemini";
+import { generateTextStream, generateToolStream, getAIProvider, resolveAIRequest } from "@/lib/ai/gemini";
 import { eligibleChatToolNames, isInternalTool, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { toolStatusText, withToolTimeout, type ToolExecutionStatus } from "@/lib/ai/tool-execution";
 import { DEFAULT_AI_PROVIDER, DEFAULT_MODEL_SELECTION, isAllowedAiModel, isKnownModelSelection, isEnabledProvider } from "@/lib/ai/catalog";
@@ -273,7 +273,7 @@ export async function POST(request: Request) {
   if (!isKnownModelSelection(requestedSelection)) {
     return Response.json({ error: "That model is not available." }, { status: 400 });
   }
-  // Resolve account access before model selection so disallowed manual choices cannot reach Gemini.
+  // Resolve account access before model selection so disallowed manual choices cannot reach a provider.
   let access = null;
   if (!session.anonymous) {
     try { access = await readAccountAccess(session.uid); }
@@ -281,13 +281,13 @@ export async function POST(request: Request) {
   }
   const plan = session.anonymous ? "free_beta" : access!.plan;
   if (requestedSelection !== "auto" && !isAllowedAiModel(requestedSelection, plan)) {
-    return Response.json({ error: "Gemini 4 Argon is available on Premium plans.", code: "premium_model_required" }, { status: 403 });
+    return Response.json({ error: "This model is available on Premium plans.", code: "premium_model_required" }, { status: 403 });
   }
   if (plan === "admin") {
     try { await assertAdminRequest(request); }
     catch (error) { return adminErrorResponse(error); }
   }
-  const routing = selectModel(prompt, requestedSelection);
+  const routing = selectModel(prompt, requestedSelection, plan);
   const modelId = routing.model;
   if (!isAllowedAiModel(modelId, plan)) {
     return Response.json({ error: "This model is not included in your plan.", code: "premium_model_required" }, { status: 403 });
@@ -352,6 +352,13 @@ export async function POST(request: Request) {
   const guestContext = session.anonymous
     ? { ...withPrompt, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
     : withPrompt;
+  const requestImages = guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data }));
+  const resolvedRequest = resolveAIRequest(modelId, requestImages);
+  console.info("[provider-routing]", JSON.stringify({
+    provider: resolvedRequest.provider.id,
+    model: resolvedRequest.model ?? modelId,
+    selection: modelId,
+  }));
   const systemInstruction = buildChatSystemPrompt(guestContext);
 
         signal.throwIfAborted();
@@ -359,7 +366,7 @@ export async function POST(request: Request) {
         let raw: ChatToolCall | null = null;
         let streamed = false;
         const supportsTools =
-          Boolean(getAIProvider().generateToolStream) &&
+          Boolean(getAIProvider(modelId).generateToolStream) &&
           chatModeSendsToolDeclarations(mode);
         let toolSent = false;
         let imagesSent = false;

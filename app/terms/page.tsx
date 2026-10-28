@@ -52,9 +52,10 @@ export default function TermsPage() {
 
       <h2>AI responses and generated items</h2>
       <p>
-        TobyVerse uses Google Gemini models at this time. AI can misunderstand your request, alter
-        wording you meant to preserve, produce incorrect or incomplete material, or generate
-        content similar to content provided to other users. You should check important names,
+        TobyVerse uses Anthropic Claude to generate text responses and Google Gemini 3.1 Flash Lite
+        to understand images. AI can misunderstand your request, alter wording you meant to
+        preserve, produce incorrect or incomplete material, or generate content similar to
+        content provided to other users. You should check important names,
         numbers, quotations, edits, calculations, and source references before relying on or sending
         an output. When asking for a narrow edit, review the result against your original.
       </p>
@@ -95,8 +96,8 @@ export default function TermsPage() {
       <h2>Privacy, Memory, and deletion</h2>
       <p>
         The <a href="/privacy">Privacy Policy</a> describes how content is processed by TobyVerse
-        and Google Gemini, how photos and documents are stored after processing, and how automatic
-        Memory works. Use Account Settings to export the available account summary or delete your
+        Anthropic Claude and Google Gemini, how photos and documents are stored after processing,
+        and how automatic Memory works. Use Account Settings to export the available account summary or delete your
         account. You can also delete individual content in the app. Deletion may not remove copies
         already shared or limited provider logs and backups; details are in the Privacy Policy.
       </p>

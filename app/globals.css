@@ -948,6 +948,13 @@ html.nav-lock body {
   .mobile-drawer-panel,
   .mobile-sidebar-content { background: var(--panel-bg); }
   .mobile-drawer-panel { border-right: 1px solid var(--panel-border); }
+  .mobile-artifact-drawer,
+  .mobile-quiz-drawer { border: 0; border-top: 1px solid var(--panel-border); }
+  .mobile-artifact-drawer .mobile-sidebar-switch,
+  .mobile-quiz-drawer .mobile-sidebar-switch { display: none; }
+  .mobile-quiz-drawer { touch-action: pan-y; padding-top: 0 !important; padding-bottom: 0 !important; }
+  .mobile-artifact-drawer-bar { background: var(--panel-bg); }
+  .mobile-artifact-drawer-handle { position: absolute; top: 12px; left: 50%; width: 36px; height: 4px; border-radius: 999px; background: var(--muted); opacity: .55; transform: translateX(-50%); }
   .mobile-sidebar-switch { overflow: hidden; background: var(--bg); }
   .mobile-sidebar-switch-indicator {
     position: absolute;

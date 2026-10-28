@@ -1,53 +1,30 @@
 "use client";
 
-import { PLAN_CATALOG, resolveEffectivePlan } from "@/lib/billing/plans";
-import { storageLimitForPlan } from "@/lib/account/plan";
-import { formatBytes } from "@/lib/format";
-import type { EffectivePlanId } from "@/types/billing";
+import { resolveEffectivePlan } from "@/lib/billing/plans";
 import type { UserProfile } from "@/types/user";
 import { useAuth } from "@/components/auth-provider";
 import { useEffect, useState } from "react";
 import { PlanOptions } from "@/components/account/plan-options";
-import type { AiModelUsage } from "@/types/billing";
 
-const PLAN_FEATURES: Record<EffectivePlanId, string[]> = {
-  free_beta: ["Gemini 3.5 Flash", "Gemini 3.1 Pro", "Auto model selection"],
-  lite: ["Gemini 3.5 Flash", "Gemini 3.1 Pro", "Auto model selection"],
-  pro: ["Everything in Tobyverse", "Gemini 4 Argon", "Higher weekly usage limits"],
-  max: ["Everything in Tobyverse", "Gemini 4 Argon", "Higher weekly usage limits"],
-  team: ["Chat, sources and Studio", "All released AI models"],
-  admin: ["Unlimited TobyVerse access", "Admin controls", "Actual storage tracking"],
-};
-
-function displayPlan(plan: EffectivePlanId): string {
-  if (plan === "free_beta") return "Tobyverse";
-  return PLAN_CATALOG[plan].name;
-}
-
-function includedLabel(plan: EffectivePlanId): string {
-  if (plan === "free_beta") return "Included in Tobyverse";
-  return `Included in ${displayPlan(plan)}`;
+function displayPlan(plan: ReturnType<typeof resolveEffectivePlan>): string {
+  return plan === "free_beta" || plan === "lite" ? "Tobyverse" : "Premium";
 }
 
 export function PlanUsage({ profile }: { profile: UserProfile | null }) {
   const { user } = useAuth();
   const [portalLoading, setPortalLoading] = useState(false);
   const [portalError, setPortalError] = useState("");
-  const [aiUsage, setAiUsage] = useState<{ weekStart: string; resetsAt: string; costMicros: number; requestCount: number; byModel?: Record<string, AiModelUsage> } | null>(null);
+  const [aiUsage, setAiUsage] = useState<{ weekStart: string; resetsAt: string; costMicros: number; requestCount: number } | null>(null);
   const [aiUsageLoading, setAiUsageLoading] = useState(true);
   const [aiUsageError, setAiUsageError] = useState("");
   const plan = resolveEffectivePlan({ storedPlan: profile?.plan, admin: profile?.admin });
-  const definition = PLAN_CATALOG[plan];
-  const storage = profile?.usage.storageBytes ?? 0;
   const access = profile?.access;
-  const storageCap = access?.storageLimitBytes ?? storageLimitForPlan(plan);
-  const storageRatio = storageCap == null ? 0 : Math.min(1, Math.max(0, storage / storageCap));
   const accessReady = access !== undefined;
   const weeklyBudget = access?.weeklyBudgetMicros;
   const aiUsageRatio = aiUsage && weeklyBudget != null && weeklyBudget > 0 ? Math.min(1, aiUsage.costMicros / weeklyBudget) : 0;
   const aiUsagePercent = Math.round(aiUsageRatio * 100);
   const aiUsageLabel = aiUsageLoading || !accessReady
-    ? "Loading…"
+    ? "Loading"
     : !aiUsage
       ? "Usage unavailable"
       : weeklyBudget == null
@@ -110,91 +87,32 @@ export function PlanUsage({ profile }: { profile: UserProfile | null }) {
 
   return (
     <div className="max-w-4xl">
-      <section className="rounded-2xl border border-border bg-surface-2 p-5">
-        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted">Current plan</p>
-        <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <h3 className="text-lg font-semibold text-foreground">{displayPlan(plan)}</h3>
-        </div>
-        <p className="mt-2 text-[13px] leading-5 text-muted">{plan === "admin" ? "Unlimited access with plan and storage visibility." : definition.description}</p>
-      </section>
+      {plan === "admin" ? (
+        <section className="rounded-xl border border-border bg-surface-2 px-5 py-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">Current plan</p>
+          <div className="mt-2 text-[18px] font-semibold text-foreground">Admin</div>
+          <p className="mt-1 text-[13px] text-muted">Unlimited access</p>
+        </section>
+      ) : (
+        <PlanOptions currentPlan={plan} subscriptions={access?.subscriptions ?? []} onManageSubscription={() => void manageSubscription()} managingSubscription={portalLoading} />
+      )}
 
-      {access ? <section className="mt-5 rounded-2xl border border-border bg-surface-2 p-5 text-[13px]">
-        <p className="font-medium text-foreground">{access.source === "manual" ? "Access provided by TobyVerse" : access.source === "subscription" ? "Subscription access" : access.source === "admin" ? "Administrator access" : "Account access"}</p>
-        <p className="mt-2 text-muted">{access.expiresAt ? `Available until ${new Date(access.expiresAt).toLocaleString()}` : access.source === "manual" ? "Permanent access" : "No scheduled expiry"}</p>
-        {access.subscriptions.length ? <button type="button" disabled={portalLoading} onClick={() => void manageSubscription()} className="mt-4 rounded-lg border border-border px-3 py-2 disabled:opacity-50">{portalLoading ? "Opening…" : "Manage subscription"}</button> : null}
-        {portalError ? <p role="alert" className="mt-3 text-red-500">{portalError}</p> : null}
-      </section> : null}
-
-      <PlanOptions currentPlan={plan} subscriptions={access?.subscriptions ?? []} onManageSubscription={() => void manageSubscription()} managingSubscription={portalLoading} usagePercent={aiUsage ? aiUsagePercent : undefined} />
-
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <section className="rounded-2xl border border-border bg-surface-2 p-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div>
-              <p className="font-medium text-foreground">AI usage this week</p>
-              <p className="mt-1 text-[12px] text-muted">Shared across chat and AI tools · resets Monday UTC</p>
-            </div>
-            <p className="text-[13px] text-muted">{aiUsageLabel}</p>
+      {plan !== "admin" ? (
+        <section className="mt-6 rounded-xl bg-surface-2 px-4 py-4">
+          <div className="flex items-center justify-between gap-3 text-[13px]">
+            <span className="font-medium text-foreground">Included in {displayPlan(plan)}</span>
+            <span className="shrink-0 text-muted">{aiUsageLabel}</span>
           </div>
           {accessReady && weeklyBudget != null && weeklyBudget > 0 ? (
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-border" role="progressbar" aria-label="Weekly AI usage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(aiUsageRatio * 100)}>
-              <div className="h-full rounded-full bg-foreground/80 transition-[width] duration-300" style={{ width: `${aiUsageRatio * 100}%` }} />
+            <div className="mt-3 h-[7px] overflow-hidden rounded-full bg-border" role="progressbar" aria-label="Plan usage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={aiUsagePercent}>
+              <div className="h-full rounded-full bg-sky-400 transition-[width] duration-300" style={{ width: `${aiUsageRatio * 100}%` }} />
             </div>
           ) : null}
-          {aiUsage && accessReady && weeklyBudget != null ? <p className="mt-2 text-[12px] text-muted">{Math.max(0, 100 - aiUsagePercent)}% remaining this week</p> : null}
           {aiUsageError ? <p role="alert" className="mt-2 text-[12px] text-red-500">{aiUsageError}</p> : null}
+          {aiUsage && !aiUsageLoading ? <p className="mt-2 text-[11px] text-muted">Resets {new Date(aiUsage.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</p> : null}
         </section>
-
-        <section className="rounded-2xl border border-border bg-surface-2 p-5">
-          <div className="flex items-baseline justify-between gap-4">
-            <div><p className="font-medium text-foreground">Material storage</p><p className="mt-1 text-[12px] text-muted">Your actual uploaded material usage.</p></div>
-            <p className="text-[13px] text-muted">{formatBytes(storage) || "0 B"} / {storageCap == null ? "Unlimited" : formatBytes(storageCap)}</p>
-          </div>
-          {storageCap != null ? <div className="mt-4 h-2 overflow-hidden rounded-full bg-border" role="progressbar" aria-label="Material storage" aria-valuemin={0} aria-valuemax={storageCap} aria-valuenow={Math.min(storage, storageCap)}>
-            <div className="h-full rounded-full bg-foreground/80 transition-[width] duration-300" style={{ width: `${storageRatio * 100}%` }} />
-          </div> : null}
-        </section>
-      </div>
-
-      <section className="mt-6 rounded-2xl border border-border bg-surface-2 p-5">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <div><p className="font-medium text-foreground">Usage by model</p><p className="mt-1 text-[12px] text-muted">This week · resets Monday UTC</p></div>
-          <p className="text-[12px] text-muted">{aiUsage ? aiUsageLabel : aiUsageLoading ? "Loading…" : "Usage unavailable"}</p>
-        </div>
-        {([
-          { label: "Gemini 3.5 Flash", color: "bg-sky-400", ids: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"] },
-          { label: "Gemini 3.1 Pro", color: "bg-violet-400", ids: ["gemini-3.1-pro-preview"] },
-          { label: "Gemini 4 Argon", color: "bg-amber-400", ids: ["gemini-4-argon"] },
-        ]).map((row) => {
-          const usage = row.ids.reduce((sum, id) => {
-            const item = aiUsage?.byModel?.[id];
-            return { costMicros: sum.costMicros + (item?.costMicros ?? 0), requestCount: sum.requestCount + (item?.requestCount ?? 0) };
-          }, { costMicros: 0, requestCount: 0 });
-          const pct = aiUsage?.costMicros ? Math.min(100, usage.costMicros / aiUsage.costMicros * 100) : 0;
-          return <div key={row.label} className="mt-5">
-            <div className="flex items-center justify-between gap-3 text-[12px]"><span className="text-foreground">{row.label}</span><span className="text-muted">{Math.round(pct)}%</span></div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-border" role="progressbar" aria-label={`${row.label} usage share`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}><div className={`h-full rounded-full ${row.color}`} style={{ width: `${pct}%` }} /></div>
-          </div>;
-        })}
-      </section>
-
-      <section className="mt-6 rounded-2xl border border-border bg-surface-2 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[13px] font-medium text-foreground">On-demand usage</p><p className="mt-1 text-[12px] text-muted">Additional usage settings will be available here.</p></div><span className="text-[12px] text-muted">Disabled</span></div>
-        <div className="mt-4 border-t border-border pt-4"><p className="text-[13px] font-medium text-foreground">Billing history</p><p className="mt-1 text-[12px] text-muted">Invoices and past transactions will appear here when billing is enabled.</p>{access?.subscriptions.length ? <button type="button" disabled={portalLoading} onClick={() => void manageSubscription()} className="mt-3 rounded-lg border border-border px-3 py-2 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{portalLoading ? "Opening…" : "Manage subscription"}</button> : null}{portalError ? <p role="alert" className="mt-2 text-[12px] text-red-500">{portalError}</p> : null}</div>
-      </section>
-
-      <section className="mt-8">
-        <p className="mb-3 px-1 text-[13px] font-medium text-foreground">{includedLabel(plan)}</p>
-        <div className="overflow-hidden rounded-2xl border border-border bg-surface-2">
-          {PLAN_FEATURES[plan].map((feature, index) => (
-            <div key={feature} className={`flex items-center justify-between gap-4 px-4 py-4 text-[13px] ${index > 0 ? "border-t border-border" : ""}`}>
-              <span className="text-foreground">{feature}</span>
-              <span className="text-muted">Included</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
+      ) : null}
+      {portalError ? <p role="alert" className="mt-3 text-[12px] text-red-500">{portalError}</p> : null}
     </div>
   );
 }

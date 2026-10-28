@@ -1,13 +1,13 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminFirestore } from "@/lib/server/firestore-admin";
 import { readAccountAccess } from "@/lib/billing/account-server";
-import { DEFAULT_GEMINI_MODEL, isAllowedAiModel } from "@/lib/ai/catalog";
+import { DEFAULT_CLAUDE_MODEL, isAllowedAiModel } from "@/lib/ai/catalog";
 import { createAiUsageCollector } from "@/lib/billing/collector";
 import { FREE_BETA_WEEKLY_MICROS, utcWeekWindow } from "@/lib/billing/plans";
 import { emptyAiUsageWeek, mergeAiUsage, MODEL_PRICES } from "@/lib/billing/pricing";
 import type { AiUsageDelta, AiUsageReporter, AiUsageWeek, EffectivePlanId } from "@/types/billing";
 
-const DEFAULT_MODEL = DEFAULT_GEMINI_MODEL;
+const DEFAULT_MODEL = DEFAULT_CLAUDE_MODEL;
 
 export class AiUsageLimitError extends Error {
   readonly code = "weekly_ai_budget_exhausted";
@@ -23,7 +23,7 @@ export class AiUsageLimitError extends Error {
 export class PremiumModelRequiredError extends Error {
   readonly code = "premium_model_required";
   constructor() {
-    super("Gemini 4 Argon is available on Premium plans.");
+    super("This model is available on Premium plans.");
     this.name = "PremiumModelRequiredError";
   }
 }
@@ -72,7 +72,7 @@ export async function readAiUsageSummary(uid: string) {
   const { weekStart, resetsAt } = utcWeekWindow();
   const snapshot = await weekRef(getAdminFirestore(), uid, weekStart).get();
   const week = asWeek(weekStart, snapshot.data());
-  return { weekStart, resetsAt, costMicros: week.costMicros, requestCount: week.requestCount, byModel: week.byModel };
+  return { weekStart, resetsAt, costMicros: week.costMicros, requestCount: week.requestCount };
 }
 
 export type AiUsageSession = {

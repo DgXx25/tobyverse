@@ -78,14 +78,14 @@ test("free storage is 300 MiB and storage grows with each paid plan", () => {
   assert.equal(caps[5], null);
 });
 
-test("Tobyverse includes Auto, Flash, and Pro while Premium adds Argon", () => {
+test("Tobyverse includes Auto and Haiku while Premium adds Sonnet; Gemini choices are temporarily disabled", () => {
   const free = availableAiModels("free_beta");
   const lite = availableAiModels("lite");
   const premium = availableAiModels("pro");
-  assert.deepEqual(free.map((model) => model.id), ["auto", "gemini-3.5-flash", "gemini-3.1-pro-preview"]);
+  assert.deepEqual(free.map((model) => model.id), ["auto", "claude-haiku-5-5"]);
   assert.deepEqual(lite.map((model) => model.id), free.map((model) => model.id));
-  assert.ok(premium.some((model) => model.id === "gemini-4-argon"));
-  assert.ok(!free.some((model) => model.id === "gemini-4-argon"));
+  assert.ok(premium.some((model) => model.id === "claude-sonnet-5-5"));
+  assert.ok(!premium.some((model) => model.id.startsWith("gemini-")));
   assert.equal(availableAiModels("admin").length, premium.length);
 });
 

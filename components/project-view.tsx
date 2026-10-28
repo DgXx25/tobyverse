@@ -127,7 +127,7 @@ export function ProjectView({
   const router = useRouter();
   const pathname = usePathname();
   const { setProjectSettings, setSidebarHidden, pendingPanel, setPendingPanel, setProjectShare } = useShell();
-  const { mobileNavOpen, setMobileNavOpen, setMobileSidebarContent } = useMobileNavigation();
+  const { mobileNavOpen, setMobileNavOpen, setMobileSidebarContent, setMobileDrawerMode } = useMobileNavigation();
   const [project, setProject] = useState<Project | null>(null);
   const [bootstrapMessages, setBootstrapMessages] = useState<ChatMessage[]>(initialMessages ?? []);
   const [threadTitle, setThreadTitle] = useState<string | undefined>();
@@ -158,6 +158,7 @@ export function ProjectView({
   const [phone, setPhone] = useState(false);
   const [singlePanel, setSinglePanel] = useState(false);
   const [sidePane, setSidePane] = useState<"sources" | "studio">("studio");
+  const [mobileArtifactOpen, setMobileArtifactOpen] = useState(false);
   const [studioRequest, setStudioRequest] = useState<StudioRequest | null>(null);
   const [studioJob, setStudioJob] = useState<StudioJob | null>(null);
   const [readingId, setReadingId] = useState<string | null>(null);
@@ -224,7 +225,23 @@ export function ProjectView({
   const onPanelViewChange = useCallback((view: ArtifactTabId) => {
     setPanelView(view);
     if (view === "sheets" || view === "path") ensureMinWidth(MIN_NOTES);
-  }, [ensureMinWidth]);
+    if (phone && mobileNavOpen) {
+      if (view !== "studio") {
+        setMobileArtifactOpen(true);
+        setMobileDrawerMode("artifact");
+      } else if (!focus && !notesLive && !pathLive && !session) {
+        setMobileArtifactOpen(false);
+        setMobileDrawerMode("sidebar");
+      }
+    }
+  }, [ensureMinWidth, phone, mobileNavOpen, focus, notesLive, pathLive, session, setMobileDrawerMode]);
+
+  const setMobileArtifactLayer = useCallback((open: boolean) => {
+    if (!phone) return;
+    setMobileArtifactOpen(open);
+    if (open) setMobileDrawerMode("artifact");
+    else if (!focus && !notesLive && !pathLive && !session) setMobileDrawerMode("sidebar");
+  }, [phone, focus, notesLive, pathLive, session, setMobileDrawerMode]);
 
   const rememberActive = useCallback((artifact: ChatArtifact, status: ActiveArtifactStatus) => {
     if (!user) return;
@@ -233,44 +250,51 @@ export function ProjectView({
     void updateProjectActiveArtifact(projectId, user.uid, active).catch(() => undefined);
   }, [user, projectId]);
 
-  const revealStudio = useCallback(() => {
+  const revealStudio = useCallback((mode: "sidebar" | "artifact" | "quiz" = "sidebar") => {
     setPanelOpen(true);
     if (phone) {
+      setMobileDrawerMode(mode);
       setSidePane("studio");
       setMobileNavOpen(true);
     }
-  }, [phone, setMobileNavOpen]);
+  }, [phone, setMobileNavOpen, setMobileDrawerMode]);
 
   useEffect(() => {
     if (!isActiveProjectView) return;
     if (!phone || !mobileNavOpen || !project || !user) {
+      if (!mobileNavOpen && mobileArtifactOpen) setMobileArtifactOpen(false);
       setMobileSidebarContent(null);
       return;
     }
 
     setMobileSidebarContent(
       <div className="flex h-full min-h-0 flex-col">
-        <nav aria-label="Project panel" role="tablist" className="mobile-sidebar-switch relative mx-2 flex h-10 w-auto shrink-0 items-center rounded-full px-0.5">
-          <span aria-hidden="true" className="mobile-sidebar-switch-indicator" style={{ transform: `translateX(${sidePane === "studio" ? "100%" : "0"})` }} />
-          {(
-            [
-              ["sources", "Materials", "materials"],
-              ["studio", "Studio", "appearance"],
-            ] as const
-          ).map(([id, label, icon]) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={sidePane === id}
-              onClick={() => setSidePane(id)}
-              className={`relative z-[1] inline-flex h-full min-w-0 flex-1 items-center justify-center gap-1.5 px-2 text-[13px] ${sidePane === id ? "text-foreground" : "text-muted"}`}
-            >
-              <UiIcon name={icon} size={18} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </nav>
+        {sidePane !== "studio" || (!session && !focus && !notesLive && !pathLive && !mobileArtifactOpen) ? (
+          <nav aria-label="Project panel" role="tablist" className="mobile-sidebar-switch relative mx-2 flex h-10 w-auto shrink-0 items-center rounded-full px-0.5">
+            <span aria-hidden="true" className="mobile-sidebar-switch-indicator" style={{ transform: `translateX(${sidePane === "studio" ? "100%" : "0"})` }} />
+            {(
+              [
+                ["sources", "Materials", "materials"],
+                ["studio", "Studio", "appearance"],
+              ] as const
+            ).map(([id, label, icon]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={sidePane === id}
+                onClick={() => {
+                  setMobileArtifactLayer(false);
+                  setSidePane(id);
+                }}
+                className={`relative z-[1] inline-flex h-full min-w-0 flex-1 items-center justify-center gap-1.5 px-2 text-[13px] ${sidePane === id ? "text-foreground" : "text-muted"}`}
+              >
+                <UiIcon name={icon} size={18} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
+        ) : null}
         <div className="min-h-0 flex-1 overflow-hidden">
           {sidePane === "sources" ? (
             <SourcesPane
@@ -305,6 +329,7 @@ export function ProjectView({
               onExitSession={exitSession}
               onPracticeComplete={setFinishedSet}
               onViewChange={onPanelViewChange}
+              onMobileArtifactLayerChange={setMobileArtifactLayer}
               onActivate={(artifact) => rememberActive(artifact, "open")}
               hideTopBarOverride
               liveNote={notesLive}
@@ -315,14 +340,21 @@ export function ProjectView({
           )}
         </div>
       </div>,
+      sidePane === "studio"
+        ? session
+          ? "quiz"
+          : focus || notesLive || pathLive || mobileArtifactOpen
+            ? "artifact"
+            : "sidebar"
+        : "sidebar",
     );
     return () => setMobileSidebarContent(null);
     // Component-local callbacks use the state dependencies listed below; their identities must not remount the panel.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isActiveProjectView, phone, mobileNavOpen, project, user, sidePane, materials, selectedIds,
-    studioRequest, notesLive, pathLive, studioJob, focus, session, readingId, setMobileSidebarContent,
-    onPanelViewChange, rememberActive, setSelectedIds,
+    studioRequest, notesLive, pathLive, studioJob, focus, session, mobileArtifactOpen, readingId, setMobileSidebarContent,
+    onPanelViewChange, setMobileArtifactLayer, rememberActive, setSelectedIds,
   ]);
 
   useEffect(() => {
@@ -481,7 +513,7 @@ export function ProjectView({
       return;
     }
     setFocus(next);
-    revealStudio();
+    revealStudio("artifact");
     if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     if (next.kind !== "material" && "title" in next) rememberActive(next, "open");
     setPendingPanel(null);
@@ -530,7 +562,7 @@ export function ProjectView({
       return;
     }
     setFocus(next);
-    revealStudio();
+    revealStudio("artifact");
     if (next.kind === "sheet" || next.kind === "plan" || next.kind === "path") ensureMinWidth(MIN_NOTES);
     rememberActive(next, "open");
   }
@@ -544,7 +576,7 @@ export function ProjectView({
     materialReturn.current = null;
     if (previous?.panelOpen) {
       setFocus(previous.focus);
-      revealStudio();
+      revealStudio(previous.focus ? "artifact" : "sidebar");
       return;
     }
     closePanel();
@@ -562,7 +594,7 @@ export function ProjectView({
         return;
       }
       setFocus(null);
-      revealStudio();
+      revealStudio("artifact");
       ensureMinWidth(MIN_NOTES);
       return;
     }
@@ -576,7 +608,7 @@ export function ProjectView({
         sheetId: event.sheetId || base.sheetId,
       };
     });
-    revealStudio();
+    revealStudio("artifact");
     ensureMinWidth(MIN_NOTES);
     if (event.sheetId) {
       if (keepPathPanel()) return;
@@ -592,7 +624,7 @@ export function ProjectView({
     if (event === "start") {
       setPathLive({ title: "Path", courses: [], status: "Mapping the path…" });
       setFocus({ kind: "path", id: "", title: "Path" });
-      revealStudio();
+      revealStudio("artifact");
       ensureMinWidth(MIN_NOTES);
       return;
     }
@@ -605,7 +637,7 @@ export function ProjectView({
         pathId: event.pathId || base.pathId,
       };
     });
-    revealStudio();
+    revealStudio("artifact");
     ensureMinWidth(MIN_NOTES);
     if (event.pathId) {
       setFocus({ kind: "path", id: event.pathId, title: event.title || "Path" });
@@ -650,13 +682,14 @@ export function ProjectView({
   function startPractice(artifact: ChatArtifact) {
     const ids = artifact.ids?.length ? artifact.ids : [artifact.id];
     setSession({ setId: artifact.id, ids, mode: artifact.mode === "exam" ? "exam" : "practice" });
-    revealStudio();
+    revealStudio("quiz");
     rememberActive(artifact, "in_progress");
   }
 
   function exitSession() {
     setSession(null);
     setSidebarHidden(false);
+    if (phone) setMobileNavOpen(false);
   }
 
   function setSources(open: boolean) {

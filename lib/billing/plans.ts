@@ -25,7 +25,7 @@ export const PLAN_CATALOG: Record<EffectivePlanId, PlanDefinition> = {
     weeklyBudgetMicros: FREE_BETA_WEEKLY_MICROS,
     available: true,
     name: "Tobyverse",
-    description: "Gemini 3.5 Flash, Gemini 3.1 Pro, and automatic model selection.",
+    description: "Claude Haiku and automatic model selection.",
   },
   lite: {
     id: "lite",
@@ -33,7 +33,7 @@ export const PLAN_CATALOG: Record<EffectivePlanId, PlanDefinition> = {
     weeklyBudgetMicros: PAID_WEEKLY_BUDGET_MICROS.lite,
     available: false,
     name: "Tobyverse",
-    description: "Gemini 3.5 Flash, Gemini 3.1 Pro, and automatic model selection.",
+    description: "Claude Haiku and automatic model selection.",
   },
   pro: {
     id: "pro",
@@ -41,7 +41,7 @@ export const PLAN_CATALOG: Record<EffectivePlanId, PlanDefinition> = {
     weeklyBudgetMicros: PAID_WEEKLY_BUDGET_MICROS.pro,
     available: false,
     name: "Premium",
-    description: "Everything in Tobyverse, plus Gemini 4 Argon and higher usage limits.",
+    description: "Everything in Tobyverse, plus Claude Sonnet and higher usage limits.",
   },
   max: {
     id: "max",

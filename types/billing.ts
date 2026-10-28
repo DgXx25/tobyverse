@@ -1,7 +1,7 @@
 export type EffectivePlanId = "free_beta" | "lite" | "pro" | "max" | "team" | "admin";
 
 export type AiCallUsage = {
-  provider: "gemini";
+  provider: "gemini" | "anthropic";
   model: string;
   modelVersion?: string;
   inputTokens: number;
