@@ -4,15 +4,18 @@ import { assertBudgetAvailable } from "./budget.js";
 
 test("a job is blocked when committed weekly cost reaches the user's allowance", () => {
   assert.throws(
-    () => assertBudgetAvailable({ plan: "free_beta", weeklyBudgetMicros: 2_000_000, spentMicros: 2_000_000, model: "gemini-3.1-flash-lite" }),
+    () => assertBudgetAvailable({ plan: "free_beta", weeklyBudgetMicros: 2_000_000, spentMicros: 2_000_000, model: "gemini-3.5-flash" }),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "weekly_ai_budget_exhausted",
   );
 });
 
-test("free accounts cannot queue a paid-only model", () => {
+test("Tobyverse includes Pro while Argon stays Premium-only", () => {
+  assert.doesNotThrow(() => assertBudgetAvailable({
+    plan: "free_beta", weeklyBudgetMicros: 2_000_000, spentMicros: 0, model: "gemini-3.1-pro-preview",
+  }));
   assert.throws(
-    () => assertBudgetAvailable({ plan: "free_beta", weeklyBudgetMicros: 2_000_000, spentMicros: 0, model: "gemini-3.1-pro-preview" }),
-    (error: unknown) => error instanceof Error && "code" in error && error.code === "paid_model_required",
+    () => assertBudgetAvailable({ plan: "free_beta", weeklyBudgetMicros: 2_000_000, spentMicros: 0, model: "gemini-4-argon" }),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "premium_model_required",
   );
 });
 

@@ -92,7 +92,7 @@ import { VirtualChatThread, type VirtualChatThreadHandle } from "@/components/wo
 import { LinkifiedText } from "@/components/workspace/linkified-text";
 import { StatusWait, formatWorked } from "@/components/workspace/status-wait";
 import { ToolActivity } from "@/components/workspace/tool-activity";
-import { CitationProvider } from "@/components/workspace/citations";
+import { CitedSources, CitationProvider } from "@/components/workspace/citations";
 import { usedSources } from "@/lib/rag/sources";
 import { useShell } from "@/components/workspace/shell-context";
 import { UiIcon } from "@/components/workspace/ui-icon";
@@ -2095,6 +2095,7 @@ export function ProjectChat({
                   onOpenImageUpload={openImageUpload}
                 />
               </CitationProvider>
+              <CitedSources sources={turnSources ?? []} onOpen={onOpenMaterial} />
               <IllustrationBlocks blocks={blocks} />
             </div>
           ) : null}

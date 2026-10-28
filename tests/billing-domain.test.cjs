@@ -78,13 +78,15 @@ test("free storage is 300 MiB and storage grows with each paid plan", () => {
   assert.equal(caps[5], null);
 });
 
-test("Lite and higher paid plans can choose every released model", () => {
+test("Tobyverse includes Auto, Flash, and Pro while Premium adds Argon", () => {
   const free = availableAiModels("free_beta");
   const lite = availableAiModels("lite");
-  assert.ok(lite.length > free.length);
-  assert.ok(lite.every((model) => model.paidOnly === false || model.paidOnly === true));
-  assert.ok(lite.some((model) => model.paidOnly));
-  assert.equal(availableAiModels("admin").length, lite.length);
+  const premium = availableAiModels("pro");
+  assert.deepEqual(free.map((model) => model.id), ["auto", "gemini-3.5-flash", "gemini-3.1-pro-preview"]);
+  assert.deepEqual(lite.map((model) => model.id), free.map((model) => model.id));
+  assert.ok(premium.some((model) => model.id === "gemini-4-argon"));
+  assert.ok(!free.some((model) => model.id === "gemini-4-argon"));
+  assert.equal(availableAiModels("admin").length, premium.length);
 });
 
 test("paid plan allowances have progressive defaults and survive weekly renewal", () => {
@@ -103,5 +105,5 @@ test("paid plan allowances have progressive defaults and survive weekly renewal"
     now: new Date("2026-10-21T00:00:00Z"),
   });
   assert.equal(access.plan, "lite");
-  assert.equal(access.weeklyBudgetMicros, budgets[0]);
+  assert.equal(access.weeklyBudgetMicros, policies.find((policy) => policy.planId === "lite").weeklyBudgetMicros);
 });

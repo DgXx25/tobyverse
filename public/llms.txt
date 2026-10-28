@@ -1,0 +1,8 @@
+# TobyVerse
+
+TobyVerse is an AI-powered study tool for students.
+
+- Features include file upload, AI chat, study notes (კონსპექტი), flashcards, and quizzes.
+- The primary language is Georgian, with English support.
+- Content is educational and user-generated within the platform, based on users' materials and prompts.
+- Website: https://tobyverse.web.app

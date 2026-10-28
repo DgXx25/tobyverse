@@ -23,7 +23,7 @@ require.extensions[".ts"] = function (module, filename) {
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const { PROJECT_ICONS, projectIconFor, foldersOf, normalizeFolder, isProjectIcon } = require("../lib/workspace/project-icons.ts");
 const { needsAutoTitle, notebookTitle, UNTITLED_NOTEBOOK_TITLE } = require("../lib/workspace/title.ts");
-const { STUDIO_TILES } = require("../lib/workspace/studio.ts");
+const { STUDIO_TILES, STUDIO_PANEL_TILES } = require("../lib/workspace/studio.ts");
 const { detectSubjectSkill, formatSkillBlock, SUBJECT_SKILLS } = require("../lib/skills/index.ts");
 
 test("a new notebook is untitled until its first question names it", () => {
@@ -59,6 +59,10 @@ test("every Studio tile maps to a tool the chat already accepts", () => {
     assert.ok(tools.has(tile.tool), `${tile.id} uses ${tile.tool}`);
     assert.ok(tile.prompt.length > 10);
   }
+});
+
+test("the Studio panel only offers Quiz and Study notes", () => {
+  assert.deepEqual(STUDIO_PANEL_TILES.map((tile) => tile.id), ["quiz", "notes"]);
 });
 
 test("the notebook shell replaces the chat sidebar", () => {

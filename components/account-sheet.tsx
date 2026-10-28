@@ -9,7 +9,6 @@ import { useAuth } from "@/components/auth-provider";
 import { useShell, type AccountSheetPage } from "@/components/workspace/shell-context";
 import { useTheme } from "@/components/workspace/theme-provider";
 import { ThemePicker } from "@/components/workspace/theme-picker";
-import { ParametersPanel } from "@/components/workspace/parameters-panel";
 import { PlanUsage } from "@/components/account/plan-usage";
 import { AccountDataControls } from "@/components/account/data-controls";
 import { MemoriesPanel } from "@/components/account/memories-panel";
@@ -91,12 +90,6 @@ export function AccountSheet() {
                 value={themeLabel}
                 onClick={() => setAccountSheetPage("appearance")}
               />
-              <SheetRow
-                icon={<UiIcon name="sliders" size={18} />}
-                label="Parameters"
-                onClick={() => setAccountSheetPage("parameters")}
-              />
-
               <p className="px-3 pb-1 pt-4 text-[12px] text-muted">Payments</p>
               <SheetRow
                 icon={<UiIcon name="usage" size={18} />}
@@ -135,11 +128,6 @@ export function AccountSheet() {
                   <ThemePicker />
                 </div>
               )}
-              {accountSheetPage === "parameters" && (
-                <div className="px-4 pb-8">
-                  <ParametersPanel />
-                </div>
-              )}
               {accountSheetPage === "planUsage" && (
                 <div className="px-4 pb-8">
                   <PlanUsage profile={profile} />
@@ -165,7 +153,6 @@ export function AccountSheet() {
 
 function pageTitle(page: AccountSheetPage): string {
   if (page === "appearance") return "Appearance";
-  if (page === "parameters") return "Parameters";
   if (page === "planUsage" || page === "billing" || page === "usage") return "Plan & usage";
   if (page === "memory") return "Memory";
   if (page === "data") return "Data";

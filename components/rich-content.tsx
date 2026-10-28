@@ -40,6 +40,12 @@ type Segment =
   | { kind: "toby"; block: ParsedChatBlock }
   | ImageGalleryPart;
 
+const LEADING_MARKDOWN_RULE = /^\s*(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})(?:\r?\n|$)/;
+
+function removeLeadingRuleAfterBlock(text: string): string {
+  return text.replace(LEADING_MARKDOWN_RULE, "");
+}
+
 function splitRichContent(parts: ReturnType<typeof layoutImageGalleries>["segments"]): Segment[] {
   return parts.flatMap((part): Segment[] => {
     if (part.kind === "gallery") return [part];
@@ -279,7 +285,10 @@ export const RichContent = memo(function RichContent({
         const wrap = appear ? "chat-stream-block" : undefined;
         const key = segmentKey(segment, index);
         if (segment.kind === "md") {
-          return <MarkdownBody key={key} text={segment.text} streaming={live && streaming} />;
+          const previous = segments[index - 1];
+          const followsRichBlock = previous !== undefined && previous.kind !== "md";
+          const markdown = followsRichBlock ? removeLeadingRuleAfterBlock(segment.text) : segment.text;
+          return <MarkdownBody key={key} text={markdown} streaming={live && streaming} />;
         }
         if (segment.kind === "gallery") {
           return (

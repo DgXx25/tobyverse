@@ -7,39 +7,33 @@ import type { EffectivePlanId } from "@/types/billing";
 import type { UserProfile } from "@/types/user";
 import { useAuth } from "@/components/auth-provider";
 import { useEffect, useState } from "react";
+import { PlanOptions } from "@/components/account/plan-options";
+import type { AiModelUsage } from "@/types/billing";
 
 const PLAN_FEATURES: Record<EffectivePlanId, string[]> = {
-  free_beta: ["Core TobyVerse workspace", "Material notes and practice", "Core AI model access"],
-  lite: ["Everyday work and study", "Chat, sources and Studio", "All released AI models"],
-  pro: ["Bigger projects and deeper work", "Chat, sources and Studio", "All released AI models"],
-  max: ["Your most demanding work", "Chat, sources and Studio", "All released AI models"],
+  free_beta: ["Gemini 3.5 Flash", "Gemini 3.1 Pro", "Auto model selection"],
+  lite: ["Gemini 3.5 Flash", "Gemini 3.1 Pro", "Auto model selection"],
+  pro: ["Everything in Tobyverse", "Gemini 4 Argon", "Higher weekly usage limits"],
+  max: ["Everything in Tobyverse", "Gemini 4 Argon", "Higher weekly usage limits"],
   team: ["Chat, sources and Studio", "All released AI models"],
   admin: ["Unlimited TobyVerse access", "Admin controls", "Actual storage tracking"],
 };
 
 function displayPlan(plan: EffectivePlanId): string {
-  if (plan === "free_beta") return "Beta";
+  if (plan === "free_beta") return "Tobyverse";
   return PLAN_CATALOG[plan].name;
 }
 
 function includedLabel(plan: EffectivePlanId): string {
-  if (plan === "free_beta") return "Included in Beta";
+  if (plan === "free_beta") return "Included in Tobyverse";
   return `Included in ${displayPlan(plan)}`;
-}
-
-function priceLabel(plan: EffectivePlanId): string {
-  const cents = PLAN_CATALOG[plan].monthlyPriceCents;
-  if (plan === "admin") return "Internal";
-  if (cents === 0) return "$0/mo";
-  if (cents == null) return "Custom";
-  return `$${cents / 100}/mo`;
 }
 
 export function PlanUsage({ profile }: { profile: UserProfile | null }) {
   const { user } = useAuth();
   const [portalLoading, setPortalLoading] = useState(false);
   const [portalError, setPortalError] = useState("");
-  const [aiUsage, setAiUsage] = useState<{ weekStart: string; resetsAt: string; costMicros: number; requestCount: number } | null>(null);
+  const [aiUsage, setAiUsage] = useState<{ weekStart: string; resetsAt: string; costMicros: number; requestCount: number; byModel?: Record<string, AiModelUsage> } | null>(null);
   const [aiUsageLoading, setAiUsageLoading] = useState(true);
   const [aiUsageError, setAiUsageError] = useState("");
   const plan = resolveEffectivePlan({ storedPlan: profile?.plan, admin: profile?.admin });
@@ -51,13 +45,14 @@ export function PlanUsage({ profile }: { profile: UserProfile | null }) {
   const accessReady = access !== undefined;
   const weeklyBudget = access?.weeklyBudgetMicros;
   const aiUsageRatio = aiUsage && weeklyBudget != null && weeklyBudget > 0 ? Math.min(1, aiUsage.costMicros / weeklyBudget) : 0;
+  const aiUsagePercent = Math.round(aiUsageRatio * 100);
   const aiUsageLabel = aiUsageLoading || !accessReady
     ? "Loading…"
     : !aiUsage
       ? "Usage unavailable"
       : weeklyBudget == null
-        ? `$${(aiUsage.costMicros / 1_000_000).toFixed(2)} used · Unlimited`
-        : `$${(aiUsage.costMicros / 1_000_000).toFixed(2)} / $${(weeklyBudget / 1_000_000).toFixed(2)}`;
+        ? "Unlimited"
+        : `${aiUsagePercent}% used`;
 
   useEffect(() => {
     if (!user || user.isAnonymous) {
@@ -114,12 +109,11 @@ export function PlanUsage({ profile }: { profile: UserProfile | null }) {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <section className="rounded-2xl border border-border bg-surface-2 p-5">
         <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted">Current plan</p>
         <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <h3 className="text-lg font-semibold text-foreground">{displayPlan(plan)}</h3>
-          <span className="text-[13px] text-muted">{priceLabel(plan)}</span>
         </div>
         <p className="mt-2 text-[13px] leading-5 text-muted">{plan === "admin" ? "Unlimited access with plan and storage visibility." : definition.description}</p>
       </section>
@@ -130,6 +124,8 @@ export function PlanUsage({ profile }: { profile: UserProfile | null }) {
         {access.subscriptions.length ? <button type="button" disabled={portalLoading} onClick={() => void manageSubscription()} className="mt-4 rounded-lg border border-border px-3 py-2 disabled:opacity-50">{portalLoading ? "Opening…" : "Manage subscription"}</button> : null}
         {portalError ? <p role="alert" className="mt-3 text-red-500">{portalError}</p> : null}
       </section> : null}
+
+      <PlanOptions currentPlan={plan} subscriptions={access?.subscriptions ?? []} onManageSubscription={() => void manageSubscription()} managingSubscription={portalLoading} usagePercent={aiUsage ? aiUsagePercent : undefined} />
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <section className="rounded-2xl border border-border bg-surface-2 p-5">
@@ -145,8 +141,7 @@ export function PlanUsage({ profile }: { profile: UserProfile | null }) {
               <div className="h-full rounded-full bg-foreground/80 transition-[width] duration-300" style={{ width: `${aiUsageRatio * 100}%` }} />
             </div>
           ) : null}
-          {aiUsage && accessReady && weeklyBudget != null ? <p className="mt-2 text-[12px] text-muted">${(Math.max(0, weeklyBudget - aiUsage.costMicros) / 1_000_000).toFixed(2)} remaining · {aiUsage.requestCount} AI requests</p> : null}
-          {aiUsage && accessReady && weeklyBudget == null ? <p className="mt-2 text-[12px] text-muted">{aiUsage.requestCount} AI requests tracked this week.</p> : null}
+          {aiUsage && accessReady && weeklyBudget != null ? <p className="mt-2 text-[12px] text-muted">{Math.max(0, 100 - aiUsagePercent)}% remaining this week</p> : null}
           {aiUsageError ? <p role="alert" className="mt-2 text-[12px] text-red-500">{aiUsageError}</p> : null}
         </section>
 
@@ -160,6 +155,33 @@ export function PlanUsage({ profile }: { profile: UserProfile | null }) {
           </div> : null}
         </section>
       </div>
+
+      <section className="mt-6 rounded-2xl border border-border bg-surface-2 p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div><p className="font-medium text-foreground">Usage by model</p><p className="mt-1 text-[12px] text-muted">This week · resets Monday UTC</p></div>
+          <p className="text-[12px] text-muted">{aiUsage ? aiUsageLabel : aiUsageLoading ? "Loading…" : "Usage unavailable"}</p>
+        </div>
+        {([
+          { label: "Gemini 3.5 Flash", color: "bg-sky-400", ids: ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"] },
+          { label: "Gemini 3.1 Pro", color: "bg-violet-400", ids: ["gemini-3.1-pro-preview"] },
+          { label: "Gemini 4 Argon", color: "bg-amber-400", ids: ["gemini-4-argon"] },
+        ]).map((row) => {
+          const usage = row.ids.reduce((sum, id) => {
+            const item = aiUsage?.byModel?.[id];
+            return { costMicros: sum.costMicros + (item?.costMicros ?? 0), requestCount: sum.requestCount + (item?.requestCount ?? 0) };
+          }, { costMicros: 0, requestCount: 0 });
+          const pct = aiUsage?.costMicros ? Math.min(100, usage.costMicros / aiUsage.costMicros * 100) : 0;
+          return <div key={row.label} className="mt-5">
+            <div className="flex items-center justify-between gap-3 text-[12px]"><span className="text-foreground">{row.label}</span><span className="text-muted">{Math.round(pct)}%</span></div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-border" role="progressbar" aria-label={`${row.label} usage share`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}><div className={`h-full rounded-full ${row.color}`} style={{ width: `${pct}%` }} /></div>
+          </div>;
+        })}
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-border bg-surface-2 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[13px] font-medium text-foreground">On-demand usage</p><p className="mt-1 text-[12px] text-muted">Additional usage settings will be available here.</p></div><span className="text-[12px] text-muted">Disabled</span></div>
+        <div className="mt-4 border-t border-border pt-4"><p className="text-[13px] font-medium text-foreground">Billing history</p><p className="mt-1 text-[12px] text-muted">Invoices and past transactions will appear here when billing is enabled.</p>{access?.subscriptions.length ? <button type="button" disabled={portalLoading} onClick={() => void manageSubscription()} className="mt-3 rounded-lg border border-border px-3 py-2 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{portalLoading ? "Opening…" : "Manage subscription"}</button> : null}{portalError ? <p role="alert" className="mt-2 text-[12px] text-red-500">{portalError}</p> : null}</div>
+      </section>
 
       <section className="mt-8">
         <p className="mb-3 px-1 text-[13px] font-medium text-foreground">{includedLabel(plan)}</p>

@@ -24,10 +24,11 @@ import {
   wouldExceedStorage,
   type UsageCounter,
 } from "@/lib/account/plan";
-import { isKnownAiModel, parsePreferredModel, type AiModelId } from "@/lib/ai/catalog";
+import { isKnownModelSelection, parsePreferredModel, type AiModelSelection } from "@/lib/ai/catalog";
 import { isAccentId, isThemeId, parseThemeAccents, readStoredTheme, readStoredThemeAccents, type ThemeAccents, type ThemeId } from "@/lib/workspace/theme";
 import type { UserProfile, UserUsage } from "@/types/user";
 import { CHAT_MODES, type ChatMode } from "@/types/chat";
+import { authHeaders } from "@/lib/api/client";
 
 function isChatMode(value: unknown): value is ChatMode {
   return typeof value === "string" && (CHAT_MODES as readonly string[]).includes(value);
@@ -157,15 +158,33 @@ async function writeUsage(userId: string, mutate: (usage: UserUsage) => UserUsag
   });
 }
 
-export async function updatePreferredModel(userId: string, model: AiModelId): Promise<void> {
-  if (!userId || !isKnownAiModel(model)) return;
+export async function updatePreferredModel(userId: string, model: AiModelSelection): Promise<boolean> {
+  if (!userId || !isKnownModelSelection(model)) return false;
   try {
-    await updateDoc(userRef(userId), {
-      preferredModel: model,
-      updatedAt: serverTimestamp(),
+    // Persist over the authenticated app API. Firestore's browser WebChannel can be blocked
+    // or dropped by extensions/proxies; model selection must not depend on that live channel.
+    const response = await fetch("/api/account/preferred-model", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ model }),
     });
+    return response.ok;
   } catch {
-    // Preference writes must never block the composer.
+    return false;
+  }
+}
+
+export async function readPreferredModel(): Promise<AiModelSelection | null> {
+  try {
+    const response = await fetch("/api/account/preferred-model", {
+      headers: await authHeaders(false),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { model?: unknown };
+    return typeof body.model === "string" && isKnownModelSelection(body.model) ? body.model : null;
+  } catch {
+    return null;
   }
 }
 

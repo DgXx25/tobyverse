@@ -1,5 +1,5 @@
 import { isAdminUid } from "../../../lib/admin/constants.js";
-import { isPaidOnlyAiModel } from "../../../lib/ai/catalog.js";
+import { isAllowedAiModel } from "../../../lib/ai/catalog.js";
 import { asBillingAccount, planPolicies, resolveAccountAccess } from "../../../lib/billing/access.js";
 import { FREE_BETA_WEEKLY_MICROS, utcWeekWindow } from "../../../lib/billing/plans.js";
 import { MODEL_PRICES } from "../../../lib/billing/pricing.js";
@@ -17,8 +17,8 @@ export function assertBudgetAvailable(input: BudgetCheck): void {
   if (!MODEL_PRICES[input.model] && input.plan !== "admin") {
     throw new JobExecutionError("model_not_available", "That AI model is not available.", false);
   }
-  if (input.plan !== "admin" && isPaidOnlyAiModel(input.model) && input.plan === "free_beta") {
-    throw new JobExecutionError("paid_model_required", "This model is available on a paid plan.", false);
+  if (input.plan !== "admin" && !isAllowedAiModel(input.model, input.plan as import("../../../types/billing.js").EffectivePlanId)) {
+    throw new JobExecutionError("premium_model_required", "Gemini 4 Argon is available on Premium plans.", false);
   }
   const allowance = input.weeklyBudgetMicros ?? FREE_BETA_WEEKLY_MICROS;
   if (input.plan !== "admin" && input.spentMicros >= allowance) {

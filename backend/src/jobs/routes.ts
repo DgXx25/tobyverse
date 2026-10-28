@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { DEFAULT_GEMINI_MODEL } from "../../../lib/ai/catalog.js";
+import { selectModel } from "../../../lib/ai/model-routing.js";
 import { ActiveJobLimitError, JobEventTooLargeError } from "./limits.js";
 import { JobNotFoundError } from "./firestore-store.js";
 import type { FirestoreJobStore } from "./firestore-store.js";
@@ -30,8 +31,11 @@ function userOf(request: Request): { uid: string; anonymous: boolean } {
 }
 
 function modelFor(payload: unknown): string {
-  if (payload && typeof payload === "object" && "model" in payload && typeof payload.model === "string") {
-    return payload.model;
+  if (payload && typeof payload === "object") {
+    const row = payload as Record<string, unknown>;
+    const selection = typeof row.model === "string" ? row.model : "auto";
+    if (selection === "auto") return selectModel(typeof row.prompt === "string" ? row.prompt : "", "auto").model;
+    if (["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-4-argon"].includes(selection)) return selection;
   }
   return DEFAULT_GEMINI_MODEL;
 }
@@ -77,7 +81,7 @@ function routeError(error: unknown, response: Response) {
     response.status(429).json({ error: "Your weekly AI allowance is used up.", code });
     return;
   }
-  if (code === "paid_model_required" || code === "model_not_available") {
+  if (code === "premium_model_required" || code === "paid_model_required" || code === "model_not_available") {
     response.status(403).json({ error: "That model is not available on your current plan.", code });
     return;
   }

@@ -32,15 +32,19 @@ function PackGlyph({ name, size, className, color }: { name: string; size: numbe
 
   useEffect(() => {
     let cancel = false;
-    void glyphLoader.load(name)
-      .then((next) => {
-        if (!cancel) setResult({ name, icon: next });
-      })
-      .catch(() => {
-        if (!cancel) setResult({ name, icon: null });
-      });
+    // App startup doesn't depend on decorative custom notebook symbols.
+    const timer = window.setTimeout(() => {
+      void glyphLoader.load(name)
+        .then((next) => {
+          if (!cancel) setResult({ name, icon: next });
+        })
+        .catch(() => {
+          if (!cancel) setResult({ name, icon: null });
+        });
+    }, 350);
     return () => {
       cancel = true;
+      window.clearTimeout(timer);
     };
   }, [name]);
 

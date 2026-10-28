@@ -1,3 +1,5 @@
+import { verifyAdminIdToken } from "@/lib/server/firestore-admin";
+
 export type AuthSession = {
   uid: string;
   email: string | null;
@@ -26,65 +28,27 @@ export async function readIdToken(request: Request): Promise<string> {
 
 export async function assertSignedInRequest(request: Request): Promise<AuthSession> {
   const token = await readIdToken(request);
-  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.trim();
-  if (!apiKey) {
-    throw new AuthError("Firebase API key is not configured.", 500);
-  }
-
-  let response: Response;
+  let decoded;
   try {
-    response = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken: token }),
-      },
-    );
-  } catch {
-    throw new AuthError("Could not verify session.");
+    // Firebase Admin validates the signature against Google's cached public certs.
+    // Identity Toolkit accounts:lookup did a network user lookup on every API call.
+    decoded = await verifyAdminIdToken(token);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    if (code.startsWith("auth/")) throw new AuthError("Invalid session.");
+    throw new AuthError("Could not verify session.", 503);
   }
-
-  if (!response.ok) {
-    throw new AuthError("Invalid session.");
-  }
-
-  const data = (await response.json()) as {
-    users?: {
-      email?: string;
-      localId?: string;
-      providerUserInfo?: { providerId?: string }[];
-    }[];
-  };
-  const row = data.users?.[0];
-  const uid = row?.localId;
+  const uid = decoded.uid;
   if (!uid) {
     throw new AuthError("Invalid session.");
   }
 
   return {
     uid,
-    email: row?.email ?? null,
-    anonymous: sessionIsAnonymous(token, row),
+    email: decoded.email ?? null,
+    emailVerified: decoded.email_verified === true,
+    anonymous: decoded.firebase?.sign_in_provider === "anonymous",
   };
-}
-
-function sessionIsAnonymous(
-  token: string,
-  row?: { email?: string; providerUserInfo?: { providerId?: string }[] },
-): boolean {
-  try {
-    const part = token.split(".")[1] ?? "";
-    const json = Buffer.from(part.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
-    const payload = JSON.parse(json) as { firebase?: { sign_in_provider?: string } };
-    if (payload.firebase?.sign_in_provider === "anonymous") return true;
-    if (payload.firebase?.sign_in_provider && payload.firebase.sign_in_provider !== "anonymous") return false;
-  } catch {
-    /* fall through to lookup fields */
-  }
-  const providers = row?.providerUserInfo ?? [];
-  if (providers.some((item) => item.providerId && item.providerId !== "anonymous")) return false;
-  return !row?.email;
 }
 
 export async function assertAccountRequest(request: Request): Promise<AuthSession> {

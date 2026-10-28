@@ -1,8 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { POST_LOGIN_PATH } from "@/lib/signed-in-cookie";
+import { POST_LOGIN_PATH, SIGNED_IN_COOKIE } from "@/lib/signed-in-cookie";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (pathname === "/" && request.cookies.get(SIGNED_IN_COOKIE)?.value === "1") {
+    const url = request.nextUrl.clone();
+    url.pathname = POST_LOGIN_PATH;
+    return NextResponse.redirect(url);
+  }
   if (pathname === "/dashboard") {
     const url = request.nextUrl.clone();
     url.pathname = POST_LOGIN_PATH;

@@ -1,4 +1,4 @@
-export type PlanLimitReason = "storage" | "ai";
+export type PlanLimitReason = "storage" | "ai" | "model";
 
 export const PLAN_LIMIT_EVENT = "tobyverse:plan-limit";
 

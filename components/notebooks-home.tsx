@@ -60,15 +60,19 @@ export function NotebooksHome() {
     const ids = shownKey ? shownKey.split(",") : [];
     if (!ready || !folderLoaded || ids.length === 0) return;
     let cancel = false;
-    void countMaterialsForProjects(ids)
-      .then((counts) => {
-        if (!cancel) setSourceCounts(counts);
-      })
-      .catch(() => {
-        if (!cancel) setSourceCounts(Object.fromEntries(ids.map((id) => [id, 0])));
-      });
+    // Source totals are supplementary card metadata; let the notebook list paint first.
+    const timer = window.setTimeout(() => {
+      void countMaterialsForProjects(ids)
+        .then((counts) => {
+          if (!cancel) setSourceCounts(counts);
+        })
+        .catch(() => {
+          if (!cancel) setSourceCounts(Object.fromEntries(ids.map((id) => [id, 0])));
+        });
+    }, 500);
     return () => {
       cancel = true;
+      window.clearTimeout(timer);
     };
   }, [shownKey, ready, folderLoaded]);
 

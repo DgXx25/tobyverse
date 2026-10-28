@@ -1,7 +1,7 @@
 import type { ChatMode } from "@/types/chat";
 import { asChatMode } from "@/lib/core/chat-modes";
 import type { ProjectTabId } from "@/lib/core/constants";
-import { DEFAULT_GEMINI_MODEL, isKnownAiModel, type AiModelId } from "@/lib/ai/catalog";
+import { DEFAULT_MODEL_SELECTION, isKnownModelSelection, type AiModelSelection } from "@/lib/ai/catalog";
 import {
   DEFAULT_COMPOSER_INTENT,
   isComposerIntent,
@@ -12,7 +12,7 @@ export type WorkspacePrefs = {
   tab: ProjectTabId;
   mode: ChatMode;
   intent: ComposerIntent;
-  model: AiModelId;
+  model: AiModelSelection;
   useMaterials: boolean;
   selectedMaterialIds: string[];
   contextOpen: boolean;
@@ -30,7 +30,7 @@ export function defaultWorkspacePrefs(mode: ChatMode = "auto"): WorkspacePrefs {
     tab: "chat",
     mode,
     intent: DEFAULT_COMPOSER_INTENT,
-    model: DEFAULT_GEMINI_MODEL,
+    model: DEFAULT_MODEL_SELECTION,
     useMaterials: true,
     selectedMaterialIds: [],
     contextOpen: false,
@@ -50,7 +50,7 @@ export function loadWorkspacePrefs(projectId: string, mode: ChatMode): Workspace
       tab: TABS.includes(parsed.tab as ProjectTabId) ? (parsed.tab as ProjectTabId) : "chat",
       mode: asChatMode(parsed.mode, mode),
       intent: isComposerIntent(parsed.intent) ? parsed.intent : DEFAULT_COMPOSER_INTENT,
-      model: isKnownAiModel(String(parsed.model)) ? (parsed.model as AiModelId) : DEFAULT_GEMINI_MODEL,
+      model: isKnownModelSelection(String(parsed.model)) ? (parsed.model as AiModelSelection) : DEFAULT_MODEL_SELECTION,
       useMaterials: parsed.useMaterials !== false,
       selectedMaterialIds: Array.isArray(parsed.selectedMaterialIds)
         ? parsed.selectedMaterialIds.filter((item): item is string => typeof item === "string")

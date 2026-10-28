@@ -115,3 +115,8 @@ export const STUDIO_TILES: StudioTile[] = [
     prompt: `Map a course path from my selected sources. ${LANGUAGE}`,
   },
 ];
+
+/** The Studio actions currently supported in the panel. */
+export const STUDIO_PANEL_TILES = STUDIO_TILES.filter(
+  (tile) => tile.id === "quiz" || tile.id === "notes",
+);

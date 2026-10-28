@@ -3,12 +3,50 @@ import "lenis/dist/lenis.css";
 import "./globals.css";
 import { LenisProvider } from "@/components/lenis-provider";
 
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://tobyverse.web.app/#organization",
+      name: "TobyVerse",
+      url: "https://tobyverse.web.app",
+    },
+    {
+      "@type": "SoftwareApplication",
+      name: "TobyVerse",
+      description:
+        "An AI-powered study tool for students, with file uploads, AI chat, study notes, flashcards, and quizzes.",
+      applicationCategory: "EducationApplication",
+      operatingSystem: "Web",
+      url: "https://tobyverse.web.app",
+      inLanguage: ["ka", "en"],
+      creator: { "@id": "https://tobyverse.web.app/#organization" },
+    },
+  ],
+};
+
   const THEME_BOOT =
   "(function(){try{var p=location.pathname.replace(/\\/+$/,'')||'/';var m=p==='/'||p==='/login'||p==='/privacy'||p==='/terms'||p==='/refunds'||p==='/pricing';var r=document.documentElement;if(/Mac|iPhone|iPad/.test(navigator.platform)||/Mac OS/.test(navigator.userAgent))r.classList.add('platform-mac');var old=['dark','light','coffee','razer','crimson','contrast','high-contrast','marketing'];r.classList.remove.apply(r.classList,old);var raw=localStorage.getItem('tv.theme');var t=raw==='light'||raw==='coffee'?'light':'dark';if(m)r.classList.add('dark','marketing');else r.classList.add(t);var palettes={default:{light:'#1d1d1f',dark:'#ffffff'},red:{light:'#FF383C',dark:'#FF4245'},orange:{light:'#FF8D28',dark:'#FF9230'},yellow:{light:'#FFCC00',dark:'#FFD600'},green:{light:'#34C759',dark:'#30D158'},mint:{light:'#00C8B3',dark:'#00DAC3'},teal:{light:'#00C3D0',dark:'#00D2E0'},cyan:{light:'#00C0E8',dark:'#3CD3FE'},blue:{light:'#0088FF',dark:'#0091FF'},indigo:{light:'#6155F5',dark:'#6D7CFF'},purple:{light:'#CB30E0',dark:'#DB34F2'},pink:{light:'#FF2D55',dark:'#FF375F'},brown:{light:'#AC7F5E',dark:'#B78A66'}};var a={};try{a=JSON.parse(localStorage.getItem('tv.theme.accents')||'{}')}catch(e){}var id=a[t];var accent=palettes[id]&&palettes[id][t]||palettes.default[t];r.style.setProperty('--accent',m?'#0091ff':accent);r.style.setProperty('--pick',m?'#0091ff':accent);var hc=!m&&t==='dark'&&localStorage.getItem('tv.highContrast')==='1';r.classList.toggle('high-contrast',hc);r.dataset.theme=m?'dark':t;var standalone=window.navigator.standalone===true||(window.matchMedia&&window.matchMedia(\"(display-mode: standalone)\").matches);if(standalone)r.classList.add('ios-standalone');var color=m?'#141414':hc?'#000000':t==='light'?'#f5f5f7':'#141414';var theme=document.querySelector('meta[name=\"theme-color\"]');if(theme)theme.setAttribute('content',color);var bar=document.querySelector('meta[name=\"apple-mobile-web-app-status-bar-style\"]');if(bar)bar.setAttribute('content',(!m&&t==='light')?'default':'black')}catch(e){document.documentElement.classList.add('dark')}})();";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://tobyverse.web.app"),
   title: "TobyVerse",
   description: "Build worlds with AI.",
+  robots: { index: true, follow: true },
+  openGraph: {
+    type: "website",
+    siteName: "TobyVerse",
+    title: "TobyVerse",
+    description: "Build worlds with AI.",
+    url: "https://tobyverse.web.app",
+    locale: "ka_GE",
+  },
+  twitter: {
+    card: "summary",
+    title: "TobyVerse",
+    description: "Build worlds with AI.",
+  },
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
@@ -48,8 +86,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark font-sans" suppressHydrationWarning>
+    <html lang="ka" className="dark font-sans" suppressHydrationWarning>
       <body className="bg-background font-sans text-foreground antialiased">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(structuredData).replace(/</g, "\\u003c"),
+          }}
+        />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
         <LenisProvider>{children}</LenisProvider>
       </body>

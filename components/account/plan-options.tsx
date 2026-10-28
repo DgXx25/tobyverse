@@ -4,17 +4,15 @@ import { useEffect, useState } from "react";
 import { ArrowRight, Check, LockKeyhole } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { openPaddleCheckout } from "@/lib/billing/paddle-client";
-import { PLAN_CATALOG } from "@/lib/billing/plans";
 import { formatBytes } from "@/lib/format";
 import { storageLimitForPlan } from "@/lib/account/plan";
 import type { EffectivePlanId } from "@/types/billing";
 import type { BillingSubscription, GrantPlanId } from "@/types/billing-admin";
 
 const PLAN_OPTIONS = [
-  { id: "lite", description: "For everyday work and study." },
-  { id: "pro", description: "For bigger projects and deeper work." },
-  { id: "max", description: "For your most demanding work." },
-] as const satisfies ReadonlyArray<{ id: GrantPlanId; description: string }>;
+  { id: "lite", publicName: "Tobyverse", description: "Gemini 3.5 Flash, Gemini 3.1 Pro, and Auto mode.", current: (plan: EffectivePlanId) => plan === "free_beta" || plan === "lite", tint: false },
+  { id: "pro", publicName: "Premium", description: "Everything in Tobyverse plus Gemini 4 Argon and higher weekly limits.", current: (plan: EffectivePlanId) => plan === "pro" || plan === "max" || plan === "team" || plan === "admin", tint: true },
+] as const satisfies ReadonlyArray<{ id: GrantPlanId; publicName: string; description: string; current: (plan: EffectivePlanId) => boolean; tint: boolean }>;
 
 type Availability = {
   ready: boolean;
@@ -29,11 +27,13 @@ export function PlanOptions({
   subscriptions,
   onManageSubscription,
   managingSubscription,
+  usagePercent,
 }: {
   currentPlan: EffectivePlanId;
   subscriptions: BillingSubscription[];
   onManageSubscription: () => void;
   managingSubscription: boolean;
+  usagePercent?: number;
 }) {
   const { user } = useAuth();
   const signedIn = !!user && !user.isAnonymous;
@@ -118,18 +118,15 @@ export function PlanOptions({
     <section className="mt-8">
       <div className="flex flex-wrap items-end justify-between gap-2 px-1">
         <div>
-          <h3 className="text-[15px] font-medium text-foreground">Available plans</h3>
-          <p className="mt-1 text-[12px] text-muted">Change or manage your plan here.</p>
+          <h3 className="text-[15px] font-medium text-foreground">Plans</h3>
+          <p className="mt-1 text-[12px] text-muted">Choose the model access and usage limit that fit your work.</p>
         </div>
       </div>
-      <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-surface-2">
-        {PLAN_OPTIONS.map((option, index) => {
-          const plan = PLAN_CATALOG[option.id];
-          const isCurrent = currentPlan === option.id;
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {PLAN_OPTIONS.map((option) => {
+          const isCurrent = option.current(currentPlan);
           const available = availability?.plans[option.id] === true;
-          const allowance = availability?.allowances[option.id] ?? plan.weeklyBudgetMicros;
           const storage = availability?.storageLimits?.[option.id] ?? storageLimitForPlan(option.id);
-          const price = plan.monthlyPriceCents;
           let action: React.ReactNode;
           if (isCurrent) {
             action = <span className="inline-flex items-center gap-1.5 text-[12px] text-muted"><Check size={14} aria-hidden="true" />Current plan</span>;
@@ -142,20 +139,21 @@ export function PlanOptions({
           } else if (availabilityState === "error") {
             action = <button type="button" onClick={() => void loadAvailability()} className="text-[12px] text-muted underline underline-offset-4 hover:text-foreground">Retry</button>;
           } else {
-            action = <span className="inline-flex items-center gap-1.5 text-[12px] text-muted"><LockKeyhole size={13} aria-hidden="true" />Not available yet</span>;
+            action = <button type="button" disabled className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-foreground/10 px-3 text-[12px] font-medium text-muted" title="Premium checkout is not enabled yet"><LockKeyhole size={13} aria-hidden="true" />Upgrade · coming soon</button>;
           }
 
           return (
-            <article key={option.id} className={`flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5 ${index > 0 ? "border-t border-border" : ""}`}>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <h4 className="text-[14px] font-medium text-foreground">{plan.name}</h4>
-                  <span className="text-[13px] text-muted">{price === null ? "Coming soon" : `$${(price / 100).toFixed(2)} / month`}</span>
+            <article key={option.id} className={`flex min-h-48 flex-col justify-between rounded-2xl border p-5 ${option.tint ? "border-sky-400/40 bg-sky-400/[0.06]" : "border-border bg-surface-2"}`}>
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted">{isCurrent ? "Current plan" : "Upgrade available"}</p>
+                <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <h4 className="text-[17px] font-semibold text-foreground">{option.publicName}</h4>
                 </div>
-                <p className="mt-1 text-[12px] text-muted">{option.description}</p>
-                <p className="mt-1 text-[11px] text-muted">{storage == null ? "Unlimited" : formatBytes(storage)} storage{allowance == null ? "" : ` · $${(allowance / 1_000_000).toFixed(2)} AI usage / week`}</p>
+                <p className="mt-2 text-[12px] leading-5 text-muted">{option.description}</p>
+                <p className="mt-2 text-[11px] text-muted">{isCurrent && currentPlan === "free_beta" ? "Beta access" : "Weekly AI usage included"} · {storage == null ? "Unlimited" : formatBytes(storage)} storage</p>
+                {option.id === "lite" ? <p className="mt-1 text-[11px] text-muted">Current usage: {usagePercent == null ? "Loading…" : `${usagePercent}% this week`}</p> : null}
               </div>
-              <div className="flex shrink-0 items-center sm:justify-end">{action}</div>
+              <div className="mt-4 flex items-center">{action}</div>
             </article>
           );
         })}

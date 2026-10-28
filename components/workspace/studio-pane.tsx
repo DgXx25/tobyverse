@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
 import { shortDate } from "@/lib/format";
 import { positionContextMenu } from "@/lib/workspace/context-menu-position";
-import { STUDIO_TILES, type StudioJob, type StudioSavedArtifact, type StudioTile } from "@/lib/workspace/studio";
+import { STUDIO_PANEL_TILES, STUDIO_TILES, type StudioJob, type StudioSavedArtifact, type StudioTile } from "@/lib/workspace/studio";
 import { renameStudioArtifact, removeStudioArtifact } from "@/lib/workspace/studio-store";
 import { deleteStudySheet, getStudySheet, updateStudySheet } from "@/lib/study-sheets/store";
 import { deleteExercise, listExercises } from "@/lib/exercises/store";
@@ -242,7 +242,7 @@ export function StudioPane({
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
       <div className="grid grid-cols-2 gap-2">
-        {STUDIO_TILES.map((tile) => (
+        {STUDIO_PANEL_TILES.map((tile) => (
           <button
             key={tile.id}
             type="button"

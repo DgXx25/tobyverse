@@ -1,7 +1,8 @@
 import { generateTextStream, generateToolStream, getAIProvider } from "@/lib/ai/gemini";
 import { eligibleChatToolNames, isInternalTool, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { toolStatusText, withToolTimeout, type ToolExecutionStatus } from "@/lib/ai/tool-execution";
-import { DEFAULT_AI_PROVIDER, DEFAULT_GEMINI_MODEL, isPaidOnlyAiModel, isKnownAiModel, isEnabledProvider } from "@/lib/ai/catalog";
+import { DEFAULT_AI_PROVIDER, DEFAULT_MODEL_SELECTION, isAllowedAiModel, isKnownModelSelection, isEnabledProvider } from "@/lib/ai/catalog";
+import { selectModel } from "@/lib/ai/model-routing";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
@@ -268,22 +269,30 @@ export async function POST(request: Request) {
     });
   }
 
-  const requestedModel = typeof body.model === "string" ? body.model : DEFAULT_GEMINI_MODEL;
-  if (!isKnownAiModel(requestedModel)) {
+  const requestedSelection = typeof body.model === "string" ? body.model : DEFAULT_MODEL_SELECTION;
+  if (!isKnownModelSelection(requestedSelection)) {
     return Response.json({ error: "That model is not available." }, { status: 400 });
   }
-  if (isPaidOnlyAiModel(requestedModel)) {
-    if (session.anonymous) return Response.json({ error: "This model is available on Lite and higher plans.", code: "paid_model_required" }, { status: 403 });
-    let access;
+  // Resolve account access before model selection so disallowed manual choices cannot reach Gemini.
+  let access = null;
+  if (!session.anonymous) {
     try { access = await readAccountAccess(session.uid); }
     catch (error) { return aiUsageErrorResponse(error); }
-    if (access.plan === "free_beta") return Response.json({ error: "This model is available on Lite and higher plans.", code: "paid_model_required" }, { status: 403 });
-    if (access.plan === "admin") {
-      try { await assertAdminRequest(request); }
-      catch (error) { return adminErrorResponse(error); }
-    }
   }
-  const modelId = requestedModel;
+  const plan = session.anonymous ? "free_beta" : access!.plan;
+  if (requestedSelection !== "auto" && !isAllowedAiModel(requestedSelection, plan)) {
+    return Response.json({ error: "Gemini 4 Argon is available on Premium plans.", code: "premium_model_required" }, { status: 403 });
+  }
+  if (plan === "admin") {
+    try { await assertAdminRequest(request); }
+    catch (error) { return adminErrorResponse(error); }
+  }
+  const routing = selectModel(prompt, requestedSelection);
+  const modelId = routing.model;
+  if (!isAllowedAiModel(modelId, plan)) {
+    return Response.json({ error: "This model is not included in your plan.", code: "premium_model_required" }, { status: 403 });
+  }
+  console.info("[model-routing]", JSON.stringify({ model: modelId, tier: routing.tier, score: routing.score, method: routing.method, signals: routing.signals }));
 
   let usage: Awaited<ReturnType<typeof startAiUsageSession>> | null = null;
   if (!session.anonymous) {

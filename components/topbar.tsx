@@ -284,7 +284,7 @@ export function Topbar() {
 
   return (
     <>
-    <header className={`mobile-topbar ${pathname.startsWith("/p/") ? "absolute inset-x-0 top-0" : "relative"} z-20 flex h-12 shrink-0 items-center gap-1 bg-background pl-2 pr-2 max-md:h-auto max-md:min-h-[46px]`}>
+    <header className="mobile-topbar relative z-20 flex h-12 shrink-0 items-center gap-1 bg-background pl-2 pr-2 max-md:h-auto max-md:min-h-[46px]">
       {pathname === "/new" ? null : <button type="button" className="mobile-drawer-trigger flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground md:hidden" aria-label="Open navigation" aria-expanded={mobileNavOpen} onPointerDown={() => setMobileNavOpen(true)} onClick={() => setMobileNavOpen(true)}><UiIcon name="menu01" size={21} /></button>}
       <div className={`topbar-brand-desktop flex shrink-0 items-center ${pathname === "/new" ? "topbar-brand-new-mobile" : ""}`}><span className="flex h-9 items-center"><BrandMark href="/new" /></span></div>
 
@@ -490,7 +490,6 @@ export function Topbar() {
               <p className="truncate px-2.5 py-2 text-[11px] text-muted">{user?.email}</p>
               <MenuRow icon={<UiIcon name="user" size={16} />} label="Account" onClick={() => pick("account")} />
               <MenuRow icon={<UiIcon name="settings" size={16} />} label="Settings" onClick={() => pick("appearance")} />
-              <MenuRow icon={<UiIcon name="help" size={16} />} label="Help" onClick={() => pick("help")} />
               <MenuRow icon={<UiIcon name="billing" size={16} />} label="Billing" onClick={() => pick("billing")} />
               <MenuRow icon={<UiIcon name="logout" size={16} />} label="Sign out" onClick={() => void handleSignOut()} />
             </div>

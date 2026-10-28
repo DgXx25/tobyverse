@@ -9,6 +9,25 @@ import type { AccountAccess } from "@/types/billing-admin";
 import type { User } from "firebase/auth";
 
 const accessCache = new Map<string, { value?: AccountAccess; at: number; pending?: Promise<AccountAccess> }>();
+function fallbackProfile(user: User): UserProfile {
+  return {
+    id: user.uid,
+    displayName: user.displayName,
+    email: user.email,
+    photoURL: user.photoURL,
+    plan: asUserPlan(undefined),
+    admin: false,
+    usage: emptyUsage(),
+    preferredModel: null,
+    chatMode: null,
+    theme: null,
+    themeAccents: { light: "default", dark: "default" },
+    highContrast: false,
+    createdAt: user.metadata.creationTime ?? null,
+    updatedAt: null,
+  };
+}
+
 async function loadAccess(user: User): Promise<AccountAccess> {
   const previous = accessCache.get(user.uid);
   if (previous?.pending) return previous.pending;
@@ -37,7 +56,7 @@ export function useUserProfile(): { profile: UserProfile | null; loading: boolea
     const refresh = () => {
       if (document.visibilityState === "hidden") return;
       void loadAccess(user).then((value) => { if (alive) setAccess({ uid: user.uid, value }); }).catch(() => {
-        if (alive) setAccess(null);
+        // Keep the last verified plan on transient network failures; dropping it would reset a Premium model to Auto.
       });
     };
     refresh();
@@ -70,32 +89,29 @@ export function useUserProfile(): { profile: UserProfile | null; loading: boolea
     return subscribeUserProfile(
       user.uid,
       (next) => {
-        setProfile(
-          next ?? {
-            id: user.uid,
-            displayName: user.displayName,
-            email: user.email,
-            photoURL: user.photoURL,
-            plan: asUserPlan(undefined),
-            admin: false,
-            usage: emptyUsage(),
-            preferredModel: null,
-            chatMode: null,
-            theme: null,
-            themeAccents: { light: "default", dark: "default" },
-            highContrast: false,
-            createdAt: user.metadata.creationTime ?? null,
-            updatedAt: null,
-          },
-        );
+        setProfile(next ?? fallbackProfile(user));
         setLoading(false);
       },
-      () => setLoading(false),
+      () => {
+        // Keep plan-aware UI usable if the Firestore browser WebChannel is blocked. Server
+        // account access is fetched over HTTP independently and still supplies verified rights.
+        setProfile((current) => current?.id === user.uid ? current : fallbackProfile(user));
+        setLoading(false);
+      },
     );
   }, [user]);
 
   const usage = asUserUsage(profile?.usage);
   const effective = access?.uid === user?.uid ? access?.value : undefined;
-  const resolved = profile && profile.id === user?.uid ? { ...profile, access: effective, plan: asUserPlan(effective?.plan ?? "free_beta"), admin: effective?.source === "admin", usage } : null;
+  // Server access is sufficient to surface allowed models even if the Firestore realtime
+  // profile listener has not delivered its first snapshot yet.
+  const currentProfile = profile?.id === user?.uid ? profile : user && effective ? fallbackProfile(user) : null;
+  const resolved = currentProfile ? {
+    ...currentProfile,
+    access: effective,
+    plan: asUserPlan(effective?.plan ?? "free_beta"),
+    admin: effective ? effective.source === "admin" : currentProfile.admin,
+    usage: currentProfile === profile ? usage : emptyUsage(),
+  } : null;
   return { profile: resolved, loading };
 }

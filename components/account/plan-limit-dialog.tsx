@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { PLAN_LIMIT_EVENT, requestPlanUpgrade, type PlanLimitReason } from "@/lib/billing/limit-prompt";
+import { PLAN_LIMIT_EVENT, type PlanLimitReason } from "@/lib/billing/limit-prompt";
 
 export function PlanLimitDialog() {
   const [reason, setReason] = useState<PlanLimitReason | null>(null);
@@ -10,25 +10,14 @@ export function PlanLimitDialog() {
   useEffect(() => {
     const onLimit = (event: Event) => {
       const detail = (event as CustomEvent<PlanLimitReason>).detail;
-      if (detail === "storage" || detail === "ai") setReason(detail);
+      if (detail === "storage" || detail === "ai" || detail === "model") setReason(detail);
     };
     window.addEventListener(PLAN_LIMIT_EVENT, onLimit);
-    const nativeFetch = window.fetch;
-    const observedFetch: typeof window.fetch = async (...args) => {
-      const response = await nativeFetch(...args);
-      if (response.status === 429 || response.status === 413) {
-        void response.clone().json().then((body: { code?: unknown; remainingBytes?: unknown }) => {
-          if (body.code === "weekly_ai_budget_exhausted") requestPlanUpgrade("ai");
-          else if (response.status === 413 && typeof body.remainingBytes === "number") requestPlanUpgrade("storage");
-        }).catch(() => undefined);
-      }
-      return response;
-    };
-    window.fetch = observedFetch;
-    return () => {
-      window.removeEventListener(PLAN_LIMIT_EVENT, onLimit);
-      if (window.fetch === observedFetch) window.fetch = nativeFetch;
-    };
+    // Each API client raises PLAN_LIMIT_EVENT when it sees an app-level limit response.
+    // Wrapping global fetch also intercepts Firebase's Firestore WebChannel traffic and can
+    // leave stacked wrappers during Fast Refresh, making unrelated listener retries look like
+    // plan-limit failures in the console.
+    return () => window.removeEventListener(PLAN_LIMIT_EVENT, onLimit);
   }, []);
 
   useEffect(() => {
@@ -42,7 +31,9 @@ export function PlanLimitDialog() {
 
   const copy = reason === "storage"
     ? { title: "Storage is full", body: "Upgrade your plan for more room to add materials." }
-    : { title: "AI usage is used up", body: "Your weekly AI allowance renews on Monday. Upgrade for a larger allowance." };
+    : reason === "model"
+      ? { title: "Gemini 4 Argon is a Premium model", body: "Upgrade to Premium to use Gemini 4 Argon. Auto mode stays within your current plan." }
+      : { title: "AI usage is used up", body: "Your weekly AI allowance renews on Monday. Upgrade for a larger allowance." };
 
   return (
     <div className="popup-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setReason(null)}>

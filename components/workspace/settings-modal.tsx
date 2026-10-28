@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { useShell, type SettingsSection } from "@/components/workspace/shell-context";
 import { ThemePicker } from "@/components/workspace/theme-picker";
-import { ParametersPanel } from "@/components/workspace/parameters-panel";
 import { PlanUsage } from "@/components/account/plan-usage";
 import { AccountDataControls } from "@/components/account/data-controls";
 import { MemoriesPanel } from "@/components/account/memories-panel";
@@ -13,14 +12,12 @@ import { UiIcon, type UiIconName } from "@/components/workspace/ui-icon";
 const NAV: { id: SettingsSection; label: string; group: string; icon: UiIconName }[] = [
   { id: "account", label: "Account", group: "General", icon: "user" },
   { id: "appearance", label: "Appearance", group: "General", icon: "appearance" },
-  { id: "parameters", label: "Parameters", group: "General", icon: "sliders" },
-  { id: "help", label: "Help", group: "TobyVerse", icon: "help" },
   { id: "planUsage", label: "Plan & usage", group: "Payments", icon: "usage" },
   { id: "memory", label: "Memory", group: "Data & Information", icon: "brain" },
   { id: "data", label: "Data", group: "Data & Information", icon: "data" },
 ];
 
-const GROUPS = ["General", "TobyVerse", "Payments", "Data & Information"];
+const GROUPS = ["General", "Payments", "Data & Information"];
 
 export function SettingsModal() {
   const { settingsOpen, settingsSection, openSettings, closeSettings } = useShell();
@@ -113,22 +110,6 @@ export function SettingsModal() {
               <div className="mt-4">
                 <ThemePicker />
               </div>
-            </div>
-          )}
-
-          {settingsSection === "parameters" && (
-            <div>
-              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Parameters</h2>
-              <div className="mt-8 max-w-sm">
-                <ParametersPanel />
-              </div>
-            </div>
-          )}
-
-          {settingsSection === "help" && (
-            <div>
-              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">Help</h2>
-              <p className="mt-6 text-[15px] leading-7 text-muted">Help is not written yet.</p>
             </div>
           )}
 

@@ -3,8 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { isMobileWidth, MOBILE_MQ } from "@/lib/workspace/media";
 
-export type SettingsSection = "account" | "appearance" | "parameters" | "help" | "planUsage" | "billing" | "usage" | "data" | "memory";
-export type AccountSheetPage = "root" | "appearance" | "parameters" | "planUsage" | "billing" | "usage" | "data" | "memory";
+export type SettingsSection = "account" | "appearance" | "planUsage" | "billing" | "usage" | "data" | "memory";
+export type AccountSheetPage = "root" | "appearance" | "planUsage" | "billing" | "usage" | "data" | "memory";
 
 export type PendingPanel = {
   projectId: string;
@@ -70,7 +70,6 @@ function blurActive() {
 function sectionToSheetPage(section?: SettingsSection): AccountSheetPage {
   if (
     section === "appearance" ||
-    section === "parameters" ||
     section === "planUsage" ||
     section === "billing" ||
     section === "usage" ||

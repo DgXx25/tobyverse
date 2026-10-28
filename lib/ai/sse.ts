@@ -37,6 +37,7 @@ export async function readChatSse(
     })) as { error?: string; code?: string } | null;
     if (data?.code === GUEST_CAP_CODE) throw new GuestCapError();
     if (data?.code === "weekly_ai_budget_exhausted") requestPlanUpgrade("ai");
+    if (data?.code === "premium_model_required") requestPlanUpgrade("model");
     throw new Error(data?.error ?? "Request failed.");
   }
 

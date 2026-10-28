@@ -1,7 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminFirestore } from "@/lib/server/firestore-admin";
 import { readAccountAccess } from "@/lib/billing/account-server";
-import { DEFAULT_GEMINI_MODEL } from "@/lib/ai/catalog";
+import { DEFAULT_GEMINI_MODEL, isAllowedAiModel } from "@/lib/ai/catalog";
 import { createAiUsageCollector } from "@/lib/billing/collector";
 import { FREE_BETA_WEEKLY_MICROS, utcWeekWindow } from "@/lib/billing/plans";
 import { emptyAiUsageWeek, mergeAiUsage, MODEL_PRICES } from "@/lib/billing/pricing";
@@ -17,6 +17,14 @@ export class AiUsageLimitError extends Error {
     super(`Your weekly AI allowance is used up. It resets at ${resetsAt}.`);
     this.name = "AiUsageLimitError";
     this.resetsAt = resetsAt;
+  }
+}
+
+export class PremiumModelRequiredError extends Error {
+  readonly code = "premium_model_required";
+  constructor() {
+    super("Gemini 4 Argon is available on Premium plans.");
+    this.name = "PremiumModelRequiredError";
   }
 }
 
@@ -64,7 +72,7 @@ export async function readAiUsageSummary(uid: string) {
   const { weekStart, resetsAt } = utcWeekWindow();
   const snapshot = await weekRef(getAdminFirestore(), uid, weekStart).get();
   const week = asWeek(weekStart, snapshot.data());
-  return { weekStart, resetsAt, costMicros: week.costMicros, requestCount: week.requestCount };
+  return { weekStart, resetsAt, costMicros: week.costMicros, requestCount: week.requestCount, byModel: week.byModel };
 }
 
 export type AiUsageSession = {
@@ -81,6 +89,7 @@ export async function startAiUsageSession(uid: string, options: { models?: strin
   const { weekStart, resetsAt } = utcWeekWindow();
   const [access, usageSnapshot] = await Promise.all([readAccountAccess(uid), weekRef(db, uid, weekStart).get()]);
   const plan = access.plan;
+  if (models.some((model) => !isAllowedAiModel(model, plan))) throw new PremiumModelRequiredError();
   const unknown = models.find((model) => !MODEL_PRICES[model]);
   if (unknown && plan !== "admin") throw new Error(`No AI price configured for model ${unknown}`);
   const current = asWeek(weekStart, usageSnapshot.data());
@@ -117,6 +126,9 @@ export async function startAiUsageSession(uid: string, options: { models?: strin
 }
 
 export function aiUsageErrorResponse(error: unknown): Response {
+  if (error instanceof PremiumModelRequiredError) {
+    return Response.json({ error: error.message, code: error.code }, { status: 403 });
+  }
   if (error instanceof AiUsageLimitError) {
     return Response.json({ error: error.message, code: error.code, resetsAt: error.resetsAt }, { status: 429 });
   }

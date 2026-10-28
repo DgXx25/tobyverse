@@ -27,6 +27,7 @@ export {
 } from "@/lib/ai/tools";
 export {
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_MODEL_SELECTION,
   GEMINI_MODEL_OPTIONS,
   availableAiModels,
   isKnownAiModel,
@@ -36,6 +37,8 @@ export {
   aiModelDisplayName,
   type AiModelId,
   type AiModelOption,
+  type AiModelSelection,
+  type AiModelSelectionOption,
   AI_PROVIDER_OPTIONS,
   DEFAULT_AI_PROVIDER,
   availableAiProviders,
@@ -47,3 +50,4 @@ export {
   type AiProviderId,
   type AiProviderOption,
 } from "@/lib/ai/catalog";
+export { createComplexityScorer, scorePrompt, selectModel, DEFAULT_COMPLEXITY_CONFIG } from "@/lib/ai/model-routing";

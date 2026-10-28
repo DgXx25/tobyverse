@@ -7,6 +7,7 @@ type ModelPrice = {
   largePromptThreshold?: number;
   inputMicrosPerMillionAboveThreshold?: number;
   outputMicrosPerMillionAboveThreshold?: number;
+  nextRate?: { startsAt: string; inputMicrosPerMillion: number; outputMicrosPerMillion: number; version: string };
 };
 
 export const MODEL_PRICES: Record<string, ModelPrice> = {
@@ -33,6 +34,22 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
     inputMicrosPerMillionAboveThreshold: 4_000_000,
     outputMicrosPerMillionAboveThreshold: 18_000_000,
     version: "gemini-2026-09-26",
+  },
+  "gemini-3.5-flash": {
+    inputMicrosPerMillion: 1_500_000,
+    outputMicrosPerMillion: 9_000_000,
+    version: "gemini-2026-10-28",
+  },
+  "gemini-4-argon": {
+    inputMicrosPerMillion: 2_000_000,
+    outputMicrosPerMillion: 10_000_000,
+    version: "gemini-argon-intro-2026-10-28",
+    nextRate: {
+      startsAt: "2026-12-01T00:00:00.000Z",
+      inputMicrosPerMillion: 4_000_000,
+      outputMicrosPerMillion: 20_000_000,
+      version: "gemini-argon-2026-12-01",
+    },
   },
 };
 
@@ -63,9 +80,13 @@ export function emptyAiUsageWeek(weekStart: string): AiUsageWeek {
   return { ...emptyAiUsageDelta(), weekStart, updatedAt: null };
 }
 
-export function priceAiCall(call: AiCallUsage): AiUsageDelta {
-  const rate = MODEL_PRICES[call.model];
-  if (!rate) throw new UnknownModelPriceError(call.model);
+export function priceAiCall(call: AiCallUsage, now = new Date()): AiUsageDelta {
+  const configuredRate = MODEL_PRICES[call.model];
+  if (!configuredRate) throw new UnknownModelPriceError(call.model);
+  const nextRate = configuredRate.nextRate;
+  const rate: ModelPrice = nextRate && now >= new Date(nextRate.startsAt)
+    ? { ...configuredRate, ...nextRate }
+    : configuredRate;
   const largePrompt = rate.largePromptThreshold !== undefined && call.inputTokens > rate.largePromptThreshold;
   const inputRate = largePrompt ? rate.inputMicrosPerMillionAboveThreshold ?? rate.inputMicrosPerMillion : rate.inputMicrosPerMillion;
   const outputRate = largePrompt ? rate.outputMicrosPerMillionAboveThreshold ?? rate.outputMicrosPerMillion : rate.outputMicrosPerMillion;

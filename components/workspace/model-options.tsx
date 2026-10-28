@@ -35,7 +35,7 @@ export function ModelOptions({
             }`}
           >
             <span>{option.name}</span>
-            {selected ? <UiIcon name="check" size={14} className="text-foreground" /> : null}
+            {selected ? <UiIcon name="check" size={14} className="text-foreground" /> : option.paidOnly ? <span className="text-[11px] text-muted">Premium</span> : null}
           </button>
         );
       })}
