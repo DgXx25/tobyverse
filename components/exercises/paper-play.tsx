@@ -115,10 +115,6 @@ export function PaperPlay({
     onSelect(answer);
   }
 
-  if (data.form !== "ganckhadeba") {
-    return <p className="text-sm text-muted">This paper layout is not in this version.</p>;
-  }
-
   return (
     <div className="ex-paper-wrap">
       {example ? <p className="ex-paper-kicker">მაგალითი</p> : null}

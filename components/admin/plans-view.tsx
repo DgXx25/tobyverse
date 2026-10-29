@@ -53,7 +53,6 @@ export function PlansView() {
   const [grantPlan, setGrantPlan] = useState<GrantPlanId>("pro");
   const [duration, setDuration] = useState("30");
   const [customDate, setCustomDate] = useState("");
-  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const listRequest = useRef<AbortController | null>(null);
@@ -98,7 +97,7 @@ export function PlansView() {
       const result = await request<AdminPlanDetail>(`/api/admin/plans/${encodeURIComponent(uid)}`, controller.signal);
       if (!controller.signal.aborted) {
         setDetail(result);
-        if (resetForm) { setGrantPlan(result.user.access.grant?.planId || "pro"); setDuration("30"); setCustomDate(""); setReason(""); }
+        if (resetForm) { setGrantPlan(result.user.access.grant?.planId || "pro"); setDuration("30"); setCustomDate(""); }
       }
       return !controller.signal.aborted;
     } catch (cause) { if (!controller.signal.aborted) setDetailError(errorText(cause)); }
@@ -131,7 +130,6 @@ export function PlansView() {
     if (!detail || saving) return;
     setDetailError("");
     setNotice("");
-    if (!reason.trim()) { setDetailError("Add a reason for this change."); return; }
     let expiresAt: string | null = null;
     if (action === "grant") {
       if (!grantConfigured) { setDetailError("Configure this plan’s weekly AI allowance before granting access."); return; }
@@ -145,10 +143,9 @@ export function PlansView() {
     mutationRequest.current = controller;
     setSaving(true);
     try {
-      const result = await request<AdminPlanDetail>(`/api/admin/plans/${encodeURIComponent(detail.user.uid)}`, controller.signal, { action, ...(action === "grant" ? { planId: grantPlan, expiresAt } : {}), reason: reason.trim(), expectedRevision: detail.user.access.revision, requestId: crypto.randomUUID() });
+      const result = await request<AdminPlanDetail>(`/api/admin/plans/${encodeURIComponent(detail.user.uid)}`, controller.signal, { action, ...(action === "grant" ? { planId: grantPlan, expiresAt } : {}), expectedRevision: detail.user.access.revision, requestId: crypto.randomUUID() });
       if (controller.signal.aborted) return;
       setDetail(result);
-      setReason("");
       setNotice(action === "grant" ? `${PLAN_NAMES[grantPlan]} grant saved.` : "Manual grant revoked. Purchased subscriptions are unchanged.");
       void loadList(search);
     } catch (cause) {
@@ -202,7 +199,6 @@ export function PlansView() {
               <fieldset className="plans-fieldset" disabled={saving || detailLoading}><div className="plans-form-grid"><label className="plans-field">Plan<select value={grantPlan} onChange={(event) => setGrantPlan(event.target.value as GrantPlanId)}>{PLANS.map((plan) => <option key={plan} value={plan}>{PLAN_NAMES[plan]}</option>)}</select></label><label className="plans-field">Duration<select value={duration} onChange={(event) => setDuration(event.target.value)}><option value="permanent">Permanent</option><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option><option value="custom">Custom date</option></select></label></div>
                 {duration === "custom" ? <label className="plans-field">Expires at (your local time)<input type="datetime-local" value={customDate} onChange={(event) => setCustomDate(event.target.value)} required /></label> : null}
                 {!grantConfigured ? <p className="plans-help plans-configuration">{PLAN_NAMES[grantPlan]} needs a weekly AI allowance. <Link className="plans-text-button" href="/admin/plan-settings">Configure plan</Link></p> : <p className="plans-help">{money(selectedPolicy.weeklyBudgetMicros!)} of provider AI spend per UTC week.</p>}
-                <label className="plans-field">Reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Why are you changing this account’s access?" maxLength={1000} rows={3} required /></label>
                 <div className="plans-grant-actions"><button type="submit" className="plans-button plans-primary" disabled={!grantConfigured}>{saving ? "Saving…" : activeGrant ? "Replace manual grant" : "Grant plan"}</button>{activeGrant ? <button type="button" className="plans-text-button plans-danger" onClick={() => void changeGrant("revoke")}>Revoke manual grant</button> : null}</div>
                 {activeGrant ? <p className="plans-help">Revoking removes the manual grant. Purchased subscriptions continue separately.</p> : null}
               </fieldset>

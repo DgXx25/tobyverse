@@ -24,7 +24,7 @@ export function upsertToolStatus(rows: ToolStatusUpdate[], update: ToolStatusUpd
 }
 
 /** Bound the wait even when a dependency ignores cancellation. */
-export async function withToolTimeout<T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+export async function withToolTimeout<T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, timeoutMs = TOOL_TIMEOUT_MS): Promise<T> {
   signal?.throwIfAborted();
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -40,7 +40,7 @@ export async function withToolTimeout<T>(run: (signal: AbortSignal) => Promise<T
       error.name = "ToolTimeoutError";
       controller.abort(error);
       reject(error);
-    }, TOOL_TIMEOUT_MS);
+    }, timeoutMs);
   });
   try {
     return await Promise.race([Promise.resolve().then(() => run(controller.signal)), deadline]);
@@ -51,6 +51,7 @@ export async function withToolTimeout<T>(run: (signal: AbortSignal) => Promise<T
 }
 
 const labels: Record<ChatToolName, [string, string, string, string]> = {
+  search_chat_history: ["Looking up earlier context…", "Earlier context found", "წინა საუბარში ვეძებ…", "წინა კონტექსტი მოიძებნა"],
   load_skill: ["Reading guide…", "Guide loaded", "გზამკვლევს ვკითხულობ…", "გზამკვლევი ჩაიტვირთა"],
   answer: ["Preparing answer…", "Answer ready", "პასუხს ვამზადებ…", "პასუხი მზადაა"],
   clarify: ["Preparing question…", "Question ready", "კითხვას ვამზადებ…", "კითხვა მზადაა"],

@@ -54,6 +54,7 @@ import { inferProjectGoal } from "@/lib/composer/goal";
 import { isSimpleChatTask } from "@/lib/blocks/match";
 import { indexChatHistory, mergeChatMessages } from "@/lib/workspace/chat-history";
 import { papersInTurns } from "@/lib/blocks/paper-thread";
+import { recentConversation } from "@/lib/chat/conversation-context";
 import { artifactFacts, historyTurnsFromMessages, historyWithoutCurrentPrompt, latestArtifact } from "@/lib/composer/memory";
 import { listMemories } from "@/lib/memory/store";
 import { cachedLearningProfile, getLearningProfile } from "@/lib/memory/profile";
@@ -401,7 +402,7 @@ export function ProjectChat({
   const { user } = useAuth();
   const { profile: userProfile } = useUserProfile();
   const router = useRouter();
-  const { model } = usePreferredModel();
+  const { model, effort } = usePreferredModel();
   const { openSettings } = useShell();
   const guest = isGuestUser(user);
   const chatThreadId = threadId || DEFAULT_CHAT_THREAD_ID;
@@ -964,6 +965,8 @@ export function ProjectChat({
   async function streamChat(input: {
     prompt: string;
     history: ChatTurn[];
+    historyBeforeId?: string;
+    historyThroughId?: string;
     appendPrefix?: string;
     materialIds: string[];
     linkUrls?: string[];
@@ -1041,7 +1044,12 @@ export function ProjectChat({
         mode: chatModeRef.current,
         provider: "anthropic",
         model,
+        effort,
         history: input.history,
+        threadId: chatThreadId,
+        historyBeforeId: input.historyBeforeId,
+        historyThroughId: input.historyThroughId,
+        continuation: Boolean(input.appendPrefix),
         context: {
           projectId: project.id,
           projectTitle: project.title,
@@ -1337,7 +1345,9 @@ export function ProjectChat({
     setStream(initialStream);
     initialScrollRef.current = !options?.studio;
 
-    const history = options?.resumeHistory ?? historyWithoutCurrentPrompt(historyTurnsFromMessages(messages), modelPrompt);
+    const history = recentConversation(historyWithoutCurrentPrompt(
+      options?.resumeHistory ?? historyTurnsFromMessages(messages), modelPrompt,
+    ));
     let followTopic: string | undefined;
     let followTeach: string | undefined;
     const recordResponseStatus = async (
@@ -1496,6 +1506,8 @@ export function ProjectChat({
       const streamed = await streamChat({
         prompt: modelPrompt,
         history,
+        historyBeforeId: options?.resumeAssistantId ?? userMessageId ?? undefined,
+        historyThroughId: options?.resumeAssistantId || userMessageId ? undefined : messages.at(-1)?.id,
         appendPrefix: options?.resumePrefix,
         materialIds: sourceIds,
         linkUrls: attachments.filter((item) => item.type === "url").map((item) => item.title),
@@ -2184,7 +2196,7 @@ export function ProjectChat({
             />
           ) : null}
           {!live ? (
-            <div className="relative -mt-2 flex items-center gap-0.5">
+            <div className={`message-actions relative -mt-2 flex items-center gap-0.5 ${history.lastAssistantId === message.id ? "" : "message-actions-hover"}`}>
               <button
                 type="button"
                 aria-label="Copy response"

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { VisualBlock } from "@/types/visual";
+import { sceneSchema } from "@/lib/blocks/kinds/scene";
 
 const title = z.string().min(1).max(80);
 const icon = z.string().min(1).max(24).optional();
@@ -64,6 +65,7 @@ export const formulaCardSchema = z.object({
   title: title.optional(),
   text: z.string().min(1).max(360).optional(),
   formula,
+  caption: z.string().trim().min(1).max(160).optional(),
 });
 
 export const diagramSchema = z.object({
@@ -181,7 +183,7 @@ export const fromToSchema = z.object({
   right: fromToSideSchema,
 });
 
-export const visualBlockSchema: z.ZodType<VisualBlock> = z.discriminatedUnion("type", [
+const regularVisualBlockSchema = z.discriminatedUnion("type", [
   sectionSchema,
   termCardSchema,
   conceptRowSchema,
@@ -202,6 +204,12 @@ export const visualBlockSchema: z.ZodType<VisualBlock> = z.discriminatedUnion("t
   walkSchema,
   fromToSchema,
 ]);
+
+// Curated scenes use `id` as their own discriminator and are shared with chat fences.
+export const visualBlockSchema: z.ZodType<VisualBlock> = z.union([
+  regularVisualBlockSchema,
+  sceneSchema,
+]) as z.ZodType<VisualBlock>;
 
 export const visualBlockListSchema = z.array(visualBlockSchema).max(12);
 

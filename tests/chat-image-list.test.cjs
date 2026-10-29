@@ -75,8 +75,11 @@ test('unresolved or unsafe images degrade to readable text without invented URLs
 
 test('new optional capabilities are selected only for relevant turns', () => {
   const { matchChatBlocks } = require('../lib/blocks/match.ts');
+  const { CHAT_TOOL_DEFINITIONS } = require('../lib/ai/tools.ts');
   const base = { projectId: 'p', projectTitle: '', projectDescription: '', goal: '', mode: 'auto', materials: [], knowledgeItems: [] };
   assert.ok(matchChatBlocks({ ...base, prompt: 'Recommend music with photos' }).some(x => x.id === 'image-list'));
+  assert.ok(matchChatBlocks({ ...base, prompt: 'მაჩვენე სამი ფოტო და თითოეულს მოკლე აღწერა დაურთე.' }).some(x => x.id === 'image-list'));
+  assert.match(CHAT_TOOL_DEFINITIONS.find(x => x.name === 'search_images').description, /prefer an image-list block/i);
   assert.ok(matchChatBlocks({ ...base, prompt: 'Help me choose my preferences' }).some(x => x.id === 'form'));
   for (const prompt of ['2+2', 'Hello', 'Translate this: photos and options']) {
     assert.ok(!matchChatBlocks({ ...base, prompt }).some(x => ['form', 'image-list'].includes(x.id)), prompt);

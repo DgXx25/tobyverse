@@ -136,7 +136,7 @@ export type AnalysisPayload = {
   sampleAnalysis?: string;
 };
 
-export const PAPER_FORMS = ["ganckhadeba"] as const;
+export const PAPER_FORMS = ["ganckhadeba", "certificate"] as const;
 export type PaperFormId = (typeof PAPER_FORMS)[number];
 
 export type PaperPayload = {

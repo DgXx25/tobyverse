@@ -13,7 +13,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Fill `.env.local` with your Firebase web app keys, `ANTHROPIC_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` (Gemini photo understanding and saved-material embeddings).
+Fill `.env.local` with your Firebase web app keys, `ANTHROPIC_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` (Gemini photo understanding and saved-material embeddings). Current weather answers use Claude's built-in web search and require no separate weather API key.
 
 ## Run
 
@@ -79,4 +79,5 @@ Env vars the host must have:
 - `NEXT_PUBLIC_FIREBASE_APP_ID`
 - `GOOGLE_GENERATIVE_AI_API_KEY`
 - `ANTHROPIC_API_KEY` (required for Claude Haiku and Sonnet)
+- Optional rollback switches: `ANTHROPIC_PROMPT_CACHE=0` disables Claude prefix/history caching; `CHAT_CONTEXT_COMPACTION=0` disables thread summaries and older-message retrieval. Both optimizations are enabled by default. Cache read/write counts appear in `[ai-cache]` diagnostics without prompt text; plan usage uses their actual discounted rates. Occasional background summaries are metered separately and never run on every message.
 - `FIREBASE_SERVICE_ACCOUNT_JSON`

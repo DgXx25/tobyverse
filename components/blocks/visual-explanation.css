@@ -1,0 +1,59 @@
+.toby-visual-explanation {
+  margin: 1.35rem 0;
+  padding: clamp(1rem, 3vw, 1.6rem);
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 20px;
+  background: var(--surface-2);
+}
+
+.toby-visual-explanation-title {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(1.2rem, 2.5vw, 1.55rem);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
+}
+
+.toby-visual-explanation-note {
+  margin: 0.9rem 0 1.1rem;
+  padding: 0.15rem 0 0.15rem 0.9rem;
+  border-left: 2px solid color-mix(in srgb, var(--text) 42%, transparent);
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.toby-visual-explanation-note .rich-content {
+  margin: 0;
+}
+
+.toby-visual-explanation-figure {
+  margin: 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.toby-visual-explanation-link {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: zoom-in;
+}
+
+.toby-visual-explanation-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+@media (max-width: 480px) {
+  .toby-visual-explanation { border-radius: 17px; }
+  .toby-visual-explanation-figure { border-radius: 12px; }
+}

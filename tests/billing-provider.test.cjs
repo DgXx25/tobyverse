@@ -23,6 +23,14 @@ require.extensions[".ts"] = loadTypeScript;
 const { geminiCallUsage } = require("../lib/ai/gemini.ts");
 const { createAiUsageCollector } = require("../lib/billing/collector.ts");
 
+test("Gemini implicit cache hits remain visible in usage without double-counting input", () => {
+  const usage = geminiCallUsage('gemini-3.1-flash-lite', undefined, { promptTokenCount: 2000, cachedContentTokenCount: 1500, candidatesTokenCount: 20, totalTokenCount: 2020 });
+  assert.equal(usage.cacheReadInputTokens, 1500);
+  assert.equal(usage.inputTokens, 2000);
+  const { priceAiCall } = require('../lib/billing/pricing.ts');
+  assert.equal(priceAiCall(usage).costMicros, 193);
+});
+
 test("Gemini metadata maps prompt, candidate, thought, and total counts", () => {
   assert.deepEqual(
     geminiCallUsage("gemini-2.5-flash", "gemini-2.5-flash-001", {

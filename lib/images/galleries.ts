@@ -1,5 +1,7 @@
 import type { ChatImageHit } from "@/types/chat";
 import { imageListFromFence, resolveImageListItems } from "./image-list";
+import { parseTobyFence } from "@/lib/blocks/registry";
+import type { VisualExplanationBlock } from "@/lib/blocks/kinds/visual-explanation";
 
 type ContentPart = { kind: "md"; text: string } | { kind: "fence"; lang: string; text: string };
 export type ImageGalleryPart = { kind: "gallery"; galleryId: string; images: ChatImageHit[] };
@@ -43,11 +45,25 @@ export function layoutImageGalleries(text: string, images: ChatImageHit[] = []):
   remaining: ChatImageHit[];
 } {
   const used = new Set<ChatImageHit>();
+  const visualGalleryIds = new Set<string>();
   const segments = contentFences(text).flatMap((part): Array<ContentPart | ImageGalleryPart> => {
     if (part.kind === "fence") {
       const list = imageListFromFence(part.lang, part.text);
       if (list) {
         for (const item of resolveImageListItems(list, images)) if (item.image) used.add(item.image);
+        return [part];
+      }
+      if (part.lang === "toby" || part.lang.startsWith("toby-")) {
+        const visual = parseTobyFence(part.lang, part.text);
+        if (visual?.type === "visual-explanation") {
+          const block = visual.data as VisualExplanationBlock;
+          const candidates = block.galleryId ? images.filter((image) => image.galleryId === block.galleryId) : images;
+          const image = candidates[block.imageIndex];
+          if (image) {
+            used.add(image);
+            if (block.galleryId) visualGalleryIds.add(block.galleryId);
+          }
+        }
         return [part];
       }
     }
@@ -64,5 +80,10 @@ export function layoutImageGalleries(text: string, images: ChatImageHit[] = []):
     matches.forEach((image) => used.add(image));
     return [{ kind: "gallery", galleryId, images: matches }];
   });
-  return { segments, remaining: images.filter((image) => !used.has(image)) };
+  return {
+    segments,
+    // A visual-explanation intentionally chooses one image from a search set;
+    // keep its unused siblings from reappearing as a second, detached gallery.
+    remaining: images.filter((image) => !used.has(image) && !visualGalleryIds.has(image.galleryId ?? "")),
+  };
 }

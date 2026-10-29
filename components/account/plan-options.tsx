@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, Check, LockKeyhole } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
-import { openPaddleCheckout } from "@/lib/billing/paddle-client";
 import type { EffectivePlanId } from "@/types/billing";
 import type { BillingSubscription, GrantPlanId } from "@/types/billing-admin";
 
@@ -24,17 +23,18 @@ export function PlanOptions({
   subscriptions,
   onManageSubscription,
   managingSubscription,
+  onChoosePlan,
 }: {
   currentPlan: EffectivePlanId;
   subscriptions: BillingSubscription[];
   onManageSubscription: () => void;
   managingSubscription: boolean;
+  onChoosePlan: () => void;
 }) {
   const { user } = useAuth();
   const signedIn = !!user && !user.isAnonymous;
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [availabilityState, setAvailabilityState] = useState<"loading" | "ready" | "error">("loading");
-  const [pending, setPending] = useState<GrantPlanId | null>(null);
   const [error, setError] = useState("");
 
   async function loadAvailability() {
@@ -84,27 +84,6 @@ export function PlanOptions({
     return () => { alive = false; };
   }, [signedIn, user]);
 
-  async function subscribe(planId: GrantPlanId) {
-    if (!user || !signedIn || pending) return;
-    setPending(planId);
-    setError("");
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch("/api/billing/checkout", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ planId, requestId: crypto.randomUUID() }),
-      });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error || "Checkout could not be opened. Try again shortly.");
-      await openPaddleCheckout(value);
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "Checkout could not be opened.");
-    } finally {
-      setPending(null);
-    }
-  }
-
   const hasCurrentSubscription = !!availability && subscriptions.some(
     (subscription) => subscription.environment === availability.environment && subscription.status !== "canceled",
   );
@@ -118,12 +97,12 @@ export function PlanOptions({
           let action: React.ReactNode;
           if (isCurrent) {
             action = hasCurrentSubscription
-              ? <button type="button" onClick={onManageSubscription} disabled={managingSubscription || pending !== null} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{managingSubscription ? "Opening…" : "Manage plan"}<ArrowRight size={13} aria-hidden="true" /></button>
+              ? <button type="button" onClick={onManageSubscription} disabled={managingSubscription} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{managingSubscription ? "Opening…" : "Manage plan"}<ArrowRight size={13} aria-hidden="true" /></button>
               : <span className="inline-flex items-center gap-1.5 text-[12px] text-muted"><Check size={14} aria-hidden="true" />Current plan</span>;
           } else if (hasCurrentSubscription) {
-            action = <button type="button" onClick={onManageSubscription} disabled={managingSubscription || pending !== null} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{managingSubscription ? "Opening…" : "Manage subscription"}<ArrowRight size={13} aria-hidden="true" /></button>;
+            action = <button type="button" onClick={onManageSubscription} disabled={managingSubscription} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground hover:bg-border disabled:opacity-50">{managingSubscription ? "Opening…" : "Manage subscription"}<ArrowRight size={13} aria-hidden="true" /></button>;
           } else if (available) {
-            action = <button type="button" onClick={() => void subscribe(option.id)} disabled={pending !== null} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background hover:opacity-90 disabled:cursor-wait disabled:opacity-60">{pending === option.id ? "Opening…" : "Choose plan"}<ArrowRight size={13} aria-hidden="true" /></button>;
+            action = <button type="button" onClick={onChoosePlan} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-foreground px-3 text-[12px] font-medium text-background hover:opacity-90">Choose plan<ArrowRight size={13} aria-hidden="true" /></button>;
           } else if (availabilityState === "loading") {
             action = <span className="text-[12px] text-muted">Checking…</span>;
           } else if (availabilityState === "error") {

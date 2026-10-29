@@ -10,6 +10,7 @@ function coerceLegacy(value: unknown): unknown {
     formula?: unknown;
     title?: unknown;
     text?: unknown;
+    caption?: unknown;
     left?: unknown;
     right?: unknown;
     from?: unknown;
@@ -37,6 +38,7 @@ function coerceLegacy(value: unknown): unknown {
       title: typeof row.title === "string" ? row.title : undefined,
       text: typeof row.text === "string" ? row.text : undefined,
       formula: row.formula,
+      caption: typeof row.caption === "string" ? row.caption : undefined,
     };
   }
   if (row.type === "walk" && !Array.isArray(row.slides) && Array.isArray(row.items)) {

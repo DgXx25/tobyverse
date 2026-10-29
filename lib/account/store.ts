@@ -24,7 +24,7 @@ import {
   wouldExceedStorage,
   type UsageCounter,
 } from "@/lib/account/plan";
-import { isKnownModelSelection, parsePreferredModel, type AiModelSelection } from "@/lib/ai/catalog";
+import { DEFAULT_AI_EFFORT, isAiEffort, isKnownModelSelection, parsePreferredModel, type AiEffort, type AiModelSelection } from "@/lib/ai/catalog";
 import { isAccentId, isThemeId, parseThemeAccents, readStoredTheme, readStoredThemeAccents, type ThemeAccents, type ThemeId } from "@/lib/workspace/theme";
 import type { UserProfile, UserUsage } from "@/types/user";
 import { CHAT_MODES, type ChatMode } from "@/types/chat";
@@ -61,6 +61,7 @@ function mapProfile(id: string, data: Record<string, unknown>): UserProfile {
     admin: data.admin === true,
     usage: asUserUsage(data.usage, weekStart),
     preferredModel: parsePreferredModel(data.preferredModel),
+    preferredEffort: isAiEffort(data.preferredEffort) ? data.preferredEffort : null,
     chatMode: isChatMode(data.chatMode) ? data.chatMode : null,
     theme: isThemeId(data.theme) ? data.theme : null,
     themeAccents: parseThemeAccents(data.themeAccents),
@@ -158,7 +159,7 @@ async function writeUsage(userId: string, mutate: (usage: UserUsage) => UserUsag
   });
 }
 
-export async function updatePreferredModel(userId: string, model: AiModelSelection): Promise<boolean> {
+export async function updatePreferredModel(userId: string, model: AiModelSelection, effort: AiEffort): Promise<boolean> {
   if (!userId || !isKnownModelSelection(model)) return false;
   try {
     // Persist over the authenticated app API. Firestore's browser WebChannel can be blocked
@@ -166,7 +167,7 @@ export async function updatePreferredModel(userId: string, model: AiModelSelecti
     const response = await fetch("/api/account/preferred-model", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({ model, effort }),
     });
     return response.ok;
   } catch {
@@ -174,15 +175,17 @@ export async function updatePreferredModel(userId: string, model: AiModelSelecti
   }
 }
 
-export async function readPreferredModel(): Promise<AiModelSelection | null> {
+export async function readPreferredModel(): Promise<{ model: AiModelSelection; effort: AiEffort } | null> {
   try {
     const response = await fetch("/api/account/preferred-model", {
       headers: await authHeaders(false),
       cache: "no-store",
     });
     if (!response.ok) return null;
-    const body = (await response.json()) as { model?: unknown };
-    return typeof body.model === "string" && isKnownModelSelection(body.model) ? body.model : null;
+    const body = (await response.json()) as { model?: unknown; effort?: unknown };
+    return typeof body.model === "string" && isKnownModelSelection(body.model)
+      ? { model: body.model, effort: isAiEffort(body.effort) ? body.effort : DEFAULT_AI_EFFORT }
+      : null;
   } catch {
     return null;
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { snapWikiThumbUrl } from "@/lib/images/types";
 import type { ChatImageHit } from "@/types/chat";
@@ -101,6 +102,31 @@ export function ImageGallery({
           onIndexChange={setPreviewIndex}
           onClose={() => setPreviewIndex(null)}
         />
+      ) : null}
+    </>
+  );
+}
+
+/** Clickable single-image preview for images embedded inside other chat blocks. */
+export function ImagePreviewButton({
+  image,
+  className,
+  label,
+  children,
+}: {
+  image: ChatImageHit;
+  className?: string;
+  label: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" aria-label={label} onClick={() => setOpen(true)} className={className}>
+        {children}
+      </button>
+      {open ? (
+        <ImageLightbox images={[image]} index={0} onIndexChange={() => {}} onClose={() => setOpen(false)} />
       ) : null}
     </>
   );
@@ -290,12 +316,20 @@ function ImageLightbox({
           <UiIcon name="forward" size={22} />
         </button>
       ) : null}
-      <RemoteImg
-        src={image.url || image.thumb || image.thumbnail || ""}
-        fallback={image.thumb || image.thumbnail}
-        alt={image.alt || image.title}
-        className="img-alpha-bg h-auto w-auto max-h-[min(72vh,640px)] max-w-[min(calc(100vw-9rem),720px)] object-contain"
-      />
+      {image.storagePath ? (
+        <StorageThumb
+          path={image.storagePath}
+          alt={image.alt || image.title}
+          className="img-alpha-bg h-auto w-auto max-h-[min(72vh,640px)] max-w-[min(calc(100vw-9rem),720px)] object-contain"
+        />
+      ) : (
+        <RemoteImg
+          src={image.url || image.thumb || image.thumbnail || ""}
+          fallback={image.thumb || image.thumbnail}
+          alt={image.alt || image.title}
+          className="img-alpha-bg h-auto w-auto max-h-[min(72vh,640px)] max-w-[min(calc(100vw-9rem),720px)] object-contain"
+        />
+      )}
     </div>,
     document.body,
   );

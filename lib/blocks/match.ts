@@ -76,41 +76,39 @@ export function matchChatBlocks(context: ChatGenerationContext): ChatBlockDef[] 
   const text = haystack(context);
   if (!text.trim()) return [];
 
-  const seen = new Set<string>();
   const hits: ChatBlockDef[] = [];
   let allowScene = true;
 
-  function take(id: string): boolean {
-    if (id === "scene" && !allowScene) return false;
-    if (seen.has(id)) return false;
-    const def = byId.get(id);
-    if (!def) return false;
-    seen.add(id);
-    hits.push(def);
-    return hits.length >= MAX_CARDS;
-  }
-
   function scan(source: string) {
+    const relevance = new Map<string, number>();
     for (const word of wordsIn(source)) {
       for (const id of unigrams.get(word) ?? []) {
-        if (take(id)) return;
+        relevance.set(id, Math.max(relevance.get(id) ?? 0, word.length));
       }
       for (let n = word.length - 1; n >= 4; n -= 1) {
         for (const id of unigrams.get(word.slice(0, n)) ?? []) {
-          if (take(id)) return;
+          relevance.set(id, Math.max(relevance.get(id) ?? 0, n));
         }
       }
       for (const hit of phrases.get(word) ?? []) {
         if (!source.includes(hit.phrase)) continue;
-        if (take(hit.id)) return;
+        relevance.set(hit.id, Math.max(relevance.get(hit.id) ?? 0, 100 + hit.phrase.length));
       }
     }
+    // Specific topic words (e.g. “dialogue”) outrank broad format words (e.g. “explain”).
+    // Longer phrases such as “why does” outrank their component unigrams.
+    return [...relevance.entries()]
+      .filter(([id]) => id !== "scene" || allowScene)
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => byId.get(id))
+      .filter((def): def is ChatBlockDef => Boolean(def))
+      .slice(0, MAX_CARDS);
   }
   // Current, specific requests outrank a notebook's older topic.
-  scan(prompt.toLowerCase());
+  hits.push(...scan(prompt.toLowerCase()));
   if (hits.length) return hits;
   allowScene = !prompt || /^(?:continue|go on|explain (?:it|this|that)|show (?:it|this|that)|what about (?:it|this|that)|შემდეგ|გააგრძელე|ეს |ამის |იგივე|ამიხსენი ეს|მაჩვენე)/i.test(prompt);
-  scan(text);
+  hits.push(...scan(text));
   return hits;
 }
 
@@ -118,11 +116,13 @@ export function tobyCardsForTurn(context: ChatGenerationContext): string {
   const defs = matchChatBlocks(context);
   const cards = formatTobyBlockCards(defs);
   if (!cards || !context.threadPaper || !defs.some((item) => item.id === "paper")) return cards;
-  return `${cards}
-
-A paper sheet is already in this thread. If they want to fill or try it now, do not rewrite the JSON. Emit only:
-\`\`\`toby paper
-{"reuse":true}
-\`\`\`
-The UI places that sheet at the bottom. Older sheets stay skipped — no Check.`;
+  return [
+    cards,
+    "",
+    "A paper sheet is already in this thread. If they want to fill or try it now, do not rewrite the JSON. Emit only:",
+    "```toby paper",
+    "{\"reuse\":true}",
+    "```",
+    "The UI places that sheet at the bottom. Older sheets stay skipped — no Check.",
+  ].join("\n");
 }

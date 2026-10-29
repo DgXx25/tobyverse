@@ -9,6 +9,7 @@ import {
   pathClarifyQuestion,
   practiceClarifyQuestion,
   sheetClarifyQuestion,
+  wantsImages,
   wantsPlainNote,
 } from "@/lib/composer/intent";
 import type { AcceptedChatTool, ChatMode, PendingKind } from "@/types/chat";
@@ -31,6 +32,11 @@ export type ToolRoutingInput = {
 /** Explicit actions pin the native tool so a save request cannot become a prose claim. */
 export function forcedToolForRequest(input: ToolRoutingInput): ChatToolCall | null {
   const accepted = input.accepted;
+  // Image requests are explicit tool intents. Pin the search before generation
+  // so a model cannot answer from unrelated project context or apologize instead.
+  if (!accepted && wantsImages(input.prompt)) {
+    return { name: "search_images", args: { query: input.prompt.trim() } };
+  }
   if (!accepted && wantsPlainNote(input.prompt)) {
     const editing = input.active?.kind === "study_sheet" && isNoteEditRequest(input.prompt);
     return { name: editing ? input.active?.noteKind === "note" ? "edit_note" : "edit_sheet" : "create_note", args: { instruction: input.prompt, ...(editing ? { id: input.active!.id } : {}) } };

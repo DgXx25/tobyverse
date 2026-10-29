@@ -22,8 +22,8 @@ const config: Config = {
         scrollbar: "var(--scrollbar)",
       },
       fontFamily: {
-        sans: ["system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
+        sans: ["Google Sans", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+        mono: ["Google Sans", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
       },
     },
   },

@@ -38,6 +38,16 @@ const { forcedToolForRequest, fallbackToolAfterProvider } = require("../lib/chat
 const { consumeSlashCommand } = require("../lib/composer/slash.ts");
 const { ChatComposer } = require("../components/workspace/chat-composer.tsx");
 const { IllustrationBlocks } = require("../components/workspace/illustration-blocks.tsx");
+const { withToolTimeout } = require("../lib/ai/tool-execution.ts");
+
+test("tool timeout can be extended for slow image searches while remaining abortable", async () => {
+  await assert.rejects(
+    withToolTimeout((signal) => new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }), undefined, 5),
+    /Tool timed out/,
+  );
+});
 
 test("all provider mappers derive the same Auto registry, including artifact tools", () => {
   const names = eligibleChatToolNames("auto");
@@ -102,6 +112,13 @@ test("only explicit slash or chip choices bypass the provider", () => {
   );
 });
 
+test("a direct photo request pins image search even when project context is present", () => {
+  assert.deepEqual(
+    forcedToolForRequest({ prompt: "მაჩვენე სამი ფოტო მზის ჩასვლის შესახებ", mode: "auto", hasMaterials: true }),
+    { name: "search_images", args: { query: "მაჩვენე სამი ფოტო მზის ჩასვლის შესახებ" } },
+  );
+});
+
 test("a study sheet is not created from an earlier assistant offer or a related explanation request", () => {
   const tool = CHAT_TOOL_DEFINITIONS.find(({ name }) => name === "create_sheet");
   assert.ok(tool);
@@ -127,7 +144,7 @@ test("illustrate parses catalog blocks without turning them into chat JSON", () 
   const call = parseToolCall("illustrate", {
     blocks: [
       { type: "graph", title: "Demand", slope: -1, intercept: 0 },
-      { type: "formula_card", formula: "Q_d = a - bP" },
+      { type: "formula_card", formula: "Q_d = a - bP", caption: "Demand decreases as price rises." },
       { type: "cycle", title: "Market cycle", items: ["Demand", "Price", "Supply"] },
     ],
   });
@@ -137,7 +154,7 @@ test("illustrate parses catalog blocks without turning them into chat JSON", () 
 
   const html = renderToStaticMarkup(React.createElement(IllustrationBlocks, { blocks: call.args.blocks }));
   assert.match(html, /<svg/);
-  assert.match(html, /Q_d/);
+  assert.ok(html.indexOf("Demand decreases as price rises.") > html.indexOf("overflow-x-auto"));
   assert.doesNotMatch(html, /\"type\":\"graph\"/);
 });
 

@@ -112,16 +112,188 @@ export function splitCodeFences(source: string): Array<{ kind: "md"; text: strin
   })).flatMap((part) => (part.kind === "md" ? splitTrailingOpenFence(part.text) : [part]));
 }
 
-export function splitDisplayMath(source: string): Array<{ kind: "md"; text: string } | { kind: "math"; value: string }> {
+export type DisplayMathPart = { kind: "md"; text: string } | { kind: "math"; value: string; note?: string; step?: boolean };
+
+const MATH_PURPOSE_CUE = /\b(?:to|because|so that|in order to|goal)\b|(?:რათა|იმისთვის|მიზნით|მიზანია|რადგან)/iu;
+const MATH_ACTION_CUE = /\b(?:subtract|add|divide|multiply|then|next|both sides)\b|(?:გამოვაკლ|დავუმატ|გავყ|გამოვყ|შემდეგ|ორივე მხარეს)/iu;
+
+/** Keep only concise purpose text; operation narration is already visible in the equations. */
+function optionalPurposeNote(source: string): string {
+  const start = source.search(MATH_PURPOSE_CUE);
+  if (start < 0) return "";
+  let note = source.slice(start).trim();
+  const action = note.search(/[,;:]\s*(?:then|subtract|add|divide|multiply|next|შემდეგ|გამოვაკლ|დავუმატ|გავყ|გამოვყ)\b/iu);
+  if (action >= 0) note = note.slice(0, action).trim();
+  return note.length > 0 && note.length <= 120 ? note : "";
+}
+
+/** Read TobyVerse's optional, human-readable note from the final standalone \text{} line. */
+function parseDisplayMathBody(source: string): { value: string; note?: string; step?: boolean } {
+  const lines = source.trim().split(/\r?\n/);
+  const stepIndex = lines.findIndex((line) => /^\s*%\s*tobyverse-step\s*$/i.test(line));
+  const step = stepIndex >= 0;
+  const noteIndex = lines.findIndex((line) => /^\s*%\s*tobyverse-note:/i.test(line));
+  let note: string | undefined;
+  if (noteIndex >= 0) {
+    const encoded = (lines[noteIndex] ?? "").replace(/^\s*%\s*tobyverse-note:/i, "").trim();
+    try { note = decodeURIComponent(encoded) || undefined; } catch { note = encoded || undefined; }
+  }
+  const formulaLines = lines.filter((_, index) => index !== stepIndex && index !== noteIndex);
+  const last = formulaLines.at(-1) ?? "";
+  const noteStart = last.match(/^\s*\\text\{/);
+  if (!note && noteStart) {
+    const open = last.indexOf("{", noteStart[0].length - 1);
+    let depth = 0;
+    let close = -1;
+    for (let index = open; index < last.length; index += 1) {
+      if (last[index] === "\\") { index += 1; continue; }
+      if (last[index] === "{") depth += 1;
+      if (last[index] === "}" && --depth === 0) { close = index; break; }
+    }
+    if (close === last.length - 1) {
+      note = last.slice(open + 1, close).replace(/\\([{}])/g, "$1").trim() || undefined;
+      formulaLines.pop();
+    }
+  }
+  return {
+    value: formulaLines.join("\n").trim(),
+    ...(note ? { note } : {}),
+    ...(step ? { step: true } : {}),
+  };
+}
+
+export function splitDisplayMath(source: string): DisplayMathPart[] {
   return splitByPattern(
     source,
     /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\begin\{(aligned|align\*?|pmatrix|bmatrix|vmatrix|cases|array)\}([\s\S]*?)\\end\{\3\}/g,
     (match) => {
-      if (match[1] != null) return { kind: "math" as const, value: match[1].trim() };
-      if (match[2] != null) return { kind: "math" as const, value: match[2].trim() };
+      if (match[1] != null) return { kind: "math" as const, ...parseDisplayMathBody(match[1]) };
+      if (match[2] != null) return { kind: "math" as const, ...parseDisplayMathBody(match[2]) };
       return { kind: "math" as const, value: `\\begin{${match[3]}}${match[4]}\\end{${match[3]}}` };
     },
   );
+}
+
+/**
+ * Join numbered move labels with their adjacent equation blocks and render the
+ * pair as one ordered-list item. This handles both inline equations and the
+ * common "numbered move, then display-math block" layout across languages.
+ */
+export function promoteEquationStepsToDisplayMath(source: string): string {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const output: string[] = [];
+  const ordered = /^\s{0,3}\d+[.)]\s+(.+)$/;
+  const inlineMath = /\$((?:\\.|[^$\n])+?)\$|\\\(([\s\S]+?)\\\)/g;
+  const transitionCue = /\b(?:then|next|subtract|add|divide|multiply|isolate|both sides|therefore)\b|(?:შემდეგ|ორივე მხარეს|გამოვაკლ|დავუმატ|გავყ|გამოვყ|ამიტომ)/iu;
+  let inFence = false;
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index] ?? "";
+    if (/^\s{0,3}```/.test(line)) {
+      inFence = !inFence;
+      output.push(line);
+      index += 1;
+      continue;
+    }
+    const first = !inFence ? line.match(ordered) : null;
+    if (!first) {
+      if (!inFence) {
+        const equations = [...line.matchAll(inlineMath)]
+          .filter((match) => /[=<>≤≥]/u.test(String(match[1] ?? match[2] ?? "")));
+        const prose = line.replace(inlineMath, " ");
+        if (equations.length >= 2 && transitionCue.test(prose)) {
+          const steps = equations.map((match, stepIndex) => {
+            const previousEnd = stepIndex === 0
+              ? 0
+              : (equations[stepIndex - 1]?.index ?? 0) + (equations[stepIndex - 1]?.[0].length ?? 0);
+            const noteText = line.slice(previousEnd, match.index).replace(/[\s:：—–.]+$/u, "").trim();
+            const note = optionalPurposeNote(noteText);
+            return { formula: String(match[1] ?? match[2] ?? "").trim(), note };
+          });
+          const prefix = line.slice(0, equations[0]?.index ?? 0).trim();
+          const suffixMatch = equations.at(-1);
+          const suffix = suffixMatch
+            ? line.slice((suffixMatch.index ?? 0) + suffixMatch[0].length).trim()
+            : "";
+          const narration = /\b(?:subtract|add|divide|multiply|then|next|both sides)\b|(?:გამოვაკლ|დავუმატ|გავყ|გამოვყ|შემდეგ|ორივე მხარეს)/iu;
+          if (prefix && !narration.test(prefix)) output.push(prefix);
+          output.push(...steps.flatMap(({ formula, note }, row) => [
+            ...(row ? [""] : []),
+            `$$\n% tobyverse-step${note ? `\n% tobyverse-note:${encodeURIComponent(note)}` : ""}\n${formula}\n$$`,
+          ]));
+          if (suffix && !narration.test(suffix)) output.push(suffix);
+          index += 1;
+          continue;
+        }
+      }
+      output.push(line);
+      index += 1;
+      continue;
+    }
+
+    const steps: Array<{ formula: string; note: string }> = [];
+    let cursor = index;
+    while (cursor < lines.length) {
+      const item = (lines[cursor] ?? "").match(ordered);
+      if (!item) break;
+      const body = item[1] ?? "";
+      const matches = [...body.matchAll(inlineMath)];
+      const equations = matches
+        .map((match) => String(match[1] ?? match[2] ?? "").trim())
+        .filter((formula) => /[=<>≤≥]/u.test(formula));
+      let formula = equations.at(-1) ?? "";
+      let note = matches.length
+        ? body.slice(0, matches.find((match) => /[=<>≤≥]/u.test(String(match[1] ?? match[2] ?? "")))?.index ?? 0).trim()
+        : body.trim();
+      let next = cursor + 1;
+
+      // A separate display equation belongs to its numbered move when only
+      // blank lines separate them. Keep the move as the card's optional note.
+      if (!formula) {
+        while (next < lines.length && !(lines[next] ?? "").trim()) next += 1;
+        const displayLine = lines[next] ?? "";
+        const inlineBlock = displayLine.match(/^\s{0,3}\$\$([\s\S]+?)\$\$\s*$/);
+        if (inlineBlock) {
+          // Handle `$$x = 5$$` as a complete block; treating the closing
+          // delimiter as formula text would expose our internal metadata.
+          formula = inlineBlock[1]?.trim() ?? "";
+          next += 1;
+        } else if (/^\s{0,3}\$\$\s*$/.test(displayLine)) {
+          next += 1;
+          const equationLines: string[] = [];
+          while (next < lines.length && !/^\s{0,3}\$\$\s*$/.test(lines[next] ?? "")) {
+            equationLines.push(lines[next] ?? "");
+            next += 1;
+          }
+          if (next < lines.length) {
+            formula = equationLines.join("\n").trim();
+            next += 1;
+          }
+        }
+      }
+
+      if (!formula || !/[=<>≤≥]/u.test(formula)) break;
+      note = note.replace(/[\s:：—–-]+$/, "").trim();
+      steps.push({ formula, note: optionalPurposeNote(note) });
+      while (next < lines.length && !(lines[next] ?? "").trim()) next += 1;
+      if (!ordered.test(lines[next] ?? "")) { cursor = next; break; }
+      cursor = next;
+    }
+
+    if (steps.length < 2) {
+      output.push(line);
+      index += 1;
+      continue;
+    }
+
+    output.push(...steps.flatMap(({ formula, note }, row) => [
+      ...(row ? [""] : []),
+      `$$\n% tobyverse-step${note ? `\n% tobyverse-note:${encodeURIComponent(note)}` : ""}\n${formula}\n$$`,
+    ]));
+    index = cursor;
+  }
+
+  return output.join("\n");
 }
 
 export function splitChatFences(source: string): ChatFenceSegment[] {

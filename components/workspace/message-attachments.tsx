@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { fileTypeBadge, isImageAttachment } from "@/lib/composer/attach";
 import { looksLikeUrl } from "@/lib/materials/ingest-client";
 import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
@@ -40,7 +41,6 @@ function AttachmentChip({ item, onOpenMaterial, fileAccess }: { item: ChatAttach
         title={item.title}
         materialId={item.materialId}
         fileAccess={fileAccess}
-        onClick={item.materialId && onOpenMaterial ? () => onOpenMaterial(item.materialId!) : undefined}
       />
     );
   }
@@ -73,9 +73,12 @@ function AttachmentChip({ item, onOpenMaterial, fileAccess }: { item: ChatAttach
   return <span className={className}>{content}</span>;
 }
 
-function ImageThumb({ path, title, onClick, materialId, fileAccess }: { path: string; title: string; onClick?: () => void; materialId?: string; fileAccess?: MaterialFileAccess }) {
+function ImageThumb({ path, title, materialId, fileAccess }: { path: string; title: string; materialId?: string; fileAccess?: MaterialFileAccess }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const shareId = fileAccess?.shareId;
+  useEffect(() => setMounted(true), []);
   useEffect(() => {
     if (!shareId && (!path.startsWith("users/") || isMissingMaterialFile(path))) return;
     let objectUrl: string | null = null;
@@ -106,6 +109,20 @@ function ImageThumb({ path, title, onClick, materialId, fileAccess }: { path: st
     };
   }, [path, shareId, materialId]);
 
+  useEffect(() => {
+    if (!previewOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setPreviewOpen(false);
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [previewOpen]);
+
   if (!url) {
     const content = (
       <span className="inline-flex h-8 max-w-[160px] items-center gap-1.5 rounded-full bg-surface pl-1 pr-2.5 text-[11px] leading-none">
@@ -115,13 +132,44 @@ function ImageThumb({ path, title, onClick, materialId, fileAccess }: { path: st
         <span className="min-w-0 truncate text-foreground">{title}</span>
       </span>
     );
-    return onClick ? <button type="button" onClick={onClick}>{content}</button> : content;
+    return <span aria-label={`Loading ${title}`} role="status">{content}</span>;
   }
 
-  const content = (
-    <span className="block h-10 w-10 overflow-hidden rounded-xl bg-surface">
-      <img src={url} alt={title} className="h-full w-full object-cover" />
-    </span>
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+        aria-label={`Open image ${title}`}
+        title={`Open ${title}`}
+        className="img-zoom block h-10 w-10 overflow-hidden rounded-xl bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+      >
+        <img src={url} alt={title} className="h-full w-full object-cover" />
+      </button>
+      {previewOpen && mounted ? createPortal(
+        <div
+          className="popup-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewOpen(false); }}
+        >
+          <button
+            type="button"
+            aria-label="Close image"
+            onClick={() => setPreviewOpen(false)}
+            className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          >
+            <span aria-hidden="true" className="text-2xl leading-none">×</span>
+          </button>
+          <img
+            src={url}
+            alt={title}
+            className="max-h-[90dvh] max-w-[min(94vw,1200px)] object-contain"
+          />
+        </div>,
+        document.body,
+      ) : null}
+    </>
   );
-  return onClick ? <button type="button" onClick={onClick}>{content}</button> : content;
 }

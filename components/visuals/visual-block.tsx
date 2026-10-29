@@ -11,6 +11,7 @@ import { BodyText, MixedText } from "@/components/visuals/mixed-text";
 import { storageDownloadUrl, isMissingMaterialFile } from "@/lib/materials/storage";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import type { EmbedKind, FromToEmbed, FromToSide, NoteBlock, TermCardFields, VisualBlock } from "@/types/visual";
+import { SceneView } from "@/components/blocks/scenes/scene-view";
 
 function hasKa(text: string): boolean {
   return /[\u10A0-\u10FF]/.test(text);
@@ -336,6 +337,9 @@ function FormulaCard({ block }: { block: Extract<VisualBlock, { type: "formula_c
         <BodyText text={block.text} className="mb-3 text-left text-[15px] leading-6 text-foreground" />
       ) : null}
       <div className="overflow-x-auto text-[1.2rem] text-foreground">{renderFormula(block.formula, true) ?? block.formula}</div>
+      {block.caption ? (
+        <BodyText text={block.caption} className="mt-2 text-center text-[13px] leading-5 text-muted" />
+      ) : null}
     </Card>
   );
 }
@@ -782,6 +786,8 @@ function InvalidChip({ message }: { message: string }) {
 export function VisualBlockView({ block }: { block: VisualBlock | NoteBlock }) {
   try {
     switch (block.type) {
+      case "scene":
+        return <SceneView block={block} />;
       case "section":
         return <SectionBlock block={block} />;
       case "term_card":

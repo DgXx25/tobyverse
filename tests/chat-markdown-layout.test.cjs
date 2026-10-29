@@ -63,6 +63,88 @@ test('chat Markdown omits horizontal dividers after quotes while preserving the 
   assert.doesNotMatch(html, /<hr\b/);
 });
 
+test('chat response headings are slightly larger than body text', () => {
+  const css = fs.readFileSync(path.join(root, 'app/globals.css'), 'utf8');
+  const headingRule = css.match(/\.chat-body h1,[\s\S]*?\.chat-body h3\s*\{([\s\S]*?)\}/)?.[1] || '';
+  assert.match(headingRule, /font-size:\s*16px/);
+});
+
+test('ordered lists keep their starting number across intervening math blocks', () => {
+  const html = renderToStaticMarkup(React.createElement(RichContent, { text: '1. Subtract four.\n\n$$3x=15$$\n\n$$x+1=6$$\n\n2. Divide by three.\n\n$$x=5$$' }));
+  assert.match(html, /<ol start="2">/);
+});
+
+test('multi-step equation lists render as one native MATH card with separate rows', () => {
+  const examples = [
+    [
+      'ამოხსნა:',
+      '',
+      '1. გადაიტანე 4 მარჯვნივ: \\(6z = 28 - 4\\), ანუ \\(6z = 24\\)',
+      '2. გაყავი 6-ზე: \\(z = 4\\)',
+    ].join('\n'),
+    [
+      'Solution:',
+      '',
+      '1. Subtract 4: \\(6z = 28 - 4\\), so \\(6z = 24\\)',
+      '2. Divide by 6: \\(z = 4\\)',
+    ].join('\n'),
+  ];
+  for (const text of examples) {
+    const html = renderToStaticMarkup(React.createElement(RichContent, { text }));
+    assert.equal((html.match(/data-kind="math"/g) || []).length, 1);
+    assert.doesNotMatch(html, /<ol class="chat-math-step-list">/);
+    assert.doesNotMatch(html, /<li>/);
+    assert.equal((html.match(/class="chat-math"/g) || []).length, 2);
+    assert.doesNotMatch(html, /tobyverse-step|tobyverse-note/);
+  }
+});
+
+test('multi-equation reasoning in a paragraph becomes vertically stacked math rows', () => {
+  const text = 'Subtract 6 from both sides: $3x = 15$. Then divide both sides by 3: $x = 5$.';
+  const html = renderToStaticMarkup(React.createElement(RichContent, { text }));
+  assert.equal((html.match(/data-kind="math"/g) || []).length, 1);
+  assert.equal((html.match(/class="chat-math"/g) || []).length, 2);
+  assert.doesNotMatch(html, /Subtract 6|Then divide/);
+});
+
+test('separate equation blocks stay inside one numbered list and inline LaTeX notes render', () => {
+  const text = [
+    'Solution:',
+    '',
+    '1. Subtract 2 from both sides:',
+    '$$',
+    '9x = 45',
+    '$$',
+    '',
+    '1. Divide both sides by 9:',
+    '$$x = 5$$',
+    '',
+    '$$',
+    'x = 5',
+    '\\text{Substitute $x=5$ to check}',
+    '$$',
+  ].join('\n');
+  const html = renderToStaticMarkup(React.createElement(RichContent, { text }));
+  assert.doesNotMatch(html, /<ol class="chat-math-step-list">/);
+  assert.doesNotMatch(html, /<li>/);
+  assert.equal((html.match(/data-kind="math"/g) || []).length, 2);
+  assert.doesNotMatch(html, /Divide both sides by 9/);
+  assert.match(html, /text-center text-\[12px\] font-semibold/);
+  assert.match(html, /chat-inline-math/);
+  assert.match(html, /Substitute/);
+  assert.doesNotMatch(html, /tobyverse-step|tobyverse-note/);
+});
+
+test('single-step and mixed-content lists keep their original Markdown layout', () => {
+  const oneStep = renderToStaticMarkup(React.createElement(RichContent, { text: '1. პასუხია \\(x = 4\\).' }));
+  const mixed = renderToStaticMarkup(React.createElement(RichContent, {
+    text: '1. \\(x = 4\\)\n2. შემოწმება წარმატებულია.',
+  }));
+  assert.doesNotMatch(oneStep, /data-kind="math"/);
+  assert.match(mixed, /<ol>/);
+  assert.doesNotMatch(mixed, /data-kind="math"/);
+});
+
 test('arbitrary UTF-8 network boundaries preserve opening Georgian words and Markdown through storage cleanup', async () => {
   const answer = 'ფოტოსინთეზი არის მნიშვნელოვანი პროცესი.\n\n### კომპონენტები\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
   const encoder = new TextEncoder();

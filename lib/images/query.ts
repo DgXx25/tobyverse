@@ -2,6 +2,13 @@ import { generateText } from "@/lib/ai/gemini";
 import type { AiUsageReporter } from "@/types/billing";
 
 const FIGURE_NOISE = /^(diagram|illustration|schematic|photo|image|picture|chart|graph|plot|structure|model)$/i;
+// Broad phrasing should not count as evidence that a result matches the image
+// subject (for example, "around the world" matched scanned travel-book pages).
+const IMAGE_CONTEXT_WORDS = new Set(["around", "world", "worldwide", "different"]);
+// The chat model already turns image requests into focused search queries.
+// Keep image search token-free by default; enable this extra planner only when
+// a deployment explicitly opts in for a catalog that needs query expansion.
+const IMAGE_SEARCH_PLANNER_ENABLED = process.env.TOBYVERSE_IMAGE_SEARCH_PLANNER === "true";
 
 const GLOSSARY: [RegExp, string][] = [
   [/მოტოკროს(?:ი)?/giu, "motocross"],
@@ -97,9 +104,10 @@ function parsePlan(text: string, seed: ImageSearchPlan): ImageSearchPlan {
     const query = typeof row.query === "string" ? tidyKeywords(row.query).split(/\s+/).slice(0, 4).join(" ") : "";
     const must = asWordList(row.must);
     const avoid = asWordList(row.avoid).filter((word) => !FIGURE_NOISE.test(word));
+    const seedMust = isMostlyLatin(seed.query) ? seed.must : [];
     return {
       query: query && isMostlyLatin(query) ? query : seed.query,
-      must: [...new Set([...seed.must, ...must])].filter((word) => !FIGURE_NOISE.test(word)).slice(0, 8),
+      must: [...new Set([...seedMust, ...must])].filter((word) => !FIGURE_NOISE.test(word)).slice(0, 8),
       avoid,
     };
   } catch {
@@ -110,19 +118,22 @@ function parsePlan(text: string, seed: ImageSearchPlan): ImageSearchPlan {
 export async function planImageSearch(query: string, options: { usage?: AiUsageReporter } = {}): Promise<ImageSearchPlan> {
   const raw = query.trim();
   if (!raw) return { query: "", must: [], avoid: [] };
-  const key = `plan6:${raw.toLowerCase()}`;
+  const key = `plan7:${raw.toLowerCase()}`;
   const cached = planMemory.get(key);
   if (cached) return cached;
 
   const seed = seedPlan(raw);
   let plan = seed;
-  try {
-    const text = await generateText(
-      `Plan an image search for a study app. Match the WHOLE topic, not a nearby object.
-"water molecule" is the molecule (H2O), not a water drop, beach, or fountain.
-"atom structure" is the atom, not a random chart.
-Return JSON only: {"query":"2-6 English keywords","must":["terms the filename/title should contain"],"avoid":["nearby objects to reject"]}
-Keep chart/graph/map/flag in query only if they asked.
+  // English queries are already prepared by the chat model; translate only when
+  // the catalogs need English labels and the prompt is not Latin.
+  if (IMAGE_SEARCH_PLANNER_ENABLED || !isMostlyLatin(raw)) {
+    try {
+      const text = await generateText(
+        `Prepare a focused image-catalog search. Translate the requested subject into concise English catalog terms; do not translate the command, requested count, or description format.
+Match the actual subject, not a nearby object (a water molecule is H2O, not a water drop or beach; an atom structure is an atom, not a random chart).
+For ordinary photo requests, use specific visual concepts that fit the topic, not generic stock-photo words.
+Return JSON only: {"query":"2-6 concise English search terms","must":["distinctive subject words"],"avoid":["nearby subjects or image types to reject"]}
+Preserve chart/graph/map/flag only when requested.
 
 ${raw}`,
       {
@@ -130,10 +141,11 @@ ${raw}`,
         systemInstruction: "JSON only. No markdown.",
         usage: options.usage,
       },
-    );
-    plan = parsePlan(text, seed);
-  } catch {
-    plan = seed;
+      );
+      plan = parsePlan(text, seed);
+    } catch {
+      plan = seed;
+    }
   }
 
   if (!plan.query) plan = seed;
@@ -163,18 +175,20 @@ function containsTerm(haystack: string, word: string): boolean {
   if (!term) return false;
   const hay = haystack.toLowerCase();
   if (term.length <= 3) return hayWords(hay).includes(term);
-  return hay.includes(term);
+  // Image filenames commonly use a singular label for a plural search topic.
+  return hay.includes(term) || (term.endsWith("s") && hay.includes(term.slice(0, -1)));
 }
 
 export function imageTopicTokens(query: string): string[] {
   return tidyKeywords(query)
     .split(/\s+/)
-    .filter((word) => word.length > 2 && !FIGURE_NOISE.test(word));
+    .filter((word) => word.length > 2 && !FIGURE_NOISE.test(word) && !IMAGE_CONTEXT_WORDS.has(word));
 }
 
 export function imageHitRelevant(haystack: string, query: string): boolean {
   const tokens = imageTopicTokens(query);
-  if (tokens.length === 0) return true;
+  // A non-empty query with no subject words is too vague to accept arbitrary hits.
+  if (tokens.length === 0) return query.trim().length === 0;
   const distinctive = [...tokens].sort((a, b) => b.length - a.length)[0];
   if (distinctive && containsTerm(haystack, distinctive)) return true;
   if (tokens.length === 1) return containsTerm(haystack, tokens[0]);

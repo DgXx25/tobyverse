@@ -30,6 +30,7 @@ type GeminiUsageMetadata = {
   candidatesTokenCount?: number;
   thoughtsTokenCount?: number;
   totalTokenCount?: number;
+  cachedContentTokenCount?: number;
 };
 
 function count(value: unknown): number {
@@ -50,6 +51,7 @@ export function geminiCallUsage(
     outputTokens: count(metadata.candidatesTokenCount),
     thinkingTokens: count(metadata.thoughtsTokenCount),
     totalTokens: count(metadata.totalTokenCount),
+    ...(count(metadata.cachedContentTokenCount) ? { cacheReadInputTokens: count(metadata.cachedContentTokenCount) } : {}),
   };
 }
 

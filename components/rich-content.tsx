@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import { Fragment, memo, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { StreamAnimRoot } from "@/components/workspace/stream-text";
 import { ChatBlockStateScope } from "@/components/workspace/chat-block-state";
@@ -16,7 +16,7 @@ import { MixedText, TableCellRich, withInlineRich } from "@/components/visuals/m
 import { htmlToMarkdown } from "@/lib/visuals/html-rich";
 import { ChatBlock } from "@/components/workspace/chat-block";
 import { renderFormula } from "@/lib/visuals/catalog";
-import { protectInlineMath, restoreInlineMath, scrubLeakedMarkup, splitDisplayMath } from "@/lib/visuals/math";
+import { promoteEquationStepsToDisplayMath, protectInlineMath, restoreInlineMath, scrubLeakedMarkup, splitDisplayMath } from "@/lib/visuals/math";
 import { CitationMark } from "@/components/workspace/citations";
 import { linkCitations, sourceNumberFromHref } from "@/lib/rag/sources";
 import { isInlineMarkHref, remarkInlineMarks } from "@/lib/visuals/markdown-marks";
@@ -25,6 +25,8 @@ import type { VisualBlock } from "@/types/visual";
 import type { ChatImageHit } from "@/types/chat";
 import { layoutImageGalleries, type ImageGalleryPart } from "@/lib/images/galleries";
 import { ImageGallery } from "@/components/workspace/image-gallery";
+import { SearchSources } from "@/components/workspace/search-sources";
+import { extractWebSearchSources, webSourceInsertionIndex } from "@/lib/rag/web-citations";
 
 const HighlightedCode = dynamic(() => import("@/components/workspace/highlighted-code").then((mod) => mod.HighlightedCode), {
   loading: () => <code>…</code>,
@@ -34,7 +36,7 @@ const HighlightedCode = dynamic(() => import("@/components/workspace/highlighted
 type Segment =
   | { kind: "md"; text: string }
   | { kind: "table"; headers: string[]; rows: string[][] }
-  | { kind: "math"; value: string }
+  | { kind: "math"; value: string; note?: string; step?: boolean }
   | { kind: "code"; lang: string; text: string }
   | { kind: "visual"; block: VisualBlock }
   | { kind: "toby"; block: ParsedChatBlock }
@@ -52,14 +54,16 @@ function splitRichContent(parts: ReturnType<typeof layoutImageGalleries>["segmen
     if (part.kind === "md") {
       return splitMarkdownTables(htmlToMarkdown(part.text)).flatMap((piece): Segment[] => {
         if (piece.kind === "table") return [piece];
-        return splitDisplayMath(piece.text).flatMap((item): Segment[] => {
-          if (item.kind === "math") return item.value ? [{ kind: "math", value: item.value }] : [];
+        return splitDisplayMath(promoteEquationStepsToDisplayMath(piece.text)).flatMap((item): Segment[] => {
+          if (item.kind === "math") return item.value ? [{ kind: "math", value: item.value, note: item.note, step: item.step }] : [];
           return item.text.trim() ? [{ kind: "md", text: item.text }] : [];
         });
       });
     }
     if (part.lang === "math" || part.lang === "latex") {
-      return part.text.trim() ? [{ kind: "math", value: part.text.trim() }] : [];
+      if (!part.text.trim()) return [];
+      const parsed = splitDisplayMath(`$$${part.text.trim()}$$`).find((item) => item.kind === "math");
+      return parsed?.kind === "math" ? [{ kind: "math", value: parsed.value, note: parsed.note, step: parsed.step }] : [];
     }
     if (part.lang === "toby" || part.lang.startsWith("toby-")) {
       const parsed = parseTobyFence(part.lang, part.text);
@@ -178,7 +182,7 @@ const MarkdownBody = memo(function MarkdownBody({
           h2: ({ children }) => <h2>{rich(children)}</h2>,
           h3: ({ children }) => <h3>{rich(children)}</h3>,
           ul: ({ children }) => <ul>{children}</ul>,
-          ol: ({ children }) => <ol>{children}</ol>,
+          ol: ({ children, start }) => <ol start={start}>{children}</ol>,
           li: ({ children }) => <li>{rich(children)}</li>,
           br: () => <br />,
           hr: () => null,
@@ -233,10 +237,35 @@ const MarkdownBody = memo(function MarkdownBody({
   );
 });
 
-function MathBlock({ value }: { value: string }) {
+function MathBlock({ value, note }: { value: string; note?: string }) {
   return (
     <ChatBlock copyText={value} label="math" kind="math">
       <div className="chat-math">{renderFormula(value, true) ?? value}</div>
+      {note ? (
+        <div className="mt-2 text-center text-[12px] font-semibold leading-4 text-muted">
+          <MixedText text={note} />
+        </div>
+      ) : null}
+    </ChatBlock>
+  );
+}
+
+function MathStepsBlock({ steps }: { steps: Array<{ value: string; note?: string }> }) {
+  const copyText = steps.map(({ value }) => value).join("\n");
+  return (
+    <ChatBlock copyText={copyText} label="math" kind="math">
+      <div className="grid gap-4">
+        {steps.map((step, index) => (
+          <div key={`math-row-${index}`} className="grid gap-1.5">
+            <div className="chat-math">{renderFormula(step.value, true) ?? step.value}</div>
+            {step.note ? (
+              <div className="text-center text-[12px] font-semibold leading-4 text-muted">
+                <MixedText text={step.note} />
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </ChatBlock>
   );
 }
@@ -266,8 +295,13 @@ export const RichContent = memo(function RichContent({
   onOpenImageUpload?: (image: ChatImageHit) => void;
   allowNativeBlocks?: boolean;
 }) {
-  const layout = useMemo(() => layoutImageGalleries(prepareChatMarkdown(text), images), [text, images]);
+  const { content: visibleText, sources: webSources } = useMemo(() => extractWebSearchSources(text), [text]);
+  const layout = useMemo(() => layoutImageGalleries(prepareChatMarkdown(visibleText), images), [visibleText, images]);
   const segments = useMemo(() => splitRichContent(layout.segments), [layout]);
+  const sourceIndex = useMemo(() => webSourceInsertionIndex(segments.map((segment) => ({
+    kind: segment.kind,
+    blockType: segment.kind === "toby" ? segment.block.type : undefined,
+  }))), [segments]);
   const liveIndex = streaming ? segments.length - 1 : -1;
   const frozen = streaming ? Math.max(0, liveIndex) : segments.length;
   const seenFrozen = useRef(0);
@@ -289,43 +323,82 @@ export const RichContent = memo(function RichContent({
           const previous = segments[index - 1];
           const followsRichBlock = previous !== undefined && previous.kind !== "md";
           const markdown = followsRichBlock ? removeLeadingRuleAfterBlock(segment.text) : segment.text;
-          return <MarkdownBody key={key} text={markdown} streaming={live && streaming} />;
+          return <Fragment key={key}>
+            <MarkdownBody text={markdown} streaming={live && streaming} />
+            {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+          </Fragment>;
         }
         if (segment.kind === "gallery") {
           return (
-            <div key={key} className={`my-5 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
+            <Fragment key={key}>
+            <div className={`my-5 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
               <ImageGallery images={segment.images} ka={ka} onOpenUpload={onOpenImageUpload} />
             </div>
+            {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+            </Fragment>
           );
         }
         if (segment.kind === "table") {
           return (
-            <div key={key} className={wrap}>
+            <Fragment key={key}>
+            <div className={wrap}>
               <ChatTable headers={segment.headers} rows={segment.rows} />
             </div>
+            {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+            </Fragment>
+          );
+        }
+        if (segment.kind === "math" && segment.step) {
+          const previous = segments[index - 1];
+          if (previous?.kind === "math" && previous.step) return null;
+          let end = index + 1;
+          while (end < segments.length) {
+            const candidate = segments[end];
+            if (candidate?.kind !== "math" || !candidate.step) break;
+            end += 1;
+          }
+          return (
+            <Fragment key={`math-steps-${index}`}>
+            <div className={wrap}>
+              <MathStepsBlock steps={segments.slice(index, end).flatMap((step) =>
+                step.kind === "math" ? [{ value: step.value, note: step.note }] : [],
+              )} />
+            </div>
+            {!streaming && webSources.length > 0 && end - 1 === sourceIndex ? <SearchSources sources={webSources} /> : null}
+            </Fragment>
           );
         }
         if (segment.kind === "math") {
           return (
-            <div key={key} className={wrap}>
-              <MathBlock value={segment.value} />
+            <Fragment key={key}>
+            <div className={wrap}>
+              <MathBlock value={segment.value} note={segment.note} />
             </div>
+            {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+            </Fragment>
           );
         }
         if (segment.kind === "code") {
           return (
-            <div key={key} className={wrap}>
+            <Fragment key={key}>
+            <div className={wrap}>
               <ChatBlock copyText={segment.text} label={segment.lang || "text"} kind="code">
                 <HighlightedCode code={segment.text} lang={segment.lang} />
               </ChatBlock>
             </div>
+            {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+            </Fragment>
           );
         }
         if (segment.kind === "toby") {
-          if (!allowNativeBlocks) return <ChatBlock key={key} copyText={JSON.stringify(segment.block.data, null, 2)} label={`toby ${segment.block.type}`} kind="code"><code>{JSON.stringify(segment.block.data, null, 2)}</code></ChatBlock>;
+          if (!allowNativeBlocks) return <Fragment key={key}>
+            <ChatBlock copyText={JSON.stringify(segment.block.data, null, 2)} label={`toby ${segment.block.type}`} kind="code"><code>{JSON.stringify(segment.block.data, null, 2)}</code></ChatBlock>
+            {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+          </Fragment>;
           const node = <ChatBlockStateScope scope={key}><TobyBlockView block={segment.block} streaming={live && streaming} images={images} /></ChatBlockStateScope>;
           return (
-            <div key={key} className={wrap}>
+            <Fragment key={key}>
+            <div className={wrap}>
               {live && streaming ? (
                 <StreamAnimRoot
                   active
@@ -340,14 +413,20 @@ export const RichContent = memo(function RichContent({
                 node
               )}
             </div>
+            {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+            </Fragment>
           );
         }
         return (
-          <div key={key} className={`my-5 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
+          <Fragment key={key}>
+          <div className={`my-5 first:mt-0 last:mb-0 ${wrap ?? ""}`}>
             <ChatBlockStateScope scope={key}><VisualBlockView block={segment.block} /></ChatBlockStateScope>
           </div>
+          {!streaming && webSources.length > 0 && index === sourceIndex ? <SearchSources sources={webSources} /> : null}
+          </Fragment>
         );
       })}
+      {!streaming && webSources.length > 0 && sourceIndex < 0 ? <SearchSources sources={webSources} /> : null}
       {!streaming && layout.remaining.length > 0 ? (
         <div className="my-5 first:mt-0 last:mb-0">
           <ImageGallery images={layout.remaining} ka={ka} onOpenUpload={onOpenImageUpload} />

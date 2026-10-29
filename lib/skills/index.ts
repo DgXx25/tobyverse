@@ -24,7 +24,7 @@ export const SUBJECT_SKILLS: readonly SubjectSkill[] = [
       "მათემატ", "ალგებრ", "გეომეტრ", "წარმოებული", "ინტეგრალ", "განტოლებ", "ფუნქცი", "თეორემ", "ალბათობ", "სტატისტიკ", "ტრიგონომეტრ",
     ],
     write:
-      "Write math with $...$ inline and $$...$$ for a displayed equation, equation only. When asked to solve, show the working one step per line and state the final answer plainly; when asked only for a result or a formula, give just that. Keep units, domains and assumptions explicit.",
+      "Use $...$ for arithmetic expressions, even simple ones; keep final values, units and surrounding prose ordinary. For multi-step equation solutions, show all transitions in one $$...$$ block using \\begin{aligned}, one equation per row. Avoid inline prose and arrow chains. Add only an optional short purpose note if useful or requested; explain the goal, not the operation. Keep one-step calculations inline, state the answer plainly, and make units, domains and assumptions explicit.",
   },
   {
     id: "physics",

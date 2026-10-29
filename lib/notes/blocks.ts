@@ -262,11 +262,13 @@ function flattenIncoming(raw: unknown): VisualBlock[] {
         continue;
       }
       const text = typeof row.text === "string" ? clip(row.text, MAX_TERM) : undefined;
+      const caption = typeof row.caption === "string" ? clip(row.caption, 160) : undefined;
       out.push({
         type: "formula_card",
         title: typeof row.title === "string" ? clip(row.title, MAX_TITLE) : undefined,
         text: text || undefined,
         formula: clip(formula, MAX_FORMULA),
+        caption: caption || undefined,
       });
       continue;
     }

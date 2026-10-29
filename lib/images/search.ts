@@ -23,7 +23,7 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 200;
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 20;
-const FETCH_MS = 8000;
+const FETCH_MS = 4000;
 const UA = "Tobyverse/1.0 (study app; image search)";
 
 type CacheEntry = { at: number; hits: ImageSearchHit[] };
@@ -37,6 +37,10 @@ function pexelsKey(): string {
 
 function pixabayKey(): string {
   return (process.env.PIXABAY_API_KEY ?? "").trim();
+}
+
+function isStockPhotoQuery(query: string): boolean {
+  return !/\b(chart|graph|diagram|plot|map|flag|schematic|molecule|atom|structure|formula|equation)\b|გრაფიკ|დიაგრამ|რუკ|დროშ|სქემ|მოლეკულ|ატომ|სტრუქტურ|ფორმულ|განტოლებ/i.test(query);
 }
 
 /** Always on: Wikimedia + Openverse need no keys. */
@@ -234,7 +238,7 @@ async function searchWikimedia(query: string, count: number, signal?: AbortSigna
         thumbnail: thumbnail || preview,
         alt: title,
         source: "wikimedia",
-        fallbackAlt: query,
+        fallbackAlt: "Image",
       });
       return hit ? [hit] : [];
     }),
@@ -262,7 +266,7 @@ async function searchOpenverse(query: string, count: number, signal?: AbortSigna
         thumbnail: thumb || imageUrl,
         alt: typeof item.title === "string" ? item.title : "",
         source: "openverse",
-        fallbackAlt: query,
+        fallbackAlt: "Image",
       });
       return hit ? [hit] : [];
     }),
@@ -295,7 +299,7 @@ async function searchPexels(query: string, count: number, signal?: AbortSignal):
         thumbnail: medium || tiny || large,
         alt: typeof photo.alt === "string" ? photo.alt : "",
         source: "pexels",
-        fallbackAlt: query,
+        fallbackAlt: "Image",
       });
       return hit ? [hit] : [];
     }),
@@ -333,7 +337,7 @@ async function searchPixabay(query: string, count: number, signal?: AbortSignal)
         thumbnail: web || preview || large,
         alt: typeof item.tags === "string" ? item.tags : "",
         source: "pixabay",
-        fallbackAlt: query,
+        fallbackAlt: "Image",
       });
       return hit ? [hit] : [];
     }),
@@ -342,6 +346,29 @@ async function searchPixabay(query: string, count: number, signal?: AbortSignal)
 
 async function searchProviders(plan: ImageSearchPlan, keep: number, signal?: AbortSignal): Promise<ImageSearchHit[]> {
   const fetchCount = Math.min(20, Math.max(12, keep * 2));
+  const stockTarget = Math.min(3, keep);
+  if (isStockPhotoQuery(plan.query) && (pexelsKey() || pixabayKey())) {
+    let stockHits: ImageSearchHit[] = [];
+    let pexelsOk = true;
+    if (pexelsKey()) {
+      const pexels = await searchPexels(plan.query, fetchCount, signal);
+      pexelsOk = pexels.ok;
+      stockHits = pickImageHits(pexels.hits, plan, keep);
+      if (stockHits.length >= stockTarget) return stockHits;
+    }
+    if (pixabayKey() && stockHits.length < stockTarget) {
+      const pixabay = await searchPixabay(plan.query, fetchCount, signal);
+      stockHits = mergeHits(stockHits, pickImageHits(pixabay.hits, plan, keep), keep);
+      if (stockHits.length >= stockTarget) return stockHits;
+      if (!pexelsOk && !pixabay.ok && stockHits.length === 0) throw new ImageSearchError("Image search failed.");
+    }
+    if (stockHits.length >= 2) return stockHits;
+    // Openverse can fill a short stock set, but archive scans are not mixed into
+    // ordinary photo galleries where they look unrelated to the requested style.
+    const openverse = await searchOpenverse(plan.query, fetchCount, signal);
+    return mergeHits(stockHits, pickImageHits(openverse.hits, plan, keep), keep);
+  }
+
   let hits: ImageSearchHit[] = [];
   let anyOk = false;
 

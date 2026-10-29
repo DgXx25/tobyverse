@@ -19,6 +19,7 @@ function fallbackProfile(user: User): UserProfile {
     admin: false,
     usage: emptyUsage(),
     preferredModel: null,
+    preferredEffort: null,
     chatMode: null,
     theme: null,
     themeAccents: { light: "default", dark: "default" },

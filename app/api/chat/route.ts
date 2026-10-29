@@ -1,11 +1,15 @@
 import { generateTextStream, generateToolStream, getAIProvider, resolveAIRequest } from "@/lib/ai/gemini";
 import { eligibleChatToolNames, isInternalTool, toolStreamsText, type ChatToolCall } from "@/lib/ai/tools";
 import { toolStatusText, withToolTimeout, type ToolExecutionStatus } from "@/lib/ai/tool-execution";
-import { DEFAULT_AI_PROVIDER, DEFAULT_MODEL_SELECTION, isAllowedAiModel, isKnownModelSelection, isEnabledProvider } from "@/lib/ai/catalog";
+import { DEFAULT_AI_PROVIDER, DEFAULT_MODEL_SELECTION, isAiEffort, isAllowedAiModel, isKnownModelSelection, isEnabledProvider } from "@/lib/ai/catalog";
 import { selectModel } from "@/lib/ai/model-routing";
 import { assertSignedInRequest, authErrorResponse } from "@/lib/api/assert";
 import { GUEST_ASSISTANT_CAP, GUEST_CAP_CODE, GUEST_CAP_LINE, gateGuestChatTool } from "@/lib/guest";
 import { buildChatSystemPrompt } from "@/lib/chat/context";
+import { after } from "next/server";
+import { openConversation } from "@/lib/chat/conversation-store";
+import { CONVERSATION_SUMMARY_INSTRUCTION, recentConversation, prepareRecentConversation } from "@/lib/chat/conversation-context";
+import { DEFAULT_CLAUDE_MODEL } from "@/lib/ai/catalog";
 import { createSkillLoader } from "@/lib/skills/server";
 import { parseChatArtifact } from "@/lib/artifacts/active";
 import { fallbackToolAfterProvider, forcedToolForRequest } from "@/lib/chat/tool-routing";
@@ -15,6 +19,12 @@ import { asChatMode, chatModeSendsToolDeclarations, chatModeTools } from "@/lib/
 import { retrieveChunks } from "@/lib/rag/server";
 import { numberSources, retrievalQuery, sourceRef } from "@/lib/rag/sources";
 import { papersInTurns } from "@/lib/blocks/paper-thread";
+import {
+  compactWeatherReply,
+  ensureCitedWeatherCard,
+  isPlainWeatherQuestion,
+  WEATHER_CARD_REPAIR_INSTRUCTION,
+} from "@/lib/blocks/kinds/weather-response";
 import { startAiUsageSession, aiUsageErrorResponse } from "@/lib/billing/server";
 import { readAccountAccess } from "@/lib/billing/account-server";
 import { waitForChatStep } from "@/lib/ai/chat-deadline";
@@ -33,8 +43,13 @@ type ChatRequestBody = {
   mode?: unknown;
   provider?: unknown;
   model?: unknown;
+  effort?: unknown;
   history?: unknown;
   context?: unknown;
+  threadId?: unknown;
+  historyBeforeId?: unknown;
+  historyThroughId?: unknown;
+  continuation?: unknown;
 };
 
 function asMode(value: unknown): ChatMode {
@@ -289,6 +304,7 @@ export async function POST(request: Request) {
   }
   const routing = selectModel(prompt, requestedSelection, plan);
   const modelId = routing.model;
+  const effort = isAiEffort(body.effort) ? body.effort : undefined;
   if (!isAllowedAiModel(modelId, plan)) {
     return Response.json({ error: "This model is not included in your plan.", code: "premium_model_required" }, { status: 403 });
   }
@@ -304,7 +320,7 @@ export async function POST(request: Request) {
   }
   const usageReporter = usage ? usage.report : undefined;
 
-  const history = asHistory(body.history).slice(-20);
+  let history = prepareRecentConversation(asHistory(body.history), prompt);
   if (session.anonymous) {
     const assistantTurns = history.filter((item) => item.role === "assistant").length;
     if (assistantTurns >= GUEST_ASSISTANT_CAP) {
@@ -314,6 +330,12 @@ export async function POST(request: Request) {
   const context = asContext(body.context, mode);
   const generation = new AbortController();
   const signal = AbortSignal.any([request.signal, generation.signal, AbortSignal.timeout(240_000)]);
+  let maintainHistory: (() => Promise<void>) | undefined;
+  let answerCompleted = false;
+  after(async () => {
+    try { if (answerCompleted) await maintainHistory?.(); }
+    catch (error) { console.warn("[chat-context] summary maintenance skipped", error instanceof Error ? error.name : "Error"); }
+  });
   const stream = new ReadableStream({
     async start(controller) {
       // Establish the response before retrieval or the model's thinking phase.
@@ -322,6 +344,33 @@ export async function POST(request: Request) {
       heartbeat();
       const heartbeatTimer = setInterval(heartbeat, 10_000);
       try {
+        const conversation = !session.anonymous && body.threadId && process.env.CHAT_CONTEXT_COMPACTION !== "0"
+          ? await waitForChatStep("Loading conversation context", () => openConversation({
+              uid: session.uid, projectId: context.projectId,
+              threadId: typeof body.threadId === "string" ? body.threadId : "",
+              beforeId: typeof body.historyBeforeId === "string" ? body.historyBeforeId : undefined,
+              throughId: typeof body.historyThroughId === "string" ? body.historyThroughId : undefined,
+              signal,
+            }), { signal, timeoutMs: 2_500 }).catch(() => null)
+          : null;
+        if (conversation) {
+          const continuation = body.continuation === true && history.at(-1)?.role === "assistant" ? [history.at(-1)!] : [];
+          history = recentConversation([...conversation.recent, ...continuation]).map(({ role, content }) => ({ role, content }));
+          maintainHistory = () => conversation.refresh(async (summaryPrompt) => {
+            // Meter the occasional background call separately; never delay the reply.
+            const summaryUsage = await startAiUsageSession(session.uid, { models: [DEFAULT_CLAUDE_MODEL] });
+            try {
+              return await getAIProvider(DEFAULT_CLAUDE_MODEL).generateText(summaryPrompt, {
+                model: DEFAULT_CLAUDE_MODEL, systemInstruction: CONVERSATION_SUMMARY_INSTRUCTION,
+                maxOutputTokens: 1400, cache: false, usage: summaryUsage.report,
+                signal: AbortSignal.timeout(30_000),
+              });
+            } finally { await summaryUsage.commit(); }
+          });
+        }
+        console.info("[chat-context]", JSON.stringify({ recentMessages: history.length,
+          historyChars: history.reduce((sum, row) => sum + row.content.length, 0),
+          summaryChars: conversation?.summary.length ?? 0, historySearch: conversation?.hasOlder ?? false }));
         const linkedPages = session.anonymous ? Promise.resolve([]) : readChatLinkedPages(prompt,
           body.context && typeof body.context === "object" ? (body.context as Record<string, unknown>).linkUrls : [], signal).catch(() => []);
         const threadPaper = context.threadPaper || papersInTurns(history).length > 0;
@@ -348,12 +397,17 @@ export async function POST(request: Request) {
     }
   }
 
-  const withPrompt = { ...context, prompt, threadPaper, sources, linkedPages: await linkedPages };
+  const withPrompt = { ...context, prompt, threadPaper, sources, linkedPages: await linkedPages,
+    conversationSummary: conversation?.summary, historySearchAvailable: conversation?.hasOlder };
   const guestContext = session.anonymous
     ? { ...withPrompt, materials: [], figures: [], hasMaterials: false, acceptedTool: undefined, memories: [], personalization: undefined }
     : withPrompt;
   const requestImages = guestContext.figures?.map((item) => ({ mimeType: item.mime, data: item.data }));
   const resolvedRequest = resolveAIRequest(modelId, requestImages);
+  const compactWeatherAnswer = resolvedRequest.provider.id === "anthropic" &&
+    isPlainWeatherQuestion(prompt) &&
+    Boolean(resolvedRequest.provider.generateToolStream) &&
+    chatModeSendsToolDeclarations(mode);
   console.info("[provider-routing]", JSON.stringify({
     provider: resolvedRequest.provider.id,
     model: resolvedRequest.model ?? modelId,
@@ -393,6 +447,7 @@ export async function POST(request: Request) {
           try {
             const response = await withToolTimeout(async (signal) => {
               if (call.name === "load_skill") return loadSkill(call.args.id);
+              if (call.name === "search_chat_history") return conversation?.search(call.args.query ?? "", call.args.id) ?? { messages: [] };
               // Artifact creation stays in the existing client dispatcher.
               if (call.name !== "search_images") return { ok: true, tool: call.name, deferred: !toolStreamsText(call.name) };
               if (guestContext.hintAsk || guestContext.examAsk) throw new Error("This turn is a chat exercise or hint.");
@@ -410,7 +465,7 @@ export async function POST(request: Request) {
               });
               imageResults!.push(...unique);
               return { galleryId, images: unique.map(({ title, source }, imageIndex) => ({ title, source, imageIndex })) };
-            }, options?.signal ?? signal);
+            }, options?.signal ?? signal, call.name === "search_images" ? 25_000 : undefined);
             const failed = response && typeof response === "object" && "ok" in response && response.ok === false;
             reportToolStatus({ call, phase: failed ? "error" : "complete", response }, id);
             return response;
@@ -418,7 +473,8 @@ export async function POST(request: Request) {
             signal.throwIfAborted();
             reportToolStatus({ call, phase: "error" }, id);
             console.warn("[chat-tool] execution failed", call.name, error instanceof Error ? error.message : error);
-            return { ok: false, images: [], error: "Tool unavailable. Answer in text using the available context; do not retry this tool." };
+            const detail = error instanceof Error ? error.message : "The requested tool is unavailable.";
+            return { ok: false, images: [], error: detail };
           }
         };
         const sendImageTool = async (tool: ChatToolCall) => {
@@ -466,10 +522,15 @@ export async function POST(request: Request) {
         if (supportsTools) {
           for await (const part of generateToolStream(prompt, {
             model: modelId,
+            effort,
             mode,
             history,
             systemInstruction,
-            tools: chatModeTools(mode),
+            tools: chatModeTools(mode).filter(name => name !== "search_chat_history" || conversation?.hasOlder),
+            // Image search uses the photo catalog tool; Anthropic web search
+            // returns text sources rather than thumbnails and would double-search.
+            webSearch: explicit?.name !== "search_images",
+            webSearchRequired: compactWeatherAnswer && explicit?.name !== "search_images",
             toolChoice:
               explicit && eligibleChatToolNames(mode).includes(explicit.name)
                 ? explicit.name
@@ -500,7 +561,7 @@ export async function POST(request: Request) {
             const preview = raw;
             const waitForTool = Boolean(guestContext.priorClarify && guestContext.pendingKind && !usedContextTool);
             if (part.text && (!waitForTool || preview) && (!preview || toolStreamsText(preview.name))) {
-              if (preview || !explicit) {
+              if (!compactWeatherAnswer && (preview || !explicit)) {
                 streamed = true;
                 controller.enqueue(encodeSse({ delta: part.text }));
               }
@@ -509,12 +570,37 @@ export async function POST(request: Request) {
           }
         }
 
+        if (compactWeatherAnswer) {
+          try {
+            pendingProviderText = await ensureCitedWeatherCard(pendingProviderText, (answer) =>
+              resolvedRequest.provider.generateText(answer, {
+                model: resolvedRequest.model,
+                mode,
+                systemInstruction: WEATHER_CARD_REPAIR_INSTRUCTION,
+                cache: false,
+                maxOutputTokens: 1000,
+                signal,
+                usage: usageReporter,
+              }),
+              prompt,
+            );
+          } catch (error) {
+            signal.throwIfAborted();
+            console.warn("[weather-card] formatting failed", error instanceof Error ? error.message : "unknown error");
+          }
+          // A simple weather lookup should surface only one concise sentence
+          // plus a validated card and its citations, even if Claude over-explains.
+          pendingProviderText = compactWeatherReply(pendingProviderText);
+        }
+
         if (!raw) {
           // A context tool followed by final text is an answer, not a zero-tool routing miss.
           const guidedAnswer: ChatToolCall | null = usedContextTool && pendingProviderText.trim()
             ? { name: "answer", args: {} }
             : null;
-          raw = explicit ?? guidedAnswer ?? fallbackToolAfterProvider({
+          raw = explicit && isInternalTool(explicit.name)
+            ? guidedAnswer ?? { name: "answer", args: {} }
+            : explicit ?? guidedAnswer ?? fallbackToolAfterProvider({
             prompt,
             mode,
             active: guestContext.activeArtifact,
@@ -536,6 +622,7 @@ export async function POST(request: Request) {
           } else if (!supportsTools && toolStreamsText(preview.name)) {
             for await (const delta of generateTextStream(prompt, {
               model: modelId,
+              effort,
               mode,
               history,
               systemInstruction,
@@ -566,11 +653,12 @@ export async function POST(request: Request) {
             const answerSystem =
               tool.name === "search_images"
                 ? imageResults?.length
-                  ? `${systemInstruction}\n\nCompleted image search results (reference data): ${JSON.stringify(imageResults.map(({ galleryId, title, source }, index) => ({ galleryId, title, source, imageIndex: imageResults!.slice(0, index).filter((image) => image.galleryId === galleryId).length })))}\nAnswer the user's request using these completed results. You may place a gallery anywhere among prose and available native or visual blocks with an image-gallery code fence containing {"galleryId":"the returned ID"}. Optionally use a toby image-list fence with {"items":[{"title":"Heading","text":"Explanation","galleryId":"the returned ID","imageIndex":0}]} for illustrated rows. These can be interleaved with prose and other blocks. Use only returned gallery IDs and zero-based image indexes, and keep image URLs out of the answer. Unplaced results appear after the answer.`
+                  ? `${systemInstruction}\n\nCompleted image search results (reference data): ${JSON.stringify(imageResults.map(({ galleryId, title, source }, index) => ({ galleryId, title, source, imageIndex: imageResults!.slice(0, index).filter((image) => image.galleryId === galleryId).length })))}\nAnswer the user's request using these completed results. You may place a gallery anywhere among prose and available native or visual blocks with an image-gallery code fence containing {"galleryId":"the returned ID"}. When the user asks for several distinct entries with a short explanation for each, prefer a toby image-list fence so each image appears beside its own title and explanation: {"items":[{"title":"Heading","text":"Explanation","galleryId":"the returned ID","imageIndex":0}]}. Use a plain gallery when they mainly want to browse. These can be interleaved with prose and other blocks. Use only returned gallery IDs and zero-based image indexes, and keep image URLs out of the answer. Unplaced results appear after the answer.`
                   : `${systemInstruction}\n\nImage search returned no images. Answer in text using the available context and briefly mention that images are unavailable.`
                 : systemInstruction;
             for await (const delta of generateTextStream(prompt, {
               model: modelId,
+              effort,
               mode,
               history,
               systemInstruction: answerSystem,
@@ -584,6 +672,7 @@ export async function POST(request: Request) {
           }
         }
         if (!toolSent) controller.enqueue(encodeSse({ tool }));
+        answerCompleted = true;
         controller.enqueue(encodeSse({ done: true }));
         controller.close();
       } catch (error) {

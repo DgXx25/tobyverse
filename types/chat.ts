@@ -159,6 +159,9 @@ export type ChatKnowledgeContext = {
 };
 
 export type ChatGenerationContext = {
+  /** Server-owned thread continuity, never parsed from a client payload. */
+  conversationSummary?: string;
+  historySearchAvailable?: boolean;
   /** Read-only pages from current-turn URLs, never saved as Sources. */
   linkedPages?: { url: string; title: string; text: string }[];
   /** Server-selected, evidence-backed observations; never accepted from a client payload. */

@@ -7,6 +7,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   limit,
   onSnapshot,
   orderBy,
@@ -17,6 +18,7 @@ import {
   startAfter,
   updateDoc,
   where,
+  writeBatch,
   type Unsubscribe,
 } from "firebase/firestore";
 import { asChatMode } from "@/lib/core/chat-modes";
@@ -38,6 +40,7 @@ import type { ChatArtifact, ChatAttachment, ChatImageHit, ChatMessage, ChatMode,
 import type { ExerciseType } from "@/types/exercise";
 import { clearUntouchedNotebook } from "@/lib/workspace/draft-notebook";
 import { needsAutoTitle } from "@/lib/workspace/title";
+import { preserveMessageOrder } from "@/lib/chat/message-order";
 
 function isPermissionDenied(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -643,9 +646,7 @@ export async function addChatMessage(input: {
   const ref = input.id
     ? doc(messagesCollection(input.projectId, threadId), input.id)
     : doc(messagesCollection(input.projectId, threadId));
-  await setDoc(
-    ref,
-    omitUndefined({
+  const payload = omitUndefined({
       projectId: input.projectId,
       threadId,
       lessonId: null,
@@ -669,8 +670,16 @@ export async function addChatMessage(input: {
       ...(input.activity?.length ? { activity: input.activity.slice(0, 5).map((item) => item.trim().slice(0, 100)).filter(Boolean) } : {}),
       ...(input.memorized ? { memorized: true } : {}),
       ...(input.responseStatus ? { responseStatus: input.responseStatus } : {}),
-    }),
-  );
+    });
+  if (input.id) {
+    await runTransaction(getFirebaseDb(), async transaction => {
+      const existing = await transaction.get(ref);
+      transaction.set(ref, preserveMessageOrder(payload, existing.data()));
+      if (existing.exists() && existing.data().content !== payload.content) {
+        transaction.update(chatRef(input.projectId, threadId), { historyRevision: increment(1) });
+      }
+    });
+  } else await setDoc(ref, payload);
   clearUntouchedNotebook(input.projectId);
 
   // Recency metadata is best effort; a reconnect must not hold up an already saved message.
@@ -704,7 +713,12 @@ export async function patchChatMessage(
   if (patch.memorized) payload.memorized = true;
   if (patch.activity !== undefined) payload.activity = patch.activity.slice(0, 5).map((item) => item.trim().slice(0, 100)).filter(Boolean);
   if (Object.keys(payload).length === 0) return;
-  await updateDoc(doc(messagesCollection(projectId, threadId), messageId), omitUndefined(payload));
+  const batch = writeBatch(getFirebaseDb());
+  batch.update(doc(messagesCollection(projectId, threadId), messageId), omitUndefined(payload));
+  // A summary of edited history is no longer valid, even if its last message
+  // did not change. Invalidate it atomically with any transcript content edit.
+  if (patch.content !== undefined) batch.update(chatRef(projectId, threadId), { historyRevision: increment(1) });
+  await batch.commit();
 }
 
 export async function listChatMessages(
@@ -768,6 +782,7 @@ export async function deleteChatMessages(
   }
   await Promise.all([...chatImages.values()].map((image) => discardChatImage(image).catch(() => undefined)));
   await Promise.all(snapshot.docs.map((item) => deleteDoc(item.ref)));
+  await deleteDoc(doc(chatRef(projectId, threadId), "contextState", "summary")).catch(() => undefined);
   await deleteDoc(chatRef(projectId, threadId)).catch(() => undefined);
   await deleteDoc(chatIndexRef(publicChatId(projectId, threadId))).catch(() => undefined);
 }

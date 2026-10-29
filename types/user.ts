@@ -31,6 +31,7 @@ export type UserProfile = {
   admin: boolean;
   usage: UserUsage;
   preferredModel: string | null;
+  preferredEffort: import("@/lib/ai/catalog").AiEffort | null;
   /** Reply style new notebooks start with. Null until the user picks one. */
   chatMode: ChatMode | null;
   theme: string | null;

@@ -19,12 +19,35 @@ const { detectSubjectSkill } = require('../lib/skills/index.ts');
 const base = { projectId: 'p', projectTitle: 'Workspace', projectDescription: '', goal: '', mode: 'auto', materials: [], knowledgeItems: [], prompt: 'Hello' };
 const activePath = { title: 'English', courseTitle: 'English', nodeTitle: 'Present perfect', teach: 'Discuss usage', outcome: '', done: 0, total: 4, courseCount: 1, started: true };
 
+test('multi-step equations use one vertically aligned math block with optional purpose text', () => {
+  const { CORE_SYSTEM_INSTRUCTION } = require('../lib/ai/core-instruction.ts');
+  const { CHAT_TOOL_DEFINITIONS } = require('../lib/ai/tools.ts');
+  const illustrate = CHAT_TOOL_DEFINITIONS.find(({ name }) => name === 'illustrate');
+  assert.match(CORE_SYSTEM_INSTRUCTION, /For multi-step equation solutions, show all transitions in one display-math block/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /one equation per row/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /Avoid inline prose and arrow chains/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /short purpose note .*explain the goal, not the operation/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /Keep one-step calculations inline/);
+  assert.match(illustrate.description, /Optionally emit typed catalog blocks when a visual materially helps/);
+  assert.doesNotMatch(illustrate.description, /For multi-step equation solutions, prefer inline display-math blocks/);
+  const { SUBJECT_SKILLS } = require('../lib/skills/index.ts');
+  const math = SUBJECT_SKILLS.find(({ id }) => id === 'math');
+  assert.match(math.write, /one \$\$\.\.\.\$\$ block using .*begin\{aligned\}/i);
+});
+
+test('equation math blocks need no wording hint or extra tool schema', () => {
+  const prompt = buildChatSystemPrompt({ ...base, prompt: 'იპოვე z: 6z + 4 = 28.' });
+  assert.doesNotMatch(prompt, /Optional native blocks available this turn \(sections\)/);
+  assert.match(prompt, /one display-math block using .*begin\{aligned\}/i);
+  assert.match(prompt, /short purpose note .*explain the goal, not the operation/i);
+});
+
 test('one short core is the exact prefix in every mode, with optional ordered slots', () => {
   const { CORE_SYSTEM_INSTRUCTION } = require('../lib/ai/core-instruction.ts');
   const { assembleChatSystemPrompt } = require('../lib/chat/system-prompt.ts');
   const words = CORE_SYSTEM_INSTRUCTION.split(/\s+/).length;
   assert.ok(words >= 150 && words <= 400, `core has ${words} words`);
-  assert.match(CORE_SYSTEM_INSTRUCTION, /MUST avoid repeating information across formats; use a second form only for distinct value/u);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /MUST avoid repeating information across formats; use another form only for distinct value/u);
   assert.equal(assembleChatSystemPrompt({}), CORE_SYSTEM_INSTRUCTION);
   assert.equal(buildChatSystemPrompt({ ...base, projectTitle: '' }), CORE_SYSTEM_INSTRUCTION);
   const normal = `${CORE_SYSTEM_INSTRUCTION}\n\n<project_context>\nProject: Workspace.\n</project_context>`;
@@ -38,6 +61,13 @@ test('one short core is the exact prefix in every mode, with optional ordered sl
   assert.doesNotMatch(prompt, /reply_style|LEGACY_STYLE/);
   const tags = ['project_context', 'subject_skill', 'active_path', 'user_memory', 'turn_context', 'turn_materials'];
   for (let i = 1; i < tags.length; i++) assert.ok(prompt.indexOf(`<${tags[i - 1]}>`) < prompt.indexOf(`<${tags[i]}>`));
+});
+
+test('general voice prefers concise simple answers without a fixed length cap', () => {
+  const { CORE_SYSTEM_INSTRUCTION } = require('../lib/ai/core-instruction.ts');
+  assert.match(CORE_SYSTEM_INSTRUCTION, /keep simple requests short/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /synthesize search findings.*instead of narrating sources one by one/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /no fixed word limit or template/i);
 });
 
 test('weak, repeated, and tied subject signals inject nothing', () => {

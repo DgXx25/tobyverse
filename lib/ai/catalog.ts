@@ -50,6 +50,9 @@ export type AiModelId = (typeof AI_MODEL_OPTIONS)[number]["id"];
 export type AiModelOption = (typeof AI_MODEL_OPTIONS)[number];
 export type AiModelSelection = AiModelId | typeof DEFAULT_MODEL_SELECTION;
 export type AiModelSelectionOption = AiModelOption | { id: "auto"; name: "Auto"; paidOnly: false };
+export const AI_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type AiEffort = (typeof AI_EFFORT_LEVELS)[number];
+export const DEFAULT_AI_EFFORT: AiEffort = "medium";
 const AUTO_MODEL_OPTION: AiModelSelectionOption = { id: "auto", name: "Auto", paidOnly: false };
 
 const KNOWN_MODEL_IDS = new Set<string>(AI_MODEL_OPTIONS.map((item) => item.id));
@@ -85,6 +88,14 @@ export function availableModelSelections(planOrAdmin: EffectivePlanId | boolean)
 
 export function isKnownModelSelection(id: string): id is AiModelSelection {
   return id === "auto" || isKnownAiModel(id);
+}
+
+export function isAiEffort(value: unknown): value is AiEffort {
+  return typeof value === "string" && (AI_EFFORT_LEVELS as readonly string[]).includes(value);
+}
+
+export function aiEffortDisplayName(effort: AiEffort): string {
+  return effort === "xhigh" ? "XHigh" : effort === "max" ? "Max" : effort[0].toUpperCase() + effort.slice(1);
 }
 
 export function isAllowedModelSelection(id: string, planOrAdmin: EffectivePlanId | boolean): id is AiModelSelection {

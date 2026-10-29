@@ -97,6 +97,8 @@ export type FormulaCardVisual = {
   /** What the formula is saying, in ordinary words. */
   text?: string;
   formula: string;
+  /** Optional very short explanation shown beneath the equation. */
+  caption?: string;
 };
 
 export type DiagramVisual = {
@@ -204,6 +206,7 @@ export type FromToVisual = {
 } & FromToEmbed;
 
 export type VisualBlock =
+  | import("@/lib/blocks/kinds/scene").SceneBlock
   | SectionVisual
   | TermCardVisual
   | ConceptRowVisual

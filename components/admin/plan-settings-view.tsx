@@ -12,16 +12,15 @@ import "./plan-settings-view.css";
 const PLANS: ConfigurablePlanId[] = ["free_beta", "lite", "pro", "max", "team"];
 const LABELS: Record<ConfigurablePlanId, string> = { free_beta: "Free Beta", lite: "Lite", pro: "Pro", max: "Max", team: "Team" };
 const GIB = 1024 ** 3;
-const formatMoney = (micros: number | null) => micros == null ? "Not configured" : `$${(micros / 1_000_000).toFixed(2)} / week`;
-const formatPlanPrice = (cents: number | null) => cents == null ? "Not set in catalog" : cents === 0 ? "Free" : `$${(cents / 100).toFixed(2)} / month`;
+const formatMonthlyBudget = (weeklyMicros: number | null) => weeklyMicros == null ? "Not configured" : `$${(weeklyMicros * 4 / 1_000_000).toFixed(2)} AI / month`;
+const formatPlanPrice = (cents: number | null) => cents == null ? "—" : cents === 0 ? "Free" : `$${(cents / 100).toFixed(2)} / month`;
 
 export function PlanSettingsView() {
   const { user } = useAuth();
   const [policies, setPolicies] = useState<PlanPolicy[]>([]);
   const [selectedId, setSelectedId] = useState<ConfigurablePlanId>("pro");
-  const [weeklyBudget, setWeeklyBudget] = useState("");
+  const [monthlyBudget, setMonthlyBudget] = useState("");
   const [storageGiB, setStorageGiB] = useState("");
-  const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -46,35 +45,33 @@ export function PlanSettingsView() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!selected) return;
-    setWeeklyBudget(selected.weeklyBudgetMicros == null ? "" : (selected.weeklyBudgetMicros / 1_000_000).toFixed(2));
+    setMonthlyBudget(selected.weeklyBudgetMicros == null ? "" : (selected.weeklyBudgetMicros * 4 / 1_000_000).toFixed(2));
     setStorageGiB(selected.storageLimitBytes == null ? "" : (selected.storageLimitBytes / GIB).toFixed(3).replace(/0+$/, "").replace(/\.$/, ""));
-    setReason("");
   }, [selected]);
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user || !selected || saving) return;
     setError(""); setNotice("");
-    const dollars = Number(weeklyBudget);
+    const monthlyDollars = Number(monthlyBudget);
     const gib = Number(storageGiB);
-    const micros = Math.round(dollars * 1_000_000);
+    // The plan policy remains a weekly allowance; each monthly amount is split into four equal renewals.
+    const weeklyMicros = Math.round(monthlyDollars * 1_000_000 / 4);
     const bytes = Math.round(gib * GIB);
-    if (!Number.isFinite(dollars) || dollars < 0.01 || dollars > 1000 || Math.abs(dollars * 1_000_000 - micros) > 0.000001) { setError("Weekly AI allowance must be between $0.01 and $1,000."); return; }
+    if (!Number.isFinite(monthlyDollars) || monthlyDollars < 0.04 || monthlyDollars > 4000 || Math.abs(monthlyDollars * 1_000_000 - Math.round(monthlyDollars * 1_000_000)) > 0.000001) { setError("Monthly AI budget must be between $0.04 and $4,000."); return; }
     if (!Number.isFinite(gib) || bytes < 50 * 1024 * 1024 || bytes > 5 * 1024 ** 4) { setError("Storage must be between 0.05 GB and 5,120 GB."); return; }
-    if (reason.trim().length < 3) { setError("Add a short reason for the change."); return; }
     setSaving(true);
     try {
       const response = await fetch("/api/admin/plans/policies", {
         method: "POST",
         headers: { Authorization: `Bearer ${await user.getIdToken()}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ planId: selectedId, weeklyBudgetMicros: micros, storageLimitBytes: bytes, expectedRevision: selected.revision, reason: reason.trim(), requestId: crypto.randomUUID() }),
+        body: JSON.stringify({ planId: selectedId, weeklyBudgetMicros: weeklyMicros, storageLimitBytes: bytes, expectedRevision: selected.revision, requestId: crypto.randomUUID() }),
       });
       const result = await response.json() as { policies?: PlanPolicy[]; error?: string };
       if (response.status === 409) throw new Error(`${result.error || "These settings changed elsewhere."} Reload before saving again.`);
       if (!response.ok || !result.policies) throw new Error(result.error || "Plan settings could not be saved.");
       setPolicies(result.policies);
       setNotice(`${LABELS[selectedId]} settings saved and applied.`);
-      setReason("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Plan settings could not be saved.");
     } finally { setSaving(false); }
@@ -83,7 +80,7 @@ export function PlanSettingsView() {
   return <section className="plan-settings-page">
     <div className="plan-settings-wrap">
       <header className="plan-settings-heading">
-        <div><Link href="/admin/plans" className="plan-settings-back"><ArrowLeft size={15} />Accounts and access</Link><h1>Plan settings</h1><p>Set the weekly AI budget and material storage limit applied to each plan.</p></div>
+        <div><Link href="/admin/plans" className="plan-settings-back"><ArrowLeft size={15} />Accounts and access</Link><h1>Plan settings</h1></div>
         <span className="plan-settings-heading-icon"><Settings2 size={20} /></span>
       </header>
 
@@ -93,26 +90,23 @@ export function PlanSettingsView() {
           {PLANS.map((id) => {
             const policy = policies.find((item) => item.planId === id);
             return <button key={id} type="button" aria-current={selectedId === id ? "true" : undefined} className={`plan-settings-item ${selectedId === id ? "is-selected" : ""}`} onClick={() => { setSelectedId(id); setError(""); setNotice(""); }} disabled={loading || saving}>
-              <span className="plan-settings-item-copy"><strong>{LABELS[id]}</strong><small>{formatPlanPrice(PLAN_CATALOG[id].monthlyPriceCents)} · {formatMoney(policy?.weeklyBudgetMicros ?? null)}</small></span>
+              <span className="plan-settings-item-copy"><strong>{LABELS[id]}</strong><small>{formatPlanPrice(PLAN_CATALOG[id].monthlyPriceCents)} · {formatMonthlyBudget(policy?.weeklyBudgetMicros ?? null)}</small></span>
               <span className="plan-settings-item-storage">{policy?.storageLimitBytes == null ? "—" : formatBytes(policy.storageLimitBytes)}</span>
             </button>;
           })}
         </nav>
 
         <main className="plan-settings-editor">
-          <div className="plan-settings-editor-title"><div><h2>{LABELS[selectedId]}</h2><p>{PLAN_CATALOG[selectedId].description}</p></div><span>{formatPlanPrice(PLAN_CATALOG[selectedId].monthlyPriceCents)}</span></div>
+          <div className="plan-settings-editor-title"><h2>{LABELS[selectedId]}</h2><span>{formatPlanPrice(PLAN_CATALOG[selectedId].monthlyPriceCents)}</span></div>
           {loading ? <p className="plan-settings-empty" role="status">Loading plan settings…</p> : selected ? <form onSubmit={save}>
-            <p className="plan-settings-note">Changes apply to every account on this plan. Storage caps are checked by the server; lowering a cap does not remove existing files, but may prevent new uploads until usage is below the limit.</p>
             <div className="plan-settings-fields">
-              <label><span>Weekly AI allowance <small>USD in provider AI costs per UTC week</small></span><span className="plan-settings-input"><b>$</b><input type="number" min="0.01" max="1000" step="0.01" inputMode="decimal" value={weeklyBudget} onChange={(event) => setWeeklyBudget(event.target.value)} required disabled={saving} /></span></label>
-              <label><span>Material storage <small>Per account · 1 GB = 1,024 MB</small></span><span className="plan-settings-input"><input type="number" min="0.05" max="5120" step="0.05" inputMode="decimal" value={storageGiB} onChange={(event) => setStorageGiB(event.target.value)} required disabled={saving} /><b>GB</b></span></label>
+              <label><span>Monthly AI budget <small>4 weekly resets</small></span><span className="plan-settings-input"><b>$</b><input type="number" min="0.04" max="4000" step="0.01" inputMode="decimal" value={monthlyBudget} onChange={(event) => setMonthlyBudget(event.target.value)} required disabled={saving} /></span><small className="plan-settings-budget-preview">Per week: {monthlyBudget && Number.isFinite(Number(monthlyBudget)) ? `$${(Number(monthlyBudget) / 4).toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}` : "—"}</small></label>
+              <label><span>Material storage <small>Per account</small></span><span className="plan-settings-input"><input type="number" min="0.05" max="5120" step="0.05" inputMode="decimal" value={storageGiB} onChange={(event) => setStorageGiB(event.target.value)} required disabled={saving} /><b>GB</b></span></label>
             </div>
-            <label className="plan-settings-reason">Reason for this change<textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} minLength={3} maxLength={400} placeholder="For example: increase storage for the new plan limits" required disabled={saving} /></label>
             {notice ? <p className="plan-settings-message is-success" role="status"><Check size={16} />{notice}</p> : null}
             {error ? <p className="plan-settings-message is-error" role="alert"><CircleAlert size={16} />{error}<button type="button" onClick={() => void load()} disabled={saving}>Reload</button></p> : null}
-            <footer className="plan-settings-actions"><span>Last updated {selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : "Using defaults"}</span><button type="submit" disabled={saving || !reason.trim()}><Save size={15} />{saving ? "Saving…" : "Save settings"}</button></footer>
+            <footer className="plan-settings-actions"><span>Last updated {selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : "Using defaults"}</span><button type="submit" disabled={saving}><Save size={15} />{saving ? "Saving…" : "Save settings"}</button></footer>
           </form> : null}
-          <aside className="plan-settings-billing-note"><strong>Subscription prices are managed in Paddle</strong><p>Keep the Paddle product price and app plan in sync before accepting a price change. This page controls TobyVerse access limits only.</p></aside>
         </main>
       </div>
     </div>

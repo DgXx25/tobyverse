@@ -9,7 +9,7 @@ import { paddleConfiguration, paddleReadiness } from "./paddle";
 import type { AdminPlanDetail, AdminPlansResponse, AdminPlanUser, BillingAccount, BillingAuditEntry } from "@/types/billing-admin";
 
 const uidSchema = z.string().min(1).max(128).refine((value) => !value.includes("/") && value !== "." && value !== "..");
-const base = { expectedRevision: z.number().int().min(0), requestId: z.string().uuid(), reason: z.string().trim().min(3).max(400) };
+const base = { expectedRevision: z.number().int().min(0), requestId: z.string().uuid() };
 export const grantMutationSchema = z.discriminatedUnion("action", [
   z.object({ ...base, action: z.literal("grant"), planId: grantPlanSchema, expiresAt: z.string().datetime({ offset: true }).nullable() }).strict(),
   z.object({ ...base, action: z.literal("revoke") }).strict(),
@@ -82,6 +82,7 @@ export async function mutateAdminGrant(uid: string, actorId: string, raw: unknow
   const ref = billingAccountRef(uid);
   const audit = ref.collection("events").doc(input.requestId);
   const digest = fingerprint(input);
+  const auditReason = input.action === "grant" ? "Manual plan access granted by administrator." : "Manual plan access revoked by administrator.";
   await getAdminFirestore().runTransaction(async (transaction) => {
     const [snapshot, config, prior] = await Promise.all([transaction.get(ref), transaction.get(billingPoliciesRef()), transaction.get(audit)]);
     if (prior.exists) {
@@ -95,13 +96,13 @@ export async function mutateAdminGrant(uid: string, actorId: string, raw: unknow
       if (input.expiresAt && (Date.parse(input.expiresAt) <= now.getTime() || Date.parse(input.expiresAt) > now.getTime() + 100 * 366 * 86400_000)) throw new AuthError("Choose a future expiry date or permanent access.", 400);
       const policy = planPolicies(config.data()?.policies).find((item) => item.planId === input.planId);
       if (!policy?.weeklyBudgetMicros) throw new AuthError("Set this plan's AI allowance before granting access.", 409);
-      account.grant = { id: randomUUID(), planId: input.planId, startsAt: now.toISOString(), expiresAt: input.expiresAt ? new Date(input.expiresAt).toISOString() : null, revokedAt: null, actorId, reason: input.reason };
+      account.grant = { id: randomUUID(), planId: input.planId, startsAt: now.toISOString(), expiresAt: input.expiresAt ? new Date(input.expiresAt).toISOString() : null, revokedAt: null, actorId, reason: auditReason };
     } else {
       if (!account.grant || account.grant.revokedAt) throw new AuthError("There is no manual grant to revoke.", 409);
       account.grant = { ...account.grant, revokedAt: now.toISOString() };
     }
     transaction.set(ref, { ...account, revision: account.revision + 1, updatedAt: now.toISOString() }, { merge: true });
-    transaction.create(audit, { actorId, fingerprint: digest, action: input.action, planId: account.grant!.planId, reason: input.reason, createdAt: now.toISOString(), expiresAt: account.grant!.expiresAt });
+    transaction.create(audit, { actorId, fingerprint: digest, action: input.action, planId: account.grant!.planId, reason: auditReason, createdAt: now.toISOString(), expiresAt: account.grant!.expiresAt });
   });
   return adminPlanDetail(uid);
 }
@@ -123,7 +124,7 @@ export async function mutatePlanPolicy(actorId: string, raw: unknown) {
     const now = new Date().toISOString();
     const next = { ...previous, weeklyBudgetMicros: input.weeklyBudgetMicros, storageLimitBytes: input.storageLimitBytes, revision: previous.revision + 1, updatedAt: now };
     transaction.set(ref, { policies: Object.fromEntries(policies.map((policy) => [policy.planId, policy.planId === input.planId ? next : policy])) });
-    transaction.create(audit, { actorId, action: "policy", planId: input.planId, reason: input.reason, fingerprint: digest, createdAt: now, before: { weeklyBudgetMicros: previous.weeklyBudgetMicros, storageLimitBytes: previous.storageLimitBytes }, after: { weeklyBudgetMicros: next.weeklyBudgetMicros, storageLimitBytes: next.storageLimitBytes } });
+    transaction.create(audit, { actorId, action: "policy", planId: input.planId, reason: "Plan settings updated by administrator.", fingerprint: digest, createdAt: now, before: { weeklyBudgetMicros: previous.weeklyBudgetMicros, storageLimitBytes: previous.storageLimitBytes }, after: { weeklyBudgetMicros: next.weeklyBudgetMicros, storageLimitBytes: next.storageLimitBytes } });
   });
   return { policies: await readPlanPolicies() };
 }

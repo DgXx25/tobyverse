@@ -38,7 +38,7 @@ export type PlannedExercise = {
 export const PAPER_SET_CAP = 3;
 
 export const FORM_WRITE_HINT =
-  /განცხადებ|საჩივარ|მიმართვა|application letter|official letter|petition|ხელისუფლებ/i;
+  /განცხადებ|საჩივარ|მიმართვა|ცნობ|certificate|proof of enrollment|application letter|official letter|petition|ხელისუფლებ/i;
 
 export function isFormWriteTopic(...parts: Array<string | null | undefined>): boolean {
   return FORM_WRITE_HINT.test(parts.filter(Boolean).join("\n"));

@@ -4,6 +4,7 @@ import type { ChatBlockDef, ParsedChatBlock } from "@/lib/blocks/types";
 import { SCENE_IDS } from "@/lib/blocks/kinds/scene";
 import { sectionItemSchema, sectionsSchema } from "@/lib/blocks/kinds/sections";
 import { imageListItemSchema, imageListSchema } from "@/lib/blocks/kinds/image-list";
+import { visualExplanationSchema } from "@/lib/blocks/kinds/visual-explanation";
 
 const BY_ID = new Map(CHAT_BLOCK_KINDS.map((item) => [item.id, item]));
 
@@ -83,6 +84,16 @@ function previewBlock(type: string, raw: Record<string, unknown>): ParsedChatBlo
     const parsed = imageListSchema.safeParse({ ...raw, items });
     return parsed.success ? { type, data: parsed.data } : null;
   }
+  if (type === "visual-explanation") {
+    const parsed = visualExplanationSchema.safeParse({
+      type,
+      title: asText(raw.title)?.trim(),
+      note: asText(raw.note)?.trim() || undefined,
+      galleryId: asText(raw.galleryId),
+      imageIndex: typeof raw.imageIndex === "number" ? raw.imageIndex : undefined,
+    });
+    return parsed.success ? { type, data: parsed.data } : null;
+  }
   if (type === "sections") {
     const items = Array.isArray(raw.items) ? raw.items.flatMap((item) => {
       const parsed = sectionItemSchema.safeParse(item);
@@ -97,7 +108,7 @@ function previewBlock(type: string, raw: Record<string, unknown>): ParsedChatBlo
         type,
         data: {
           reuse: true,
-          form: "ganckhadeba",
+          form: raw.form === "certificate" ? "certificate" : "ganckhadeba",
           brief: asText(raw.brief) ?? "",
         },
       };
@@ -107,7 +118,7 @@ function previewBlock(type: string, raw: Record<string, unknown>): ParsedChatBlo
     return {
       type,
       data: {
-        form: "ganckhadeba",
+        form: raw.form === "certificate" ? "certificate" : "ganckhadeba",
         brief: asText(raw.brief) ?? "",
         given: given ? { to: asText(given.to) } : undefined,
         sample: sample
@@ -192,5 +203,5 @@ export function formatTobyBlockCards(defs: ChatBlockDef[]): string {
   const names = defs.map((item) => item.id).join(", ");
   const sample = defs[0]?.id ?? "dialogue";
   const cards = defs.map((item) => item.card()).join("\n\n");
-  return `Optional native blocks available this turn (${names}). Use one only when it helps the request. Rendering protocol, if selected:\n\`\`\`toby ${sample}\n{...json...}\n\`\`\`\nThe fence body MUST be JSON only and the type MUST be listed here. Place each block where its explanation is being discussed: interleave prose and blocks naturally, and do not collect them at the end. Prefer concise prose around a block; retain useful reasoning and details, and expand when the request calls for it. Do not ask for permission to use an available block; decide from the request whether it helps, and omit it when it does not. A short lead-in can introduce a block; include the fence if you promise one. A table and a block may both appear when each adds distinct value.\n\n${cards}`;
+  return `Optional native blocks available this turn (${names}). Use one only when it helps the request. For an explanation with two or more distinct ideas, usually prefer the sections block with short, meaningful headings over an ungrouped paragraph or generic bullet list; keep simple answers in prose. For a concrete real-world phenomenon, proactively consider whether one specific photo can make its appearance, mechanism, or effect easier to grasp; if so, search for and include the most relevant result in a visual-explanation card, even when the user did not ask for an image. When you use search_images to support an explanation and visual-explanation is available, place the best matching returned photo in that block instead of leaving it as a detached gallery. If results are not actually relevant, omit the photo block. Do not repeat the card note or restate the same conclusion after a sections block. These formats remain optional when they add no real value. Rendering protocol, if selected:\n\`\`\`toby ${sample}\n{...json...}\n\`\`\`\nThe fence body MUST be JSON only and the type MUST be listed here. Place each block where its explanation is being discussed: interleave prose and blocks naturally, and do not collect them at the end. Prefer concise prose around a block; retain useful reasoning and details, and expand when the request calls for it. Do not ask for permission to use an available block; decide from the request whether it helps, and omit it when it does not. A short lead-in can introduce a block; include the fence if you promise one. A table and a block may both appear when each adds distinct value.\n\n${cards}`;
 }

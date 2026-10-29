@@ -128,7 +128,7 @@ export const analysisSchema = z.object({
 });
 
 export const paperSchema = z.object({
-  form: z.enum(["ganckhadeba"]),
+  form: z.enum(["ganckhadeba", "certificate"]),
   brief: z.string().min(1).max(400),
   given: z.object({ to: z.string().max(200).optional() }).optional(),
   rubric: z.array(z.object({ criterion: line, weight: z.number().min(0).max(1) })).max(6).optional(),
@@ -150,7 +150,7 @@ export const paperBlockSchema = z.union([
   }),
   z.object({
     reuse: z.literal(true),
-    form: z.enum(["ganckhadeba"]).optional(),
+    form: z.enum(["ganckhadeba", "certificate"]).optional(),
     brief: z.string().max(400).optional(),
   }),
 ]);

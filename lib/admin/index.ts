@@ -2,9 +2,7 @@ export { adminUids, isAdminUid } from "@/lib/admin/constants";
 export { assertAdminRequest, AdminAuthError, adminErrorResponse } from "@/lib/admin/assert";
 export {
   PLAYGROUND_VERSIONS,
-  DEFAULT_PLAYGROUND_PROMPTS,
-  DEFAULT_PLAYGROUND_MATERIALS,
-  PLAYGROUND_LABELS,
+  PLAYGROUND_PRESETS,
   clipPrompt,
   buildPlaygroundUserMessage,
 } from "@/lib/admin/playground";
