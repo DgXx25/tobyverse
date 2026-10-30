@@ -19,6 +19,7 @@ export async function dropMaterialIndex(projectId: string, materialId: string): 
 
 export async function removeMaterial(material: Material): Promise<void> {
   const paths = new Set<string>([material.storagePath, material.textPath]);
+  if (material.originalStoragePath) paths.add(material.originalStoragePath);
   for (const image of material.images) paths.add(image.path);
   await Promise.all([
     ...[...paths].map((path) => deleteStoragePath(path)),
@@ -32,11 +33,13 @@ export async function removeLibraryMaterial(item: {
   id: string;
   projectId: string;
   storagePath?: string;
+  originalStoragePath?: string;
   images?: { path: string }[];
   sizeBytes?: number;
 }): Promise<void> {
   const paths = new Set<string>();
   if (item.storagePath) paths.add(item.storagePath);
+  if (item.originalStoragePath) paths.add(item.originalStoragePath);
   for (const image of item.images ?? []) {
     if (image.path) paths.add(image.path);
   }

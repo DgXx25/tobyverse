@@ -21,7 +21,7 @@
     "jobs:inspect": "npm run jobs:inspect --workspace @tobyverse/backend",
     "test:stack": "node --test tests/parallel-stack.test.cjs && npm run test --workspace @tobyverse/backend && npm run test:jobs --workspace @tobyverse/backend && npm run test --workspace @tobyverse/frontend",
     "lint": "eslint",
-    "deploy": "npm run clean && next build && firebase deploy --only auth,hosting --force"
+    "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

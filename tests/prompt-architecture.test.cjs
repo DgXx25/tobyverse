@@ -23,16 +23,17 @@ test('multi-step equations use one vertically aligned math block with optional p
   const { CORE_SYSTEM_INSTRUCTION } = require('../lib/ai/core-instruction.ts');
   const { CHAT_TOOL_DEFINITIONS } = require('../lib/ai/tools.ts');
   const illustrate = CHAT_TOOL_DEFINITIONS.find(({ name }) => name === 'illustrate');
-  assert.match(CORE_SYSTEM_INSTRUCTION, /For multi-step equation solutions, show all transitions in one display-math block/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /For math and quantitative explanations, put meaningful formulas and worked calculations in display-math blocks/i);
   assert.match(CORE_SYSTEM_INSTRUCTION, /one equation per row/i);
   assert.match(CORE_SYSTEM_INSTRUCTION, /Avoid inline prose and arrow chains/i);
   assert.match(CORE_SYSTEM_INSTRUCTION, /short purpose note .*explain the goal, not the operation/i);
-  assert.match(CORE_SYSTEM_INSTRUCTION, /Keep one-step calculations inline/);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /Do not force a block around every number/i);
+  assert.match(CORE_SYSTEM_INSTRUCTION, /MUST end with one short, broad, optional-sounding question offering to continue/i);
   assert.match(illustrate.description, /Optionally emit typed catalog blocks when a visual materially helps/);
   assert.doesNotMatch(illustrate.description, /For multi-step equation solutions, prefer inline display-math blocks/);
   const { SUBJECT_SKILLS } = require('../lib/skills/index.ts');
   const math = SUBJECT_SKILLS.find(({ id }) => id === 'math');
-  assert.match(math.write, /one \$\$\.\.\.\$\$ block using .*begin\{aligned\}/i);
+  assert.match(math.write, /math explanations as well as requested solutions, place meaningful formulas .* display-math blocks/i);
 });
 
 test('equation math blocks need no wording hint or extra tool schema', () => {

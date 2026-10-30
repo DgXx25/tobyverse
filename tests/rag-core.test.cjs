@@ -24,6 +24,54 @@ const { chunkPages, chunkText, pagesFromMarkedText, CHUNK_MAX_TOKENS } = require
 const { formatChunks, parseChunks } = require("../lib/rag/format.ts");
 const { bm25, reciprocalRankFusion, pickDiverse, parseLocator, cosine, l2normalize } = require("../lib/rag/rank.ts");
 const { stem, queryTerms, chunkTerms, estimateTokens } = require("../lib/rag/tokens.ts");
+const { focusedSourceIds, selectSearchSources, focusQueryForTurn } = require("../lib/rag/source-focus.ts");
+
+test("a named checked source is searched instead of a similarly relevant older source", () => {
+  const sources = [
+    { id: "old", title: "ლექცია 1-3 (1)" },
+    { id: "new", title: "სემინარი 3" },
+  ];
+  assert.deepEqual(focusedSourceIds(sources, "სემინარი 3 რომ ავტვირთე, პირობა რა წერია?"), ["new"]);
+  assert.deepEqual(focusedSourceIds(sources.slice(0, 1), "სემინარი 3 რომ ავტვირთე, პირობა რა წერია?"), []);
+});
+
+test("a question about a freshly uploaded source uses the newest checked source", () => {
+  const now = Date.now();
+  const sources = [
+    { id: "old", title: "ლექცია", createdAt: now - 86_400_000 },
+    { id: "new", title: "სემინარი 3", createdAt: now - 60_000 },
+  ];
+  assert.deepEqual(focusedSourceIds(sources, "ახლახანს ატვირთულ სემინარში რა წერია?", now), ["new"]);
+});
+
+test("source search honors checked items and a named document", () => {
+  const sources = [
+    { id: "old", title: "ლექცია 1-3 (1)", chunks: 3 },
+    { id: "new", title: "სემინარი 3", chunks: 2 },
+  ];
+  assert.deepEqual(selectSearchSources(sources, [], "რეგრესია ამიხსენი").usable.map((item) => item.id), ["old", "new"]);
+  assert.deepEqual(selectSearchSources(sources, ["new"], "რეგრესია ამიხსენი").usable.map((item) => item.id), ["new"]);
+  assert.deepEqual(selectSearchSources(sources, ["__none__"], "რეგრესია ამიხსენი").usable, []);
+  assert.deepEqual(selectSearchSources(sources, [], "სემინარი 3-ის ცხრილი ამიხსენი").usable.map((item) => item.id), ["new"]);
+  assert.deepEqual(selectSearchSources(sources, [], "სემინარი 3 შეადარე ლექციას").usable.map((item) => item.id), ["old", "new"]);
+});
+
+test("a short source follow-up keeps the checked document named in the previous question", () => {
+  const sources = [
+    { id: "lecture", title: "ლექცია 1-3 (1)", chunks: 2 },
+    { id: "seminar", title: "სემინარი 3", chunks: 1 },
+  ];
+  const focus = focusQueryForTurn(sources, "ახლა შეგიძლია წაიკითხო?", ["სემინარი 3 რომ ავტვირთე, პირობა რა წერია?"]);
+  assert.deepEqual(selectSearchSources(sources, [], focus).usable.map((item) => item.id), ["seminar"]);
+  const fileFocus = focusQueryForTurn(sources, "ფაილში ფოტოს სახით არსებული ცხრილის მონაცემები რა არის?", ["სემინარი 3 რომ ავტვირთე, პირობა რა წერია?"]);
+  assert.deepEqual(selectSearchSources(sources, [], fileFocus).usable.map((item) => item.id), ["seminar"]);
+  const longFileQuestion = "შეგიძლია ამოცანის პირობა მითხრა? ფაილში ორიგინალში ფოტოს სახით არის მოცემული სტატისტიკური ცხრილი და ატვირთვის შემდეგ შენთვის ხელმისაწვდომ ტექსტში მისი ყველა მონაცემი წერია თუ არა?";
+  assert.deepEqual(selectSearchSources(sources, [], focusQueryForTurn(sources, longFileQuestion, ["სემინარი 3-ში რა წერია?"])).usable.map((item) => item.id), ["seminar"]);
+  assert.equal(focusQueryForTurn(sources, "ინფლაცია ამიხსენი", ["სემინარი 3-ში რა წერია?"]), "ინფლაცია ამიხსენი");
+  assert.equal(focusQueryForTurn(sources, "ახლა ინფლაცია ამიხსენი", ["სემინარი 3-ში რა წერია?"]), "ახლა ინფლაცია ამიხსენი");
+  assert.equal(focusQueryForTurn(sources, "ლექცია 1-3 (1) შეაჯამე", ["სემინარი 3-ში რა წერია?"]), "ლექცია 1-3 (1) შეაჯამე");
+  assert.equal(focusQueryForTurn(sources.slice(0, 1), "ახლა შეგიძლია წაიკითხო?", ["სემინარი 3-ში რა წერია?"]), "ახლა შეგიძლია წაიკითხო?");
+});
 
 function longPage(seed, sentences = 40) {
   return Array.from({ length: sentences }, (_, i) => `${seed} sentence number ${i} explains one idea about the topic in plain words.`).join(" ");

@@ -36,11 +36,13 @@ export type Material = {
   folderId?: string;
   originalName?: string;
   originalMime?: string;
-  /** MIME of the retained compressed image; originalMime remains the uploaded identity. */
+  /** MIME of a retained compressed image; absent after image-to-text retention. */
   storedMime?: string;
   originalSizeBytes?: number;
   /** The binary was replaced in Storage by its extracted plain text. */
   originalRemoved?: boolean;
+  /** Private object path retained only for idempotent cleanup after binary removal. */
+  originalStoragePath?: string;
   storagePath: string;
   textPath: string;
   extractedPath?: string;

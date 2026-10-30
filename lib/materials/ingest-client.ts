@@ -85,7 +85,7 @@ async function deriveFromStorage(
     response = await fetch("/api/materials/extract", {
       method: "POST",
       headers: await authHeaders(),
-      body: JSON.stringify({ path: stored.path, textPath: stored.textPath, phase: "text" }),
+      body: JSON.stringify({ path: stored.path, textPath: stored.textPath, phase: "all" }),
     });
   } catch {
     throw new MaterialIngestError("Network error. Try again.", { phase: "network" });
@@ -104,7 +104,7 @@ async function deriveFromApi(source: IngestSource): Promise<ExtractResponse> {
   if (source.kind === "file") {
     const form = new FormData();
     form.set("file", source.file);
-    form.set("phase", "text");
+    form.set("phase", "all");
     let response: Response;
     try {
       response = await fetch("/api/materials/extract", {

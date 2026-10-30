@@ -31,6 +31,7 @@ import { QuietIconCluster, type QuietIconAction } from "@/components/workspace/q
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
 import { chatArtifactToActive } from "@/lib/artifacts/active";
+import { COMPOSER_FILES_DROP_EVENT, routeSourceFilesDrop } from "@/lib/composer/attach";
 import type { ActiveArtifactStatus } from "@/types/project";
 import type { Material } from "@/types/material";
 import type { ChatArtifact, ChatMessage, ChatMode, Project } from "@/types";
@@ -90,6 +91,10 @@ function writeFlag(key: string, value: boolean) {
   } catch {
     /* private mode */
   }
+}
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/") || /\.(?:png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(file.name);
 }
 
 function isDesktop() {
@@ -158,6 +163,8 @@ export function ProjectView({
   const [phone, setPhone] = useState(false);
   const [singlePanel, setSinglePanel] = useState(false);
   const [sidePane, setSidePane] = useState<"sources" | "studio">("studio");
+  const [externalDropActive, setExternalDropActive] = useState(false);
+  const [composerDropActive, setComposerDropActive] = useState(false);
   const [mobileArtifactOpen, setMobileArtifactOpen] = useState(false);
   const [studioRequest, setStudioRequest] = useState<StudioRequest | null>(null);
   const [studioJob, setStudioJob] = useState<StudioJob | null>(null);
@@ -177,8 +184,50 @@ export function ProjectView({
   const widthRef = useRef(420);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const materialReturn = useRef<{ focus: ArtifactFocus | null; panelOpen: boolean } | null>(null);
+  const dragOrigin = useRef<{ sidePane: "sources" | "studio"; sourcesOpen: boolean; panelOpen: boolean; mobileNavOpen: boolean } | null>(null);
   widthRef.current = artifactWidth;
   sourcesWidthRef.current = sourcesOpen && !singlePanel ? sourcesWidth : 0;
+
+  const revealSourcesForDrop = useCallback(() => {
+    setHasOpenedSources(true);
+    if (phone) {
+      setSidePane("sources");
+      setMobileDrawerMode("sidebar");
+      setMobileNavOpen(true);
+    } else if (singlePanel) {
+      setSidePane("sources");
+      setPanelOpen(true);
+    } else {
+      setSourcesOpen(true);
+    }
+  }, [phone, singlePanel, setMobileDrawerMode, setMobileNavOpen]);
+
+  const restoreDropOrigin = useCallback(() => {
+    const origin = dragOrigin.current;
+    dragOrigin.current = null;
+    if (!origin) return;
+    setSidePane(origin.sidePane);
+    setSourcesOpen(origin.sourcesOpen);
+    setPanelOpen(origin.panelOpen);
+    if (phone) setMobileNavOpen(origin.mobileNavOpen);
+    setExternalDropActive(false);
+    setComposerDropActive(false);
+  }, [phone, setMobileNavOpen]);
+
+  useEffect(() => {
+    function onImageRouted() { restoreDropOrigin(); }
+    function onSourcesRouted() {
+      dragOrigin.current = null;
+      setExternalDropActive(false);
+      setComposerDropActive(false);
+    }
+    window.addEventListener("tobyverse:image-drop-routed", onImageRouted);
+    window.addEventListener("tobyverse:source-drop-routed", onSourcesRouted);
+    return () => {
+      window.removeEventListener("tobyverse:image-drop-routed", onImageRouted);
+      window.removeEventListener("tobyverse:source-drop-routed", onSourcesRouted);
+    };
+  }, [restoreDropOrigin]);
 
   useEffect(() => {
     if (!shareNotice) return;
@@ -469,6 +518,7 @@ export function ProjectView({
 
   useEffect(() => {
     const valid = new Set(materials.map((item) => item.id));
+    valid.add("__none__");
     setSelectedIds((current) => {
       const next = current.filter((id) => valid.has(id));
       return next.length === current.length ? current : next;
@@ -865,7 +915,73 @@ export function ProjectView({
   }
 
   return (
-    <div ref={workspaceRef} className={`project-workspace relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent md:overflow-x-auto md:overflow-y-hidden ${phone ? "phone-layout" : ""} ${singlePanel ? "single-panel-workspace" : ""} ${resizing ? "pane-resizing" : ""}`}>
+    <div
+      ref={workspaceRef}
+      className={`project-workspace relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent md:overflow-x-auto md:overflow-y-hidden ${phone ? "phone-layout" : ""} ${singlePanel ? "single-panel-workspace" : ""} ${resizing ? "pane-resizing" : ""}`}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        if (!dragOrigin.current) dragOrigin.current = { sidePane, sourcesOpen, panelOpen, mobileNavOpen };
+        const overSources = (event.target as HTMLElement).closest?.(".sources-pane");
+        if (overSources) {
+          event.preventDefault();
+          setExternalDropActive(true);
+          setComposerDropActive(false);
+          return;
+        }
+        const overComposer = (event.target as HTMLElement).closest?.(".chat-composer-bleed");
+        if (overComposer) {
+          setComposerDropActive(true);
+          return;
+        }
+        const imageDrag = Array.from(event.dataTransfer.items).some((item) => item.kind === "file" && item.type.startsWith("image/"));
+        if (imageDrag) {
+          setComposerDropActive(true);
+          return;
+        }
+        event.preventDefault();
+        setExternalDropActive(true);
+        revealSourcesForDrop();
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        if ((event.target as HTMLElement).closest?.(".chat-composer-bleed")) setComposerDropActive(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+        setExternalDropActive(false);
+        setComposerDropActive(false);
+        if (dragOrigin.current) restoreDropOrigin();
+      }}
+      onDragEnd={() => {
+        dragOrigin.current = null;
+        setExternalDropActive(false);
+        setComposerDropActive(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        const files = [...event.dataTransfer.files];
+        const images = files.filter(isImageFile);
+        const sources = files.filter((file) => !isImageFile(file));
+        if (images.length) window.dispatchEvent(new CustomEvent(COMPOSER_FILES_DROP_EVENT, { detail: { files: images } }));
+        if (sources.length) {
+          dragOrigin.current = null;
+          revealSourcesForDrop();
+          routeSourceFilesDrop(sources);
+        } else {
+          restoreDropOrigin();
+          window.dispatchEvent(new CustomEvent("tobyverse:image-drop-routed"));
+        }
+        setExternalDropActive(false);
+        setComposerDropActive(false);
+      }}
+    >
+      {externalDropActive ? (
+        <div className="pointer-events-none absolute inset-2 z-[70] flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-background/35">
+          <span className="rounded-full bg-surface px-4 py-2 text-[14px] font-medium text-foreground shadow-lg">Drop files to add them to Sources</span>
+        </div>
+      ) : null}
       {singlePanel ? (
         <button
           type="button"
@@ -952,6 +1068,7 @@ export function ProjectView({
           key={`${project.id}:${threadId || DEFAULT_CHAT_THREAD_ID}`}
           project={project}
           isActive={isActiveProjectView}
+          externalImageDropActive={composerDropActive}
           initialMessages={bootstrapMessages}
           onLoadOlder={loadOlderMessages}
           userId={user.uid}

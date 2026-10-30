@@ -23,6 +23,7 @@ import { DEFAULT_CHAT_THREAD_ID, DEFAULT_PROJECT_GOAL } from "@/lib/core/constan
 import { figureAttachmentsForTurn, pickChatFigures, shouldAttachChatFigures } from "@/lib/materials/figures";
 import { listMaterials, removeMaterial, waitForMaterialPreviews } from "@/lib/materials";
 import { ingestMaterialPaste } from "@/lib/materials/ingest-client";
+import { hasSourceUploads, waitForSourceUploads } from "@/lib/materials/source-upload";
 import { discardChatImage, ingestComposerFile } from "@/lib/composer/attach-client";
 import { newChipId, attachmentsFromMaterials, snapshotChatAttachments } from "@/lib/composer/attach";
 import { patchComposerChip } from "@/lib/composer/chips";
@@ -364,6 +365,7 @@ export function ProjectChat({
   onStudioRequestHandled,
   onStudioProgress,
   onBusyChange,
+  externalImageDropActive = false,
 }: {
   project: Project;
   userId: string;
@@ -391,6 +393,7 @@ export function ProjectChat({
   onStudioRequestHandled?: (id: number, result: StudioResult) => void;
   onStudioProgress?: (id: number, status: string) => void;
   onBusyChange?: (busy: boolean) => void;
+  externalImageDropActive?: boolean;
   onProjectPatch?: (patch: {
     title?: string;
     goal?: ProjectGoal;
@@ -1498,6 +1501,12 @@ export function ProjectChat({
         }
       }
 
+      if (hasSourceUploads(project.id)) {
+        setStream((current) => current ? { ...current, status: promptIsKa(prompt) ? "წყაროებს ვამზადებ…" : "Preparing sources…" } : current);
+        await waitForChatStep("Preparing sources", () => waitForSourceUploads(project.id), { signal: controller.signal, timeoutMs: 120_000 });
+        pool = await waitForChatStep("Loading sources", () => listMaterials(project.id), { signal: controller.signal });
+      }
+
       modelPrompt =
         prompt.trim() ||
         (attachments.length ? DEFAULT_FIRST_PROMPT : "");
@@ -2409,7 +2418,15 @@ export function ProjectChat({
               >
                 {message.role === "user" ? (
                   <div className="flex w-fit max-w-[min(100%,36rem)] flex-col items-end gap-2">
-                    <MessageAttachments items={message.attachments} onOpenMaterial={onOpenMaterial} />
+                    <MessageAttachments
+                      items={message.attachments.map(attachment => {
+                        const material = materials.find(item => item.id === attachment.materialId);
+                        return material?.type === "image"
+                          ? { ...attachment, storagePath: material.originalRemoved ? undefined : material.storagePath }
+                          : attachment;
+                      })}
+                      onOpenMaterial={onOpenMaterial}
+                    />
                     {message.content.trim() ? (
                       <div
                         role={message.content.length > 280 ? "button" : undefined}
@@ -2503,6 +2520,7 @@ export function ProjectChat({
               onPasteText={onPasteText}
               onUrl={onUrl}
               showParameters
+              dropActive={externalImageDropActive}
               chatMode={chatMode}
               onChatMode={onChatMode}
               skill={guest ? null : skill}

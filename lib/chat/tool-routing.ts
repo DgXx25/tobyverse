@@ -2,16 +2,19 @@ import type { ChatToolCall } from "@/lib/ai/tools";
 import { isNoteEditRequest } from "@/lib/notes/plain";
 import {
   extractTopic,
+  explicitlyRequestsExternalMedia,
   fallbackChatTool,
   forcedCreateTool,
   gateChatTool,
   imageClarifyQuestion,
   pathClarifyQuestion,
   practiceClarifyQuestion,
+  refersToUserMaterial,
   sheetClarifyQuestion,
   wantsImages,
   wantsPlainNote,
 } from "@/lib/composer/intent";
+import { focusedSourceIds } from "@/lib/rag/source-focus";
 import type { AcceptedChatTool, ChatMode, PendingKind } from "@/types/chat";
 
 export type ToolRoutingInput = {
@@ -19,6 +22,7 @@ export type ToolRoutingInput = {
   mode: ChatMode;
   accepted?: AcceptedChatTool;
   hasMaterials?: boolean;
+  sourceTitles?: string[];
   priorClarify?: boolean;
   pendingTopic?: string | null;
   pendingKind?: PendingKind | null;
@@ -29,12 +33,20 @@ export type ToolRoutingInput = {
   pathStarted?: boolean;
 };
 
+/** Source questions use extracted document text; only an explicit outside-image request may search the web. */
+export function externalImageSearchAllowed(prompt: string, accepted?: AcceptedChatTool, sourceTitles: string[] = []): boolean {
+  if (accepted === "search_images") return true;
+  if (refersToUserMaterial(prompt)) return false;
+  const namedSource = focusedSourceIds(sourceTitles.map((title, index) => ({ id: String(index), title })), prompt).length > 0;
+  return !namedSource || explicitlyRequestsExternalMedia(prompt);
+}
+
 /** Explicit actions pin the native tool so a save request cannot become a prose claim. */
 export function forcedToolForRequest(input: ToolRoutingInput): ChatToolCall | null {
   const accepted = input.accepted;
   // Image requests are explicit tool intents. Pin the search before generation
   // so a model cannot answer from unrelated project context or apologize instead.
-  if (!accepted && wantsImages(input.prompt)) {
+  if (!accepted && wantsImages(input.prompt) && externalImageSearchAllowed(input.prompt, accepted, input.sourceTitles)) {
     return { name: "search_images", args: { query: input.prompt.trim() } };
   }
   if (!accepted && wantsPlainNote(input.prompt)) {
@@ -91,7 +103,7 @@ export function fallbackToolAfterProvider(input: ToolRoutingInput): ChatToolCall
     hasPath: input.hasPath,
     pathStarted: input.pathStarted,
   });
-  return gateChatTool({
+  const gated = gateChatTool({
     tool: raw,
     prompt: input.prompt,
     hasMaterials: input.hasMaterials,
@@ -107,4 +119,7 @@ export function fallbackToolAfterProvider(input: ToolRoutingInput): ChatToolCall
     keywordFallback: true,
     mode: input.mode,
   });
+  return gated.name === "search_images" && !externalImageSearchAllowed(input.prompt, input.accepted, input.sourceTitles)
+    ? { name: "answer", args: {} }
+    : gated;
 }

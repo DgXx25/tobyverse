@@ -1,10 +1,13 @@
 import { getDocumentProxy, renderPageAsImage } from "unpdf";
+import { OPS } from "unpdf/pdfjs";
 
 export type ExtractedPdfPage = {
   page: number;
   text: string;
   /** True when the page has no text layer (a scan). OCR is the caller's decision. */
   scanned: boolean;
+  /** True when a text-bearing page also contains an embedded raster image. */
+  hasImages?: boolean;
   /** PNG bytes, only for scanned pages, so the caller can OCR them. */
   image?: Uint8Array;
 };
@@ -12,7 +15,11 @@ export type ExtractedPdfPage = {
 export type ExtractedPdf = { text: string; pageCount: number };
 
 type PdfJsItem = { str?: string; hasEOL?: boolean };
-type PdfJsPage = { getTextContent: () => Promise<{ items: PdfJsItem[] }>; cleanup?: () => void };
+type PdfJsPage = {
+  getTextContent: () => Promise<{ items: PdfJsItem[] }>;
+  getOperatorList: () => Promise<{ fnArray: number[] }>;
+  cleanup?: () => void;
+};
 type PdfJsDoc = {
   numPages: number;
   getPage: (pageNumber: number) => Promise<PdfJsPage>;
@@ -63,9 +70,36 @@ export async function openPdf(bytes: Uint8Array): Promise<OpenPdf> {
       for (let number = from; number <= to; number += 1) {
         const page = await pdf.getPage(number);
         const text = pageBody((await page.getTextContent()).items ?? []);
+        let hasImages = false;
+        if (text.length >= 8) {
+          try {
+            const operators = await page.getOperatorList();
+            hasImages = operators.fnArray.some(operation =>
+              operation === OPS.paintImageXObject ||
+              operation === OPS.paintImageXObjectRepeat ||
+              operation === OPS.paintInlineImageXObject ||
+              operation === OPS.paintInlineImageXObjectGroup ||
+              operation === OPS.paintImageMaskXObject ||
+              operation === OPS.paintImageMaskXObjectGroup ||
+              operation === OPS.paintImageMaskXObjectRepeat,
+            );
+          } catch {
+            hasImages = false;
+          }
+        }
         page.cleanup?.();
         if (text.length >= 8) {
-          pages.push({ page: number, text, scanned: false });
+          let image: Uint8Array | undefined;
+          if (hasImages) {
+            try {
+              image = new Uint8Array(
+                await renderPageAsImage(proxy, number, { scale: options?.rasterScale ?? 1.25, toDataURL: false }),
+              );
+            } catch {
+              image = undefined;
+            }
+          }
+          pages.push({ page: number, text, scanned: false, hasImages, image });
           continue;
         }
         let image: Uint8Array | undefined;
@@ -76,7 +110,7 @@ export async function openPdf(bytes: Uint8Array): Promise<OpenPdf> {
         } catch {
           image = undefined;
         }
-        pages.push({ page: number, text: "", scanned: true, image });
+        pages.push({ page: number, text: "", scanned: true, hasImages, image });
       }
       return pages;
     },

@@ -144,6 +144,7 @@ function mapMaterial(id: string, projectId: string, data: Record<string, unknown
     storedMime: asString(data.storedMime) || undefined,
     originalSizeBytes: typeof data.originalSizeBytes === "number" ? data.originalSizeBytes : undefined,
     originalRemoved,
+    originalStoragePath: asString(data.originalStoragePath) || undefined,
     storagePath,
     textPath: extractedPath,
     extractedPath,

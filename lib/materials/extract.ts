@@ -1,4 +1,4 @@
-import { extractDocxText } from "@/lib/materials/docx";
+import { extractDocx, extractDocxText } from "@/lib/materials/docx";
 import { EXTRACT_MAX_CHARS, clipText } from "@/lib/materials/limits";
 import { extractPdf } from "@/lib/materials/pdf";
 import { extractPptx } from "@/lib/materials/pptx";
@@ -32,10 +32,34 @@ export type ExtractResult = {
 
 export async function extractImageText(buffer: Buffer, mime: string, usage?: AiUsageReporter): Promise<string> {
   const text = (await generateText(
-    "Extract all readable text from this image. If it is a diagram, describe it briefly. Plain text only. If there is no readable text or diagram, return exactly [NO_READABLE_TEXT].",
+    "Read the image for later text search. Return two short sections: Visible text: transcribe legible words, numbers, labels and table values as faithfully as possible, keeping table rows/columns understandable. Visual description: one concise sentence describing what the image shows, including relevant relationships, trends, objects or scene details. Do not guess unreadable values; mark them [unclear]. If no text is visible, say so and still describe the image. Plain text only.",
     { images: [{ mimeType: mime || "image/jpeg", data: buffer.toString("base64") }], usage },
   )).trim();
-  return text === "[NO_READABLE_TEXT]" ? "" : clipText(text, EXTRACT_MAX_CHARS);
+  if (!text || text === "[NO_READABLE_TEXT]") {
+    throw new MaterialExtractError("Could not read or describe this image; the original has been kept.");
+  }
+  return clipText(text, EXTRACT_MAX_CHARS);
+}
+
+async function extractEmbeddedImageText(images: { label: string; mime: string; bytes: Uint8Array }[], usage?: AiUsageReporter): Promise<string> {
+  if (!images.length) return "";
+  const supportedTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+  const supported = images.filter(image => supportedTypes.has(image.mime.toLowerCase()));
+  const unsupported = images.filter(image => !supportedTypes.has(image.mime.toLowerCase()));
+  const response = supported.length ? await generateText(
+    `These images are embedded in a document. They are supplied in this order: ${supported.map(image => image.label).join(", ")}. Return one compact entry per image, each on its own line, in the same order and beginning with its supplied label followed by an em dash. For each image, include “Visible text:” with legible words, numbers, labels and table values transcribed faithfully, then “Visual description:” with one brief factual description of what it shows and relevant objects, relationships or trends. Do not guess unreadable content; mark it [unclear]. Keep each entry under 70 words. Do not merge images. Plain text only.`,
+    {
+      images: supported.map(image => ({ mimeType: image.mime, data: Buffer.from(image.bytes).toString("base64") })),
+      usage,
+    },
+  ) : "";
+  const trimmed = response.trim();
+  const missingSupported = supported.filter(image => !trimmed.toLowerCase().includes(image.label.toLowerCase()));
+  const fallbacks = [
+    ...missingSupported.map(image => `${image.label} — Visible text: not reliably detected. Visual description: embedded image; a description could not be generated.`),
+    ...unsupported.map(image => `${image.label} — Visual description: this embedded image format could not be analyzed.`),
+  ];
+  return [trimmed, ...fallbacks].filter(Boolean).join("\n");
 }
 
 export async function extractPlainText(input: {
@@ -64,7 +88,20 @@ export async function extractPlainText(input: {
     }
 
     if (type === "docx") {
-      const text = await extractDocxText(input.buffer);
+      const docx = input.includeImages === false
+        ? { text: await extractDocxText(input.buffer), images: [] }
+        : await extractDocx(input.buffer, true);
+      const imageNotes = await extractEmbeddedImageText(
+        docx.images.map((image, index) => ({ ...image, label: `Image ${index + 1}` })),
+        input.usage,
+      );
+      const noteLines = imageNotes.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      const text = docx.text.replace(/\[\[TOBY_IMAGE_(\d+)\]\]/g, (_, rawIndex: string) => {
+        const imageIndex = Number(rawIndex);
+        const note = noteLines.find(line => new RegExp(`^(?:[-*]\\s*)?Image ${imageIndex + 1}\\s*[—:-]`, "i").test(line));
+        const fallback = `Image ${imageIndex + 1} — Visible text: not reliably detected. Visual description: embedded image; a description could not be generated.`;
+        return `\n${note || fallback}\n`;
+      });
       return { text: clipText(text, EXTRACT_MAX_CHARS), type, pageCount: 1, images: [] };
     }
 
@@ -76,9 +113,13 @@ export async function extractPlainText(input: {
     }
 
     if (type === "pptx") {
-      const pptx = await extractPptx(input.buffer, { includeImages: false });
+      const pptx = await extractPptx(input.buffer, { includeImages: input.includeImages !== false });
+      const imageNotes = input.includeImages === false ? "" : await extractEmbeddedImageText(
+        pptx.images.map((image, index) => ({ ...image, label: `Slide ${image.page}, image ${index + 1}` })),
+        input.usage,
+      );
       return {
-        text: clipText(pptx.text, EXTRACT_MAX_CHARS),
+        text: clipText([pptx.text, imageNotes && `Embedded image notes\n${imageNotes}`].filter(Boolean).join("\n\n"), EXTRACT_MAX_CHARS),
         type,
         pageCount: pptx.pageCount,
         images: [],

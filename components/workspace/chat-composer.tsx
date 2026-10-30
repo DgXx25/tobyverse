@@ -12,7 +12,7 @@ import {
   type TransitionEvent,
 } from "react";
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from "react";
-import { attachFileKey } from "@/lib/composer/attach";
+import { attachFileKey, COMPOSER_FILES_DROP_EVENT } from "@/lib/composer/attach";
 import { shouldAttachPastedText } from "@/lib/composer/paste-policy";
 import { COMPOSER_FILE_ACCEPT } from "@/lib/materials/types";
 import { UiIcon } from "@/components/workspace/ui-icon";
@@ -390,6 +390,18 @@ export const ChatComposer = forwardRef<
 
     for (const file of files) onFile(file);
   }
+
+  const takeFilesRef = useRef(takeFiles);
+  takeFilesRef.current = takeFiles;
+
+  useEffect(() => {
+    function onExternalFiles(event: Event) {
+      const files = (event as CustomEvent<{ files?: File[] }>).detail?.files;
+      if (files?.length) takeFilesRef.current(files, "drop");
+    }
+    window.addEventListener(COMPOSER_FILES_DROP_EVENT, onExternalFiles);
+    return () => window.removeEventListener(COMPOSER_FILES_DROP_EVENT, onExternalFiles);
+  }, []);
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     if (!allowAttach) return;

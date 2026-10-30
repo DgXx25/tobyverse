@@ -16,10 +16,17 @@
 # next.js
 /.next/
 /.next-dev/
+/.next-paddle-deploy/
+/.next-review/
+/.superpowers/
 /out/
 
 # production
 /build
+/backend/dist/
+/backend/node_modules/
+/frontend/dist/
+/frontend/node_modules/
 
 # misc
 .DS_Store

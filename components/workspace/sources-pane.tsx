@@ -6,12 +6,13 @@ import { FileKindIcon } from "@/components/workspace/file-kind-icon";
 import { MaterialText } from "@/components/workspace/material-text";
 import { MaterialViewer } from "@/components/workspace/material-viewer";
 import { UiIcon } from "@/components/workspace/ui-icon";
-import { newChipId } from "@/lib/composer/attach";
+import { COMPOSER_FILES_DROP_EVENT, newChipId, subscribeSourceFilesDrop } from "@/lib/composer/attach";
 import { ingestMaterialFile, ingestMaterialPaste, ingestMaterialUrl } from "@/lib/materials/ingest-client";
 import { removeMaterial } from "@/lib/materials/save";
 import { renameMaterial } from "@/lib/materials/store";
 import { createSourceFolder, deleteSourceFolder, groupSourcesByFolder, moveSourcesToFolder, renameSourceFolder, SOURCE_DRAG_TYPE, subscribeSourceFolders, type SourceFolder } from "@/lib/materials/folders";
 import { MATERIAL_FILE_ACCEPT } from "@/lib/materials/types";
+import { trackSourceUpload } from "@/lib/materials/source-upload";
 import { positionContextMenu } from "@/lib/workspace/context-menu-position";
 import { markProjectActivityComplete } from "@/lib/workspace/project-activity";
 import type { LibraryFileKind } from "@/lib/library/media";
@@ -135,7 +136,6 @@ export function SourcesPane({
   className?: string;
 }) {
   const [pending, setPending] = useState<Pending[]>([]);
-  const [dragging, setDragging] = useState(false);
   const [adderOpen, setAdderOpen] = useState(false);
   const [adding, setAdding] = useState<"site" | "youtube" | "paste" | null>(null);
   const [linkValue, setLinkValue] = useState("");
@@ -156,6 +156,10 @@ export function SourcesPane({
   const [folderBusy, setFolderBusy] = useState(false);
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const selectionAnchor = useRef<string | null>(null);
+  const uploadFilesRef = useRef(uploadFiles);
+  uploadFilesRef.current = uploadFiles;
+
+  useEffect(() => subscribeSourceFilesDrop((files) => { void uploadFilesRef.current(files); }), []);
 
   useEffect(() => {
     if (!active) return;
@@ -243,8 +247,16 @@ export function SourcesPane({
     event.preventDefault();
     event.stopPropagation();
     setDropFolder(null);
-    setDragging(false);
-    if (event.dataTransfer.files.length) { void uploadFiles([...event.dataTransfer.files], folderId ?? undefined); return; }
+    if (event.dataTransfer.files.length) {
+      const files = [...event.dataTransfer.files];
+      const images = files.filter((file) => file.type.startsWith("image/") || /\.(?:png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(file.name));
+      const sources = files.filter((file) => !images.includes(file));
+      if (images.length) window.dispatchEvent(new CustomEvent(COMPOSER_FILES_DROP_EVENT, { detail: { files: images } }));
+      if (sources.length) void uploadFiles(sources, folderId ?? undefined);
+      else if (images.length) window.dispatchEvent(new CustomEvent("tobyverse:image-drop-routed"));
+      if (sources.length) window.dispatchEvent(new CustomEvent("tobyverse:source-drop-routed"));
+      return;
+    }
     try {
       const data = JSON.parse(event.dataTransfer.getData(SOURCE_DRAG_TYPE)) as { projectId?: unknown; ids?: unknown };
       if (data.projectId !== projectId || !Array.isArray(data.ids)) return;
@@ -314,7 +326,7 @@ export function SourcesPane({
         await uploadOne(entries[index], files[index]);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, worker));
+    await trackSourceUpload(projectId, Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, worker)));
   }
 
   async function retry(entry: Pending) {
@@ -476,11 +488,6 @@ export function SourcesPane({
         if (!event.dataTransfer.types.includes("Files") && !event.dataTransfer.types.includes(SOURCE_DRAG_TYPE)) return;
         event.preventDefault();
         event.stopPropagation();
-        if (event.dataTransfer.types.includes("Files")) setDragging(true);
-      }}
-      onDragLeave={(event) => {
-        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-        setDragging(false);
       }}
       onDrop={(event) => {
         dropSources(event, null);
@@ -626,11 +633,6 @@ export function SourcesPane({
       </div>
       </>}
 
-      {dragging && !adderOpen ? (
-        <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-2xl border border-dashed border-foreground/40 bg-surface/90 text-[14px] text-foreground">
-          Drop to add sources
-        </div>
-      ) : null}
       {adderOpen ? <AddSourcesDialog
         adding={adding}
         setAdding={setAdding}

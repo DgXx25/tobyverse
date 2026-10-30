@@ -4,6 +4,7 @@ import { embedQuery, embedTexts } from "@/lib/rag/embed";
 import type { RagChunk } from "@/lib/rag/chunk";
 import { bm25, cosine, parseLocator, pickDiverse, reciprocalRankFusion } from "@/lib/rag/rank";
 import { queryTerms } from "@/lib/rag/tokens";
+import { focusQueryForTurn, selectSearchSources } from "@/lib/rag/source-focus";
 
 /**
  * Server-only index. A chunk is a doc at projects/{p}/materials/{m}/chunks/{c} with the text,
@@ -136,8 +137,8 @@ async function vectorCandidates(db: Firestore, projectId: string, materialIds: s
 }
 
 /** Brute force fallback: bounded, per-material, cosine in process. */
-async function scanCandidates(db: Firestore, projectId: string, materialIds: string[], vector: number[]): Promise<Candidate[]> {
-  const perMaterial = Math.max(200, Math.floor(SCAN_LIMIT / Math.max(1, materialIds.length)));
+async function scanCandidates(db: Firestore, projectId: string, materialIds: string[], vector: number[], perMaterialLimit?: number): Promise<Candidate[]> {
+  const perMaterial = perMaterialLimit ?? Math.max(200, Math.floor(SCAN_LIMIT / Math.max(1, materialIds.length)));
   const lists = await Promise.all(
     materialIds.map(async (materialId) => {
       const snapshot = await chunksCollection(db, projectId, materialId).limit(perMaterial).get();
@@ -197,9 +198,9 @@ async function locatorCandidates(db: Firestore, materialIds: string[], page: num
   return lists.flat();
 }
 
-export type IndexedMaterial = { id: string; title: string; chunks: number; status: string };
+export type IndexedMaterial = { id: string; title: string; chunks: number; status: string; createdAt?: number };
 
-/** Materials of this project that have at least some indexed chunks. */
+/** Project material metadata, including sources whose indexing has not finished yet. */
 export async function indexedMaterials(projectId: string, uid: string): Promise<IndexedMaterial[]> {
   const db = getAdminFirestore();
   const snapshot = await db.collection("projects").doc(projectId).collection("materials").get();
@@ -208,8 +209,14 @@ export async function indexedMaterials(projectId: string, uid: string): Promise<
     if (data.userId !== uid) return [];
     const index = (data.index ?? {}) as { status?: string; chunks?: number };
     const chunks = typeof index.chunks === "number" ? index.chunks : 0;
-    if (chunks <= 0) return [];
-    return [{ id: doc.id, title: typeof data.title === "string" ? data.title : "Untitled", chunks, status: index.status ?? "ready" }];
+    const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
+    return [{
+      id: doc.id,
+      title: typeof data.title === "string" ? data.title : "Untitled",
+      chunks,
+      status: typeof data.status === "string" ? data.status : index.status ?? "processing",
+      createdAt: typeof createdAt?.toMillis === "function" ? createdAt.toMillis() : undefined,
+    }];
   });
 }
 
@@ -221,6 +228,10 @@ export async function retrieveChunks(input: {
   uid: string;
   projectId: string;
   query: string;
+  /** Current user message, used to resolve named or newly uploaded files. */
+  focusQuery?: string;
+  previousUserPrompts?: string[];
+  signal?: AbortSignal;
   /** Restrict to these sources. Omit or pass [] for the whole project. */
   materialIds?: string[];
   limit?: number;
@@ -228,35 +239,73 @@ export async function retrieveChunks(input: {
 }): Promise<RetrievedChunk[]> {
   const limit = Math.max(1, Math.min(16, input.limit ?? 8));
   const db = getAdminFirestore();
-  const available = input.materials ?? (await indexedMaterials(input.projectId, input.uid));
-  const allowed = new Set(input.materialIds?.length ? input.materialIds : available.map((item) => item.id));
-  const usable = available.filter((item) => allowed.has(item.id));
-  if (usable.length === 0 || !input.query.trim()) return [];
+  let available = input.materials ?? (await indexedMaterials(input.projectId, input.uid));
+  const selectedIds = input.materialIds ?? [];
+  let focusQuery = focusQueryForTurn(available, input.focusQuery ?? input.query, input.previousUserPrompts ?? []);
+  if (!input.materials) {
+    const deadline = Date.now() + 35_000;
+    while (true) {
+      input.signal?.throwIfAborted();
+      const current = selectSearchSources(available, selectedIds, focusQuery);
+      const pending = current.selected.filter((item) =>
+        item.status !== "ready" && item.status !== "failed" &&
+        (current.focusedIds.length
+          ? current.focusedIds.includes(item.id)
+          : item.createdAt != null && Date.now() - item.createdAt < 3 * 60_000),
+      );
+      if (!pending.length) break;
+      if (Date.now() >= deadline) throw new Error("The newly uploaded source is still being read. Please try again shortly.");
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      available = await indexedMaterials(input.projectId, input.uid);
+      focusQuery = focusQueryForTurn(available, input.focusQuery ?? input.query, input.previousUserPrompts ?? []);
+    }
+  }
+  const { selected, indexed, focusedIds, usable } = selectSearchSources(
+    available,
+    selectedIds,
+    focusQuery,
+  );
+  if (focusedIds.some((id) => !indexed.some((item) => item.id === id))) {
+    throw new Error("The named source has no searchable text yet. Check its reading status or upload it again.");
+  }
+  if (selected.length && indexed.length === 0) {
+    throw new Error("The selected sources have no searchable text yet. Check their reading status.");
+  }
+  const query = input.query.trim();
+  if (usable.length === 0 || !query) return [];
   const usableIds = usable.map((item) => item.id);
+  const focusedUsableIds = focusedIds.filter((id) => usableIds.includes(id));
   const titles = new Map(usable.map((item) => [item.id, item.title]));
+  const freshIds = usable
+    .filter((item) => item.createdAt != null && Date.now() - item.createdAt < 3 * 60_000)
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    .slice(0, 3)
+    .map((item) => item.id);
+  const directIds = [...new Set([...focusedUsableIds, ...freshIds])].slice(0, 4);
 
-  const locator = parseLocator(input.query);
-  const vector = await embedQuery(input.query);
-  const [vectorHits, keywordHits, locatorHits] = await Promise.all([
+  const locator = parseLocator(query);
+  const vector = await embedQuery(query);
+  const [vectorHits, keywordHits, locatorHits, directHits] = await Promise.all([
     vectorCandidates(db, input.projectId, usableIds, vector),
-    keywordCandidates(db, input.projectId, queryTerms(input.query, 10)),
+    keywordCandidates(db, input.projectId, queryTerms(query, 10)),
     locator.page ? locatorCandidates(db, usableIds, locator.page) : Promise.resolve([] as Candidate[]),
+    directIds.length ? scanCandidates(db, input.projectId, directIds, vector, 160) : Promise.resolve([] as Candidate[]),
   ]);
 
   const byId = new Map<string, Candidate>();
-  for (const candidate of [...locatorHits, ...vectorHits, ...keywordHits]) {
+  for (const candidate of [...locatorHits, ...vectorHits, ...keywordHits, ...directHits]) {
     if (!usableIds.includes(candidate.materialId)) continue;
     if (!byId.has(candidate.id)) byId.set(candidate.id, candidate);
   }
   const candidates = [...byId.values()];
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) throw new Error("Source search returned no indexed passages. Please try again.");
 
   const vectorRank = candidates
     .filter((candidate) => candidate.vector)
     .map((candidate) => ({ id: candidate.id, score: cosine(candidate.vector as number[], vector) }))
     .sort((a, b) => b.score - a.score);
   const keywordRank = bm25(
-    input.query,
+    query,
     candidates.map((candidate) => ({ id: candidate.id, text: `${candidate.section}\n${candidate.text}`, item: candidate.id })),
   )
     .filter((entry) => entry.score > 0)
@@ -277,9 +326,12 @@ export async function retrieveChunks(input: {
       : [];
   });
 
-  const picked = pickDiverse(ordered, limit, {
+  const focusedFirst = focusedIds.flatMap((materialId) => ordered.find((item) => item.materialId === materialId) ?? []);
+  const reserved = pickDiverse(focusedFirst, Math.min(limit, focusedFirst.length), { perMaterialCap: 1 });
+  const reservedIds = new Set(reserved.map((item) => item.id));
+  const picked = [...reserved, ...pickDiverse(ordered.filter((item) => !reservedIds.has(item.id)), limit - reserved.length, {
     perMaterialCap: usable.length > 1 ? Math.max(3, Math.ceil(limit * 0.6)) : limit,
-  });
+  })];
   return picked.map((item) => ({
     id: item.id,
     materialId: item.materialId,

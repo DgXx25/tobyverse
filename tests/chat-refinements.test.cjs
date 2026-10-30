@@ -16,7 +16,7 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
 
 test('topic words do not turn ordinary questions into external image searches', () => {
   const { wantsImages } = require('../lib/composer/intent.ts');
-  const { fallbackToolAfterProvider } = require('../lib/chat/tool-routing.ts');
+  const { externalImageSearchAllowed, fallbackToolAfterProvider, forcedToolForRequest } = require('../lib/chat/tool-routing.ts');
   for (const prompt of ['რა არის ფოტოსინთეზი?', 'როგორ მუშაობს ფოტორესპირაცია?', 'რა არის ფოტოგრაფია?', 'რას ნიშნავს ეს გრაფიკი?', 'What does a normal distribution graph mean?', 'მომიძებნე x-ის მნიშვნელობა']) {
     assert.equal(wantsImages(prompt), false, prompt);
     assert.equal(fallbackToolAfterProvider({ prompt, mode: 'auto' }).name, 'answer', prompt);
@@ -25,6 +25,21 @@ test('topic words do not turn ordinary questions into external image searches', 
     assert.equal(wantsImages(prompt), true, prompt);
     assert.equal(fallbackToolAfterProvider({ prompt, mode: 'auto' }).name, 'search_images', prompt);
   }
+  for (const prompt of [
+    'ფაილში ორიგინალში ფოტოს სახით არის ცხრილი; რა წერია მასში?',
+    'სემინარი 3-ში ფოტოზე მოცემული ამოცანის პირობა რა არის?',
+    'ჩემს ატვირთულ დოკუმენტში ფოტოს მონაცემები ჩანს?',
+    'ფოტოზე რა წერია?',
+    'What does the photo inside my uploaded document say?',
+  ]) {
+    assert.equal(wantsImages(prompt), false, prompt);
+    assert.equal(externalImageSearchAllowed(prompt, undefined, ['სემინარი 3']), false, prompt);
+    assert.equal(externalImageSearchAllowed(prompt, 'search_images'), true, prompt);
+    assert.equal(forcedToolForRequest({ prompt, mode: 'auto', hasMaterials: true, sourceTitles: ['სემინარი 3'] }), null, prompt);
+    assert.equal(fallbackToolAfterProvider({ prompt, mode: 'auto', hasMaterials: true, sourceTitles: ['სემინარი 3'] }).name, 'answer', prompt);
+    assert.equal(fallbackToolAfterProvider({ prompt, mode: 'auto', hasMaterials: true, sourceTitles: ['სემინარი 3'], priorClarify: true, pendingKind: 'images' }).name, 'answer', prompt);
+  }
+  assert.equal(externalImageSearchAllowed('მაჩვენე ინტერნეტში ამ დოკუმენტთან დაკავშირებული ფოტოები'), true);
 });
 
 test('short labels and long descriptions retain equal table columns', () => {

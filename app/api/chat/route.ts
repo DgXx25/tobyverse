@@ -12,7 +12,7 @@ import { CONVERSATION_SUMMARY_INSTRUCTION, recentConversation, prepareRecentConv
 import { DEFAULT_CLAUDE_MODEL } from "@/lib/ai/catalog";
 import { createSkillLoader } from "@/lib/skills/server";
 import { parseChatArtifact } from "@/lib/artifacts/active";
-import { fallbackToolAfterProvider, forcedToolForRequest } from "@/lib/chat/tool-routing";
+import { externalImageSearchAllowed, fallbackToolAfterProvider, forcedToolForRequest } from "@/lib/chat/tool-routing";
 import { CHAT_EXCERPT_CHARS, CHAT_IMAGE_LIMIT, CHAT_MATERIAL_LIMIT } from "@/lib/materials/limits";
 import { asMemoryFacts, sanitizePersonalization } from "@/lib/memory/normalize";
 import { asChatMode, chatModeSendsToolDeclarations, chatModeTools } from "@/lib/core/chat-modes";
@@ -379,22 +379,26 @@ export async function POST(request: Request) {
   // The answer is grounded in the user's own materials: retrieve server-side from the vector index.
   let sources: ChatSource[] = [];
   if (!session.anonymous && context.projectId && prompt.length >= 3) {
+    const rawContext = body.context && typeof body.context === "object" ? (body.context as Record<string, unknown>) : {};
+    const materialIds = Array.isArray(rawContext.materialIds)
+      ? rawContext.materialIds.filter((id): id is string => typeof id === "string").slice(0, 200)
+      : [];
     try {
-      const rawContext = body.context && typeof body.context === "object" ? (body.context as Record<string, unknown>) : {};
-      const materialIds = Array.isArray(rawContext.materialIds)
-        ? rawContext.materialIds.filter((id): id is string => typeof id === "string").slice(0, 200)
-        : [];
       sources = numberSources(
         await waitForChatStep("Retrieving sources", () => retrieveChunks({
           uid: session.uid,
           projectId: context.projectId,
           query: retrievalQuery(prompt, history),
+          focusQuery: prompt,
+          previousUserPrompts: history.filter((turn) => turn.role === "user").map((turn) => turn.content).slice(-2),
+          signal,
           materialIds,
           limit: mode === "fast" ? 5 : 8,
-        }), { signal, timeoutMs: 30_000 }),
+        }), { signal, timeoutMs: 60_000 }),
       );
     } catch (error) {
-      console.warn("[rag] retrieval failed, answering without sources", error instanceof Error ? error.message : error);
+      console.warn("[rag] retrieval failed", error instanceof Error ? error.message : error);
+      if (context.hasMaterials && !materialIds.includes("__none__")) throw error;
     }
   }
 
@@ -415,6 +419,7 @@ export async function POST(request: Request) {
     selection: modelId,
   }));
   const systemInstruction = buildChatSystemPrompt(guestContext);
+  const externalImagesAllowed = externalImageSearchAllowed(prompt, guestContext.acceptedTool, sources.map((source) => source.title));
 
         signal.throwIfAborted();
         if (sources.length > 0) controller.enqueue(encodeSse({ sources: sources.map(sourceRef) }));
@@ -441,6 +446,9 @@ export async function POST(request: Request) {
           }));
         };
         const executeTool = async (call: ChatToolCall, options?: { signal: AbortSignal }): Promise<unknown> => {
+          if (call.name === "search_images" && !externalImagesAllowed) {
+            return { ok: false, images: [], error: "Use the uploaded source text for this question." };
+          }
           const id = `tool-${++toolSequence}`;
           if (isInternalTool(call.name)) usedContextTool = true;
           reportToolStatus({ call, phase: "start" }, id);
@@ -499,6 +507,7 @@ export async function POST(request: Request) {
               mode,
               accepted: guestContext.acceptedTool,
               hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
+              sourceTitles: sources.map((source) => source.title),
               priorClarify: guestContext.priorClarify,
               pendingTopic: guestContext.pendingTopic,
               pendingKind: guestContext.pendingKind,
@@ -527,11 +536,13 @@ export async function POST(request: Request) {
             mode,
             history,
             systemInstruction,
-            tools: chatModeTools(mode).filter(name => name !== "search_chat_history" || conversation?.hasOlder),
+            tools: chatModeTools(mode).filter(name =>
+              (name !== "search_chat_history" || conversation?.hasOlder) &&
+              (name !== "search_images" || externalImagesAllowed)),
             // Image search uses the photo catalog tool; Anthropic web search
             // returns text sources rather than thumbnails and would double-search.
-            webSearch: explicit?.name !== "search_images",
-            webSearchRequired: compactWeatherAnswer && explicit?.name !== "search_images",
+            webSearch: externalImagesAllowed && explicit?.name !== "search_images",
+            webSearchRequired: externalImagesAllowed && compactWeatherAnswer && explicit?.name !== "search_images",
             toolChoice:
               explicit && eligibleChatToolNames(mode).includes(explicit.name)
                 ? explicit.name
@@ -542,7 +553,9 @@ export async function POST(request: Request) {
             signal,
           })) {
             if (part.tool && !raw) {
-              raw = explicit && (explicit.name === "create_note" || explicit.name === "edit_note" || explicit.name === "edit_sheet") && part.tool.name !== explicit.name ? explicit : part.tool;
+              raw = !externalImagesAllowed && part.tool.name === "search_images"
+                ? { name: "answer", args: {} }
+                : explicit && (explicit.name === "create_note" || explicit.name === "edit_note" || explicit.name === "edit_sheet") && part.tool.name !== explicit.name ? explicit : part.tool;
               const preview = raw;
               if (preview.name === "search_images" && !guestContext.examAsk && !guestContext.hintAsk) {
                 await sendImageTool(preview);
@@ -607,6 +620,7 @@ export async function POST(request: Request) {
             active: guestContext.activeArtifact,
             accepted: guestContext.acceptedTool,
             hasMaterials: Boolean(guestContext.hasMaterials || guestContext.materials.length > 0),
+            sourceTitles: sources.map((source) => source.title),
             priorClarify: guestContext.priorClarify,
             pendingTopic: guestContext.pendingTopic,
             pendingKind: guestContext.pendingKind,
@@ -615,6 +629,7 @@ export async function POST(request: Request) {
             hasPath: guestContext.hasPath,
             pathStarted: Boolean(guestContext.hasPath && guestContext.path && guestContext.path.started !== false),
           });
+          if (raw.name === "search_images" && !externalImagesAllowed) raw = { name: "answer", args: {} };
           const preview = raw;
           if (preview.name === "search_images") await sendImageTool(preview);
           else if (!streamed && toolStreamsText(preview.name) && pendingProviderText.trim()) {

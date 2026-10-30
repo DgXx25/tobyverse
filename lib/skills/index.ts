@@ -24,7 +24,7 @@ export const SUBJECT_SKILLS: readonly SubjectSkill[] = [
       "მათემატ", "ალგებრ", "გეომეტრ", "წარმოებული", "ინტეგრალ", "განტოლებ", "ფუნქცი", "თეორემ", "ალბათობ", "სტატისტიკ", "ტრიგონომეტრ",
     ],
     write:
-      "Use $...$ for arithmetic expressions, even simple ones; keep final values, units and surrounding prose ordinary. For multi-step equation solutions, show all transitions in one $$...$$ block using \\begin{aligned}, one equation per row. Avoid inline prose and arrow chains. Add only an optional short purpose note if useful or requested; explain the goal, not the operation. Keep one-step calculations inline, state the answer plainly, and make units, domains and assumptions explicit.",
+      "For math explanations as well as requested solutions, place meaningful formulas and worked calculations in display-math blocks so expressions do not crowd the prose. Keep prose in its own short paragraphs; use inline math only for a brief symbol or a single simple value when that is clearer. For linked steps, use one aligned block with one equation per row. Do not turn every number into a block or force a lesson structure. State the answer plainly, and make units, domains and assumptions explicit.",
   },
   {
     id: "physics",
@@ -35,7 +35,7 @@ export const SUBJECT_SKILLS: readonly SubjectSkill[] = [
       "ფიზიკ", "მექანიკ", "კინემატიკ", "ნიუტონ", "თერმოდინამიკ", "ოპტიკ", "სიჩქარ", "აჩქარებ", "ძაბვა", "დენის",
     ],
     write:
-      "Name the physical idea before the formula, write formulas in $...$ with SI units, and say what each symbol stands for only when it is not obvious. In a calculation keep units through every line and check the order of magnitude of the result.",
+      "Name the physical idea before its formula. In explanations and calculations, put meaningful formulas on their own display-math lines, keep prose separate, and retain SI units through calculation steps. Explain symbols only when needed and check the result's order of magnitude.",
   },
   {
     id: "chemistry",

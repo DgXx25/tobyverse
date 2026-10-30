@@ -9,11 +9,18 @@ import { deleteGcsObject, downloadGcsObject } from "@/lib/storage-gcs";
 
 const bytes = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 
-/** Documents keep verified text; photographs keep one compressed image and their OCR sidecar. */
+/** Sources retain searchable text; uploaded photo binaries are removed after OCR and description are saved. */
 export async function retainMaterialText(input: { uid: string; projectId: string; materialId: string; ref: DocumentReference }): Promise<void> {
   const material = (await input.ref.get()).data();
   if (!material || material.userId !== input.uid) throw new AuthError("Material not found.", 404);
-  if (material.originalRemoved === true) return;
+  if (material.originalRemoved === true) {
+    const oldPath = typeof material.originalStoragePath === "string" ? material.originalStoragePath : "";
+    const oldParsed = oldPath ? parseMaterialStoragePath(oldPath) : null;
+    if (oldParsed?.userId === input.uid && oldParsed.projectId === input.projectId && oldParsed.materialId === input.materialId && oldPath !== material.storagePath) {
+      await deleteGcsObject(oldPath);
+    }
+    return;
+  }
   const originalPath = typeof material.storagePath === "string" ? material.storagePath : "";
   const textPath = typeof material.textPath === "string" ? material.textPath : "";
   for (const path of [originalPath, textPath]) {
@@ -25,11 +32,12 @@ export async function retainMaterialText(input: { uid: string; projectId: string
   if (storedObjectName(textPath) !== "extracted.txt") throw new AuthError("Invalid extracted text path.", 400);
   const { buffer } = await downloadGcsObject(textPath);
   if (material.type === "image") {
-    // Empty OCR is valid. Verify the image and count the two actual objects.
     if (originalPath === textPath) throw new AuthError("This photo has no retained image.", 422);
+    if (!buffer.byteLength || !buffer.toString("utf8").trim()) {
+      throw new AuthError("No text or description was extracted. The original photo has been kept.", 422);
+    }
     const image = await downloadGcsObject(originalPath);
     if (!image.buffer.byteLength || !image.contentType.startsWith("image/")) throw new AuthError("Invalid retained image.", 422);
-    const retainedBytes = image.buffer.byteLength + buffer.byteLength;
     const db = getAdminFirestore();
     const userRef = db.collection(COLLECTIONS.users).doc(input.uid);
     await db.runTransaction(async transaction => {
@@ -39,17 +47,26 @@ export async function retainMaterialText(input: { uid: string; projectId: string
       if (current.storagePath !== originalPath || current.textPath !== textPath) throw new Error("Material changed. Retry processing.");
       const usage = user.data()?.usage ?? {};
       transaction.set(input.ref, {
+        originalName: current.originalName || storedObjectName(originalPath) || current.title || "Photo",
+        originalMime: current.originalMime || image.contentType,
+        originalSizeBytes: bytes(current.originalSizeBytes) || bytes(current.sizeBytes),
+        originalStoragePath: originalPath,
+        originalRemoved: true,
+        storagePath: textPath,
+        textPath,
         extractedPath: textPath,
-        sizeBytes: retainedBytes,
-        storedMime: image.contentType,
-        images: [{ page: 1, path: originalPath, mime: image.contentType }],
-        hasImages: true,
+        sizeBytes: buffer.byteLength,
+        storedMime: FieldValue.delete(),
+        images: [],
+        imagePaths: [],
+        hasImages: false,
       }, { merge: true });
       transaction.set(userRef, {
-        usage: { ...usage, storageBytes: Math.max(0, bytes(usage.storageBytes) - bytes(current.sizeBytes)) + retainedBytes },
+        usage: { ...usage, storageBytes: Math.max(0, bytes(usage.storageBytes) - bytes(current.sizeBytes)) + buffer.byteLength },
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     });
+    await deleteGcsObject(originalPath);
     return;
   }
   if (!buffer.toString("utf8").trim() || !bytes(material.textChars)) {

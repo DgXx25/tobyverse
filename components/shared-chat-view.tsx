@@ -151,7 +151,9 @@ export function SharedChatView({
                       <MessageAttachments
                         items={message.attachments.map(attachment => {
                           const material = snapshot.materials.find(item => item.id === attachment.materialId);
-                          return material?.type === "image" ? { ...attachment, storagePath: material.storagePath } : attachment;
+                          return material?.type === "image"
+                            ? { ...attachment, storagePath: material.originalRemoved ? undefined : material.storagePath }
+                            : attachment;
                         })}
                         fileAccess={{ shareId }}
                         onOpenMaterial={(id) => open({ kind: "material", id })}

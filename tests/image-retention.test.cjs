@@ -46,29 +46,31 @@ function retentionFixture(text, type = 'image', source) {
   return { run: () => api.retainMaterialText({ uid: 'u', projectId: 'p', materialId: 'photo', ref }), get material() { return material; }, get user() { return user; }, objects };
 }
 
-test('photo keeps exactly its compressed image and OCR; quota counts UTF-8 bytes once on retry', async () => {
+test('photo keeps searchable text only and removes its image; quota counts UTF-8 bytes once on retry', async () => {
   const fixture = retentionFixture('OCR ✓');
   await fixture.run();
   await fixture.run();
-  const total = 100 + Buffer.byteLength('OCR ✓');
-  assert.equal(fixture.material.storagePath, storagePath);
+  const total = Buffer.byteLength('OCR ✓');
+  assert.equal(fixture.material.storagePath, textPath);
   assert.equal(fixture.material.sizeBytes, total);
   assert.equal(fixture.user.usage.storageBytes, 200 + total);
   assert.equal(fixture.user.usage.other, 7);
-  assert.deepEqual([...fixture.objects.keys()], [storagePath, textPath]);
-  assert.deepEqual(fixture.material.images, [{ page: 1, path: storagePath, mime: 'image/webp' }]);
+  assert.deepEqual([...fixture.objects.keys()], [textPath]);
+  assert.deepEqual(fixture.material.images, []);
+  assert.equal(fixture.material.originalRemoved, true);
+  assert.equal(fixture.material.hasImages, false);
   assert.equal(fixture.material.originalName, 'camera.png');
   assert.equal(fixture.material.originalMime, 'image/png');
   assert.equal(fixture.material.originalSizeBytes, 5000);
 });
 
-test('photo without readable text remains an image with an empty extracted.txt', async () => {
+test('photo without readable text or description stays stored instead of being discarded', async () => {
   const fixture = retentionFixture('');
-  await fixture.run();
-  await fixture.run();
+  await assert.rejects(fixture.run(), /No text or description was extracted/);
   assert.equal(fixture.material.sizeBytes, 100);
   assert.equal(fixture.user.usage.storageBytes, 300);
-  assert.equal(fixture.material.hasImages, true);
+  assert.equal(fixture.material.hasImages, undefined);
+  assert.equal(fixture.objects.has(storagePath), true);
   assert.equal(fixture.objects.get(textPath).buffer.byteLength, 0);
 });
 
@@ -85,17 +87,22 @@ test('document retention still deletes the binary only after verifying nonempty 
   assert.equal(empty.objects.has(storagePath), true);
 });
 
-test('OCR accepts the explicit no-text marker and preserves real extracted content', async () => {
-  for (const [answer, expected] of [['[NO_READABLE_TEXT]', ''], ['', ''], ['  readable text  ', 'readable text']]) {
+test('photo extraction requires a text or visual description and preserves its response', async () => {
+  for (const answer of ['[NO_READABLE_TEXT]', '']) {
     const { extractImageText } = isolated('lib/materials/extract.ts', {
       '@/lib/ai/gemini': { generateText: async () => answer },
       '@/lib/materials/docx': {}, '@/lib/materials/pdf': {}, '@/lib/materials/pptx': {}, '@/lib/materials/txt': {},
     });
-    assert.equal(await extractImageText(Buffer.from('compressed'), 'image/webp'), expected);
+    await assert.rejects(extractImageText(Buffer.from('compressed'), 'image/webp'), /Could not read or describe/);
   }
+  const { extractImageText } = isolated('lib/materials/extract.ts', {
+    '@/lib/ai/gemini': { generateText: async () => '  Visible text: red ball. Visual description: A red ball on a table.  ' },
+    '@/lib/materials/docx': {}, '@/lib/materials/pdf': {}, '@/lib/materials/pptx': {}, '@/lib/materials/txt': {},
+  });
+  assert.equal(await extractImageText(Buffer.from('compressed'), 'image/webp'), 'Visible text: red ball. Visual description: A red ball on a table.');
 });
 
-test('image ingest uploads the compressed bytes and preserves original identity even with empty OCR', async t => {
+test('image ingest sends a compressed image for analysis and preserves original identity', async t => {
   const writes = [];
   const uploaded = [];
   const compressed = new Blob(['small'], { type: 'image/webp' });
@@ -108,11 +115,12 @@ test('image ingest uploads the compressed bytes and preserves original identity 
     '@/lib/materials/storage': {
       originalStoragePath: () => storagePath, extractedTextPath: () => textPath,
       uploadMaterialBytes: async (_path, bytes, mime) => { uploaded.push({ bytes, mime }); return { path: storagePath, sizeBytes: 5, contentType: mime, reservedBytes: 5 }; },
-      uploadExtractedText: async (_path, text) => { assert.equal(text, ''); return textPath; },
+      uploadExtractedText: async (_path, text) => { assert.match(text, /Visual description/); return textPath; },
     },
   });
   const calls = [];
-  t.mock.method(global, 'fetch', async (url) => { calls.push(url); return Response.json(url.endsWith('/extract') ? { type: 'image', text: '', textChars: 0 } : { done: true }); });
+  const description = 'Visible text: None. Visual description: A red ball on a table.';
+  t.mock.method(global, 'fetch', async (url) => { calls.push(url); return Response.json(url.endsWith('/extract') ? { type: 'image', text: description, textChars: description.length } : { done: true }); });
   const file = new File(['uncompressed pixels'], 'camera.png', { type: 'image/png' });
   const prepared = await prepareMaterialIngest({ projectId: 'p', userId: 'untrusted', source: { kind: 'file', file } });
   assert.equal(uploaded[0].bytes, compressed);

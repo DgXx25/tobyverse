@@ -43,26 +43,26 @@ function asState(value: unknown): IndexState {
   return value && typeof value === "object" ? (value as IndexState) : {};
 }
 
-async function ocrPage(image: Uint8Array, usage?: AiUsageReporter): Promise<string> {
-  try {
-    const text = await generateText(
-      "Transcribe all readable text on this page in reading order. Keep headings and paragraph breaks. Plain text only, no commentary. If a diagram has labels, list the labels. If the page is blank, return nothing.",
-      { images: [{ mimeType: "image/png", data: Buffer.from(image).toString("base64") }], usage },
-    );
-    return text.trim();
-  } catch {
-    return "";
-  }
+async function ocrPage(image: Uint8Array, usage?: AiUsageReporter, scanned = true): Promise<string> {
+  const text = await generateText(
+    scanned
+      ? "Read this document page for text search. Return two compact sections: Page text: transcribe readable text in reading order, preserving headings, paragraph breaks and table rows. Visual notes: briefly describe each meaningful chart, diagram, photograph or other figure and its key labels, values, objects or relationships. Do not guess unclear text or values; mark them [unclear]. Plain text only."
+      : "This page already has selectable text. Inspect only embedded images, charts, diagrams, photographs or figures, and ignore ordinary page text. Return a compact section titled Embedded visuals: for each meaningful visual, transcribe legible labels or values and add one brief factual description of what it shows and its relationships or trend. Do not guess unclear text or values; mark them [unclear]. If the image contains a table, preserve its rows and columns. Plain text only.",
+    { images: [{ mimeType: "image/png", data: Buffer.from(image).toString("base64") }], usage },
+  );
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error(`Could not read or describe the visual on PDF page.`);
+  return trimmed;
 }
 
-async function ocrMany(pages: { page: number; image: Uint8Array }[], usage?: AiUsageReporter): Promise<Map<number, string>> {
+async function ocrMany(pages: { page: number; image: Uint8Array; scanned: boolean }[], usage?: AiUsageReporter): Promise<Map<number, string>> {
   const out = new Map<number, string>();
   let cursor = 0;
   const workers = Array.from({ length: Math.min(OCR_CONCURRENCY, pages.length) }, async () => {
     while (cursor < pages.length) {
       const item = pages[cursor];
       cursor += 1;
-      out.set(item.page, await ocrPage(item.image, usage));
+      out.set(item.page, await ocrPage(item.image, usage, item.scanned));
     }
   });
   await Promise.all(workers);
@@ -118,15 +118,19 @@ export async function indexPdfStep(input: {
       const end = Math.min(pdf.pageCount, page + PDF_WINDOW_PAGES - 1);
       const read = await pdf.readPages(page, end);
 
-      const scans = read.filter((item) => item.scanned && item.image);
-      const allowed = scans.slice(0, Math.max(0, OCR_PAGE_CAP - ocrPages));
+      const visualPages = read.filter((item) => item.image && (item.scanned || item.hasImages));
+      const allowed = visualPages.slice(0, Math.max(0, OCR_PAGE_CAP - ocrPages));
       const ocr = allowed.length
-        ? await ocrMany(allowed.map((item) => ({ page: item.page, image: item.image as Uint8Array })), input.usage)
+        ? await ocrMany(allowed.map((item) => ({ page: item.page, image: item.image as Uint8Array, scanned: item.scanned })), input.usage)
         : new Map<number, string>();
       ocrPages += allowed.length;
 
       const pages: SourcePage[] = read
-        .map((item) => ({ page: item.page, text: item.scanned ? (ocr.get(item.page) ?? "") : item.text }))
+        .map((item) => {
+          const visualText = ocr.get(item.page)?.trim();
+          const pageText = item.scanned ? (visualText ?? "") : item.text;
+          return { page: item.page, text: visualText && !item.scanned ? `${pageText}\n\n${visualText}` : pageText };
+        })
         .filter((item) => item.text.trim().length > 0);
 
       const windowChunks = chunkPages(pages, page);

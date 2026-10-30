@@ -10,7 +10,7 @@ import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { UiIcon } from "@/components/workspace/ui-icon";
 import { usePreferredModel } from "@/components/account/use-preferred-model";
-import { AI_EFFORT_LEVELS, DEFAULT_AI_EFFORT, aiEffortDisplayName, type AiEffort, type AiModelSelection } from "@/lib/ai/catalog";
+import { AI_EFFORT_LEVELS, DEFAULT_AI_EFFORT, aiEffortDisplayName, type AiEffort } from "@/lib/ai/catalog";
 
 type PanelView = "effort" | "model";
 
@@ -48,7 +48,7 @@ function EffortTrack({ value, onChange, labelId }: { value: number; onChange: (i
   function indexAt(clientX: number) {
     const rect = trackRef.current?.getBoundingClientRect();
     if (!rect) return value;
-    return Math.max(0, Math.min(count - 1, Math.floor(((clientX - rect.left) / rect.width) * count)));
+    return Math.max(0, Math.min(count - 1, Math.round(((clientX - rect.left) / rect.width) * (count - 1))));
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -80,7 +80,7 @@ function EffortTrack({ value, onChange, labelId }: { value: number; onChange: (i
       aria-valuemin={0}
       aria-valuenow={value}
       aria-valuetext={aiEffortDisplayName(AI_EFFORT_LEVELS[value])}
-      className="h-9 cursor-pointer touch-none select-none rounded-lg bg-foreground/[0.06] p-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+      className="group relative h-12 cursor-pointer touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       onKeyDown={onKeyDown}
       onLostPointerCapture={() => setDragging(false)}
       onPointerDown={startDrag}
@@ -93,33 +93,32 @@ function EffortTrack({ value, onChange, labelId }: { value: number; onChange: (i
       role="slider"
       tabIndex={0}
     >
-      <div className="relative flex h-full" ref={trackRef}>
+      <div className="absolute inset-x-3 top-1/2 h-[18px] -translate-y-1/2 rounded-full bg-foreground/[0.14]" ref={trackRef}>
         <motion.span
           aria-hidden="true"
-          className="absolute inset-y-0 rounded-md bg-surface shadow-[0_1px_3px_rgba(0,0,0,0.14)] ring-1 ring-border/70"
+          className="absolute inset-y-0 left-0 rounded-full bg-accent"
           initial={false}
-          animate={{ left: `${(value / count) * 100}%`, width: `${100 / count}%` }}
+          animate={{ width: `${(value / (count - 1)) * 100}%` }}
           transition={{ duration: dragging ? 0.1 : 0.22, ease: easeOut }}
         />
         {AI_EFFORT_LEVELS.map((effort, index) => (
           <span
             key={effort}
             aria-hidden="true"
-            className={`relative flex flex-1 items-center justify-center text-[11px] transition-colors duration-150 ${index === value ? "font-medium text-foreground" : "text-muted"}`}
-          >
-            {aiEffortDisplayName(effort)}
-          </span>
+            className={`absolute top-1/2 size-[4px] -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors ${index <= value ? "bg-white/45" : "bg-foreground/30"}`}
+            style={{ left: `${(index / (count - 1)) * 100}%` }}
+          />
         ))}
+        <motion.span
+          aria-hidden="true"
+          className="absolute top-1/2 size-[28px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-black/5 bg-white shadow-[0_2px_8px_rgba(0,0,0,.28)]"
+          initial={false}
+          animate={{ left: `${(value / (count - 1)) * 100}%` }}
+          transition={{ duration: dragging ? 0.1 : 0.22, ease: easeOut }}
+        />
       </div>
     </div>
   );
-}
-
-function modelDescription(id: AiModelSelection, fallback: string) {
-  if (id === "auto") return "Recommended model for each request";
-  if (id === "gpt-6-luna") return "Efficient multilingual model · OpenAI";
-  if (id === "deepseek-flash") return "Strong quality for the cost · DeepSeek";
-  return fallback.replace("Claude ", "Fast, capable · Claude ");
 }
 
 export function AIModelSelector() {
@@ -184,7 +183,7 @@ export function AIModelSelector() {
               id={panelId}
               role="dialog"
               aria-label={panelView === "effort" ? "Effort settings" : "Select model"}
-              className="absolute bottom-full left-0 z-50 mb-2 w-[min(304px,calc(100vw-32px))] origin-bottom-left overflow-hidden rounded-2xl border border-border/80 bg-surface p-1.5 text-foreground shadow-[0_12px_36px_rgba(0,0,0,0.3)] ring-1 ring-white/[0.025]"
+              className="absolute bottom-full left-0 z-50 mb-2 w-[min(304px,calc(100vw-32px))] origin-bottom-left overflow-hidden rounded-[22px] border border-border/80 bg-surface p-3 text-foreground shadow-[0_12px_36px_rgba(0,0,0,0.3)] ring-1 ring-white/[0.025]"
               initial={reduceMotion ? false : { opacity: 0, scale: 0.97, y: 5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 3 }}
@@ -198,33 +197,28 @@ export function AIModelSelector() {
                     animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                     exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4, filter: "blur(2px)" }}
                     transition={motionTransition}
-                    className="px-2 pt-2 pb-1"
+                    className="px-0 pt-0 pb-0"
                   >
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-baseline gap-2">
-                          <span id={effortLabelId} className="text-[11px] text-muted">Effort</span>
-                          <p className="text-[15px] font-semibold leading-5 text-accent">{effortName}</p>
-                        </div>
-                        <button
-                          type="button"
-                          aria-label={`Select model. Current model: ${name}`}
-                          aria-haspopup="listbox"
-                          onClick={() => setPanelView("model")}
-                          className="group/model -ml-1 flex max-w-full items-center gap-1 rounded-md px-1 py-0.5 text-left text-[12px] text-muted transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                        >
-                          <span className="truncate">{model === "auto" ? "Default" : name}</span>
-                          <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3 shrink-0 fill-none stroke-current transition-transform group-hover/model:translate-x-0.5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m6 3 5 5-5 5" />
-                          </svg>
-                        </button>
-                      </div>
+                    <div className="relative mb-2 flex flex-col items-center">
+                      <p id={effortLabelId} className="text-[14px] font-semibold leading-5 text-accent">{effortName}</p>
+                      <button
+                        type="button"
+                        aria-label={`Select model. Current model: ${name}`}
+                        aria-haspopup="listbox"
+                        onClick={() => setPanelView("model")}
+                        className="group/model mt-1 flex h-8 max-w-full items-center justify-center gap-1 rounded-lg bg-foreground/[0.07] px-3 text-[12px] text-muted transition-colors hover:bg-foreground/[0.11] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      >
+                        <span className="truncate">{model === "auto" ? "Default" : name}</span>
+                        <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3 shrink-0 fill-none stroke-current transition-transform group-hover/model:translate-x-0.5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m6 3 5 5-5 5" />
+                        </svg>
+                      </button>
                       <button
                         type="button"
                         aria-label={`Reset effort to ${aiEffortDisplayName(DEFAULT_AI_EFFORT)}`}
                         title={`Reset to ${aiEffortDisplayName(DEFAULT_AI_EFFORT)}`}
                         onClick={() => setEffort(DEFAULT_AI_EFFORT)}
-                        className="-mr-1 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        className="absolute right-0 top-0 grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                       >
                         <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 fill-none stroke-current" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M16.2 9.2a6.3 6.3 0 1 0 .1 2.1" />
@@ -237,7 +231,7 @@ export function AIModelSelector() {
                       value={effortIndex}
                       onChange={(index) => setEffort(AI_EFFORT_LEVELS[index])}
                     />
-                    <div className="relative mt-2 h-8">
+                    <div className="relative mt-1 min-h-8">
                       <AnimatePresence initial={false} mode="popLayout">
                         <motion.p
                           key={effort}
@@ -288,11 +282,11 @@ export function AIModelSelector() {
                               setModel(option.id);
                               setPanelView("effort");
                             }}
-                            className={`flex min-h-12 w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors focus-visible:bg-foreground/[0.06] ${selected ? "bg-foreground/[0.055]" : "hover:bg-foreground/[0.045]"}`}
+                            className={`flex min-h-8 w-full items-center gap-3 rounded-lg px-2.5 py-1 text-left outline-none transition-colors focus-visible:bg-foreground/[0.06] ${selected ? "bg-foreground/[0.055]" : "hover:bg-foreground/[0.045]"}`}
                           >
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[13px] font-medium text-foreground">{isDefault ? "Default" : option.name}</span>
-                              <span className="block truncate text-[11px] leading-4 text-muted">{modelDescription(option.id, option.name)}</span>
+                              {isDefault ? <span className="block truncate text-[11px] leading-4 text-muted">Recommended set of models</span> : null}
                             </span>
                             <span className="flex size-4 shrink-0 items-center justify-center text-accent">
                               {selected ? <UiIcon name="check" size={14} /> : option.paidOnly ? <span className="text-[10px] text-muted">Pro</span> : null}

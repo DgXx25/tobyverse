@@ -252,8 +252,20 @@ const START_PATH_HINT =
   /დავიწყოთ|დავიწყო|მზად ვარ|let'?s start|start (the )?(path|course)|i'?m ready|\bcontinue\b|გავაგრძელოთ|go ahead/i;
 /** Conservative fallback: a subject containing a media stem is not an image request. */
 const IMAGE_MEDIA = /(?:^|[^\p{L}\p{N}])(?:ფოტო(?:ებ\p{L}*|ს|ზე|ში)?|ფოტოსურათ\p{L}*|სურათ\p{L}*|photos?|images?|pictures?)(?=$|[^\p{L}\p{N}])/iu;
+const IMAGE_MEDIA_PLURAL = /(?:^|[^\p{L}\p{N}])(?:ფოტოებ\p{L}*|ფოტოსურათებ\p{L}*|სურათებ\p{L}*|photos|images|pictures)(?=$|[^\p{L}\p{N}])/iu;
 const IMAGE_DIAGRAM = /(?:^|[^\p{L}\p{N}])(?:გრაფიკ\p{L}*|დიაგრამ\p{L}*|charts?|graphs?|diagrams?)(?=$|[^\p{L}\p{N}])/iu;
 const IMAGE_REQUEST = /მაჩვენ|მომიძებნ|იპოვ|\b(?:show|find|search|display)\b|look\s+for/i;
+const USER_MATERIAL_REFERENCE = /ფაილ\p{L}*|დოკუმენტ\p{L}*|წყარ\p{L}*|მასალ\p{L}*|ატვირთულ\p{L}*|ამ\s+ფოტო\p{L}*|ამ\s+სურათ\p{L}*|ფოტოზე|ფოტოში|სურათზე|სურათში|ფოტოს\s+(?:მონაცემ|ინფორმაცი|ტექსტ)|სურათის\s+(?:მონაცემ|ინფორმაცი|ტექსტ)|\b(?:uploaded|attached|my\s+(?:photo|image|picture|file|document|source)|(?:this|the)\s+(?:photo|image|picture|file|document|source))\b/iu;
+const EXTERNAL_IMAGE_REFERENCE = /ინტერნეტ\p{L}*|ვებ\p{L}*|გარე\s+(?:ფოტო|სურათ)|\b(?:online|internet|web|external)\b/iu;
+
+export function explicitlyRequestsExternalMedia(prompt: string): boolean {
+  return EXTERNAL_IMAGE_REFERENCE.test(prompt);
+}
+
+/** A mention of an image inside the user's own material is a source question, not a web-search request. */
+export function refersToUserMaterial(prompt: string): boolean {
+  return USER_MATERIAL_REFERENCE.test(prompt) && !explicitlyRequestsExternalMedia(prompt);
+}
 const EDIT_HINT = /გაამარტივე|შეამოკლე|simplify|shorten|rewrite|easier/i;
 const APPEND_HINT = /დაამატე|add more|more questions|more items/i;
 
@@ -325,9 +337,10 @@ export function wantsStartPath(prompt: string): boolean {
 
 export function wantsImages(prompt: string): boolean {
   if (isInternalTutorPrompt(prompt) || isSimpleChatTask(prompt)) return false;
+  if (refersToUserMaterial(prompt)) return false;
   const requested = IMAGE_REQUEST.test(prompt);
-  if (!requested && /რა არის|რას ნიშნავს|როგორ მუშაობს|\bwhat (?:is|are|does)\b|\bhow does\b/i.test(prompt)) return false;
-  return IMAGE_MEDIA.test(prompt) || (requested && IMAGE_DIAGRAM.test(prompt));
+  return (IMAGE_MEDIA.test(prompt) && (requested || (IMAGE_MEDIA_PLURAL.test(prompt) && !looksLikeQuestion(prompt)))) ||
+    (requested && IMAGE_DIAGRAM.test(prompt));
 }
 
 export function promptIsKa(text: string): boolean {

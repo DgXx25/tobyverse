@@ -1,6 +1,25 @@
 import type { ChatAttachment } from "@/types/chat";
 import type { Material } from "@/types/material";
 
+export const SOURCE_FILES_DROP_EVENT = "tobyverse:source-files-drop";
+export const COMPOSER_FILES_DROP_EVENT = "tobyverse:composer-files-drop";
+
+const sourceDropListeners = new Set<(files: File[]) => void>();
+const queuedSourceDrops: File[][] = [];
+
+export function routeSourceFilesDrop(files: File[]) {
+  if (!files.length) return;
+  const listener = Array.from(sourceDropListeners).pop();
+  if (listener) listener(files);
+  else queuedSourceDrops.push(files);
+}
+
+export function subscribeSourceFilesDrop(listener: (files: File[]) => void) {
+  sourceDropListeners.add(listener);
+  while (queuedSourceDrops.length) listener(queuedSourceDrops.shift()!);
+  return () => { sourceDropListeners.delete(listener); };
+}
+
 export function newChipId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
