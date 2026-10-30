@@ -53,10 +53,7 @@ export function markProjectActivityComplete(projectId: string) {
 }
 
 export function markProjectGenerationComplete(projectId: string) {
-  if (typeof window === "undefined" || !projectId) return;
-  const current = readNotifications();
-  if (current.includes(projectId)) return;
-  writeNotifications([...current, projectId]);
+  markProjectActivityComplete(projectId);
 }
 
 export function clearProjectActivityNotificationFor(projectId: string) {

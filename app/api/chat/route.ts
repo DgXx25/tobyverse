@@ -284,8 +284,8 @@ export async function POST(request: Request) {
     });
   }
 
-  const requestedSelection = typeof body.model === "string" ? body.model : DEFAULT_MODEL_SELECTION;
-  if (!isKnownModelSelection(requestedSelection)) {
+  const suppliedSelection = typeof body.model === "string" ? body.model : null;
+  if (suppliedSelection && !isKnownModelSelection(suppliedSelection)) {
     return Response.json({ error: "That model is not available." }, { status: 400 });
   }
   // Resolve account access before model selection so disallowed manual choices cannot reach a provider.
@@ -295,6 +295,7 @@ export async function POST(request: Request) {
     catch (error) { return aiUsageErrorResponse(error); }
   }
   const plan = session.anonymous ? "free_beta" : access!.plan;
+  const requestedSelection = suppliedSelection ?? (plan === "free_beta" || plan === "lite" ? DEFAULT_CLAUDE_MODEL : DEFAULT_MODEL_SELECTION);
   if (requestedSelection !== "auto" && !isAllowedAiModel(requestedSelection, plan)) {
     return Response.json({ error: "This model is available on Premium plans.", code: "premium_model_required" }, { status: 403 });
   }

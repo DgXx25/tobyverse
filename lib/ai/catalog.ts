@@ -25,9 +25,16 @@ export const AI_PROVIDER_OPTIONS = [
   {
     id: "gpt",
     name: "GPT",
-    model: "gpt-5",
-    enabled: false,
-    note: "add key later",
+    model: "gpt-6-luna",
+    enabled: true,
+    note: null,
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    model: "deepseek-flash",
+    enabled: true,
+    note: null,
   },
 ] as const;
 
@@ -43,6 +50,8 @@ export const DEFAULT_MODEL_SELECTION = "auto" as const;
 /** Only chat models currently enabled in the user-facing picker. */
 export const AI_MODEL_OPTIONS = [
   { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", paidOnly: false },
+  { id: "gpt-6-luna", name: "GPT-6 Luna", paidOnly: false },
+  { id: "deepseek-flash", name: "DeepSeek V4.1 Flash", paidOnly: false },
   { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", paidOnly: true },
 ] as const;
 
@@ -110,7 +119,7 @@ export function parsePreferredModel(value: unknown): AiModelSelection | null {
 
 export function resolveAiModel(id: string | null | undefined, planOrAdmin: EffectivePlanId | boolean): AiModelSelection {
   if (id && isAllowedModelSelection(id, planOrAdmin)) return id;
-  return DEFAULT_MODEL_SELECTION;
+  return hasPaidModelAccess(planOrAdmin) ? DEFAULT_MODEL_SELECTION : DEFAULT_CLAUDE_MODEL;
 }
 
 export function aiModelDisplayName(id: AiModelSelection): string {

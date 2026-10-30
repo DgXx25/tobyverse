@@ -72,6 +72,23 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
     outputMicrosPerMillion: 10_000_000,
     version: "anthropic-2026-10-claude-5.5",
   },
+  // OpenAI GPT-6 Luna standard rates ($0.10 input / $0.50 output up to 272K context).
+  "gpt-6-luna": {
+    cacheReadMultiplier: 0.1,
+    inputMicrosPerMillion: 100_000,
+    outputMicrosPerMillion: 500_000,
+    largePromptThreshold: 272_000,
+    inputMicrosPerMillionAboveThreshold: 200_000,
+    outputMicrosPerMillionAboveThreshold: 750_000,
+    version: "openai-2026-09-gpt-6-luna",
+  },
+  // DeepSeek Flash peak rates; cache-hit input is $0.006/MTok vs $0.30 cache-miss.
+  "deepseek-flash": {
+    cacheReadMultiplier: 0.02,
+    inputMicrosPerMillion: 300_000,
+    outputMicrosPerMillion: 1_200_000,
+    version: "deepseek-v4.1-flash-2026-09-10-peak",
+  },
 };
 
 export class UnknownModelPriceError extends Error {

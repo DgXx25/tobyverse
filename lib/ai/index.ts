@@ -10,6 +10,7 @@ export {
   geminiCallUsage,
 } from "@/lib/ai/gemini";
 export { AnthropicProvider, anthropicCallUsage } from "@/lib/ai/anthropic";
+export { DeepSeekProvider, OpenAICompatibleProvider, OpenAIProvider, openAICallUsage } from "@/lib/ai/openai";
 export { generateJson, validateOrRepairJson } from "@/lib/ai/json";
 export {
   ASK_WRITING_CONTRACT,

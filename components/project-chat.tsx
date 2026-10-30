@@ -423,6 +423,10 @@ export function ProjectChat({
     liveGeneration ? [...openingUi.messages].reverse().find((message) => message.role === "user")?.id ?? null : null,
   );
   const [promptScrollSpacer, setPromptScrollSpacer] = useState(0);
+  const promptScrollSpacerRef = useRef(0);
+  const focusedPromptIdRef = useRef<string | null>(
+    liveGeneration ? [...openingUi.messages].reverse().find((message) => message.role === "user")?.id ?? null : null,
+  );
   const [loadingOlder, setLoadingOlder] = useState(false);
   const loadingOlderRef = useRef(false);
   const olderExhaustedRef = useRef(false);
@@ -775,6 +779,7 @@ export function ProjectChat({
         const targetOffset = promptStart - 24;
         const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
         const spacer = Math.max(0, targetOffset - maxScroll);
+        promptScrollSpacerRef.current = spacer;
         setPromptScrollSpacer(spacer);
         if (spacer > 0 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
           pendingSpacerPromptRef.current = promptId;
@@ -784,6 +789,33 @@ export function ProjectChat({
       requestAnimationFrame(() => historyViewRef.current?.scrollToMessage(promptId, "smooth"));
     }
   }, [loading, historyReady, messages, stream, sending, stickToBottom]);
+
+  useLayoutEffect(() => {
+    if (sending || stream || !focusedPromptIdRef.current) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const currentSpacer = promptScrollSpacerRef.current;
+    const contentMaxScroll = Math.max(
+      0,
+      scroller.scrollHeight - currentSpacer - scroller.clientHeight,
+    );
+    const remainingSpacer = Math.max(0, scroller.scrollTop - contentMaxScroll);
+    promptScrollSpacerRef.current = remainingSpacer;
+    setPromptScrollSpacer(remainingSpacer);
+    if (remainingSpacer === 0) {
+      focusedPromptIdRef.current = null;
+      setFocusedPromptId(null);
+    }
+  }, [sending, stream]);
+
+  const releasePromptScrollAnchor = () => {
+    pendingPromptScrollRef.current = null;
+    pendingSpacerPromptRef.current = null;
+    focusedPromptIdRef.current = null;
+    promptScrollSpacerRef.current = 0;
+    setFocusedPromptId(null);
+    setPromptScrollSpacer(0);
+  };
 
   useEffect(() => {
     if (loading || namedRef.current) return;
@@ -1320,6 +1352,7 @@ export function ProjectChat({
     if (!options?.skipUser && !options?.studio) {
       pendingPromptScrollRef.current = savedUserMessageId;
       setFocusedPromptId(savedUserMessageId);
+      focusedPromptIdRef.current = savedUserMessageId;
       enteringPromptsRef.current.add(savedUserMessageId);
     }
     abortRef.current = controller;
@@ -1642,6 +1675,7 @@ export function ProjectChat({
       );
 
       if (artifact?.step) artifactStepsRef.current.set(assistantId, artifact.step);
+      const responseSources = toolStreamsText(tool.name) ? usedSources(content, streamed.sources) : undefined;
       const id = options?.studio
         ? assistantId
         : await waitForChatStep("Saving response", () => addChatMessage({
@@ -1658,11 +1692,36 @@ export function ProjectChat({
         images: dispatched.images,
         promptAsk,
         blocks: dispatched.blocks,
-        sources: toolStreamsText(tool.name) ? usedSources(content, streamed.sources) : undefined,
+        sources: responseSources,
         memorized: memorizedRef.current.has(assistantId) || undefined,
         threadId: chatThreadId,
       }), { signal: controller.signal });
       if (!options?.studio) {
+        const savedAt = new Date().toISOString();
+        const completedMessage: ChatMessage = {
+          id,
+          projectId: project.id,
+          threadId: chatThreadId,
+          lessonId: null,
+          exerciseId: null,
+          role: "assistant",
+          mode: chatModeRef.current,
+          content,
+          attachments: [],
+          relatedExerciseType: null,
+          intent: dispatched.intent,
+          artifact,
+          activity: activity.length ? [...activity] : undefined,
+          options: dispatched.options,
+          pendingKind: dispatched.pendingKind,
+          images: dispatched.images,
+          promptAsk,
+          blocks: dispatched.blocks,
+          sources: responseSources,
+          memorized: memorizedRef.current.has(assistantId) || undefined,
+          createdAt: savedAt,
+        };
+        setMessages((current) => mergeChatMessages(current, [completedMessage]));
         void streamed.memory.then((saved) => {
           if (!saved) return;
           markMemorized(id);
@@ -1756,8 +1815,6 @@ export function ProjectChat({
       setSending(false);
       setStoppable(false);
       pendingSpacerPromptRef.current = null;
-      setFocusedPromptId(null);
-      setPromptScrollSpacer(0);
       finishLiveGeneration(liveGenerationKey, controller);
       keepComposerFocus();
       markProjectGenerationComplete(project.id);
@@ -2316,10 +2373,10 @@ export function ProjectChat({
       <div
         ref={scrollerRef}
         className="chat-thread-viewport min-h-0 flex-1 overflow-y-auto overscroll-contain pt-12 [overflow-anchor:none]"
-        onWheel={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
-        onTouchStart={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
-        onPointerDown={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
-        onKeyDown={() => { pendingPromptScrollRef.current = null; pendingSpacerPromptRef.current = null; }}
+        onWheel={releasePromptScrollAnchor}
+        onTouchStart={releasePromptScrollAnchor}
+        onPointerDown={releasePromptScrollAnchor}
+        onKeyDown={releasePromptScrollAnchor}
       >
         <div className="mx-auto w-full max-w-3xl px-8 max-md:px-4">
             {loadingOlder ? <span role="status" className="pointer-events-none absolute top-2 z-10 rounded-full bg-background px-3 py-1 text-xs text-muted">Loading older messages…</span> : null}

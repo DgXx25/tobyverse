@@ -491,7 +491,7 @@ export function eligibleChatToolDefinitions(
   return CHAT_TOOL_DEFINITIONS.filter((definition) => allowed.has(definition.name));
 }
 
-/** OpenAI Chat Completions mapper stub. No OpenAI provider is live yet. */
+/** OpenAI Chat Completions function-tool mapper. */
 export function toOpenAITools(defs: ChatToolDefinition[] = eligibleChatToolDefinitions("auto")) {
   return defs.map((def) => ({
     type: "function" as const,

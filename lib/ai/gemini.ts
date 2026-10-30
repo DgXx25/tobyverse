@@ -24,6 +24,7 @@ import {
 import { runToolLoop } from "@/lib/ai/tool-loop";
 import { toolFallbackText } from "@/lib/ai/tool-execution";
 import { AnthropicProvider } from "@/lib/ai/anthropic";
+import { DeepSeekProvider, OpenAIProvider } from "@/lib/ai/openai";
 
 type GeminiUsageMetadata = {
   promptTokenCount?: number;
@@ -351,6 +352,8 @@ export class GeminiProvider implements AIProvider {
 
 const geminiProvider = new GeminiProvider();
 const anthropicProvider = new AnthropicProvider();
+const openAIProvider = new OpenAIProvider();
+const deepSeekProvider = new DeepSeekProvider();
 let currentProvider: AIProvider = anthropicProvider;
 /** Gemini stays out of chat model selection; this ID is reserved for photo understanding. */
 export const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite" as const;
@@ -359,15 +362,16 @@ export function getAIProvider(model?: string): AIProvider {
   if (model?.startsWith("gemini-")) {
     throw new Error("Gemini is temporarily disabled. Choose a Claude model.");
   }
+  if (model?.startsWith("gpt-")) return openAIProvider;
+  if (model?.startsWith("deepseek-")) return deepSeekProvider;
   if (model?.startsWith("claude-")) return anthropicProvider;
   return currentProvider;
 }
 
 export function resolveAIRequest(model?: string, images?: GenerateOptions["images"]): { provider: AIProvider; model?: string } {
-  // Image-bearing prompts are the only requests that continue using Gemini. Text requests
-  // always honor the selected Claude model and never fall back to Gemini.
+  // Photos use Gemini for Claude and Auto. OpenAI's selected multimodal models keep the request.
   const hasPhoto = images?.some((image) => image.data && image.mimeType.startsWith("image/")) ?? false;
-  return hasPhoto
+  return hasPhoto && !model?.startsWith("gpt-") && !model?.startsWith("deepseek-")
     ? { provider: geminiProvider, model: GEMINI_IMAGE_MODEL }
     : { provider: getAIProvider(model), model };
 }

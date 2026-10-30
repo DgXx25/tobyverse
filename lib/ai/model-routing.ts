@@ -90,10 +90,10 @@ export const scorePrompt = createComplexityScorer();
 /** Deterministic, local-only routing. Auto stays on enabled Claude models and respects plan access. */
 export function selectModel(prompt: string, mode: AiModelSelection | string = "auto", planOrAdmin: import("@/types/billing").EffectivePlanId | boolean = "free_beta"): RoutingResult {
   if (mode !== "auto") {
-    if (mode !== "claude-haiku-5-5" && mode !== "claude-sonnet-5-5") {
+    if (mode !== "claude-haiku-5-5" && mode !== "claude-sonnet-5-5" && mode !== "gpt-6-luna" && mode !== "deepseek-flash") {
       throw new Error(`Unknown model selection: ${mode}`);
     }
-    const tier: ComplexityTier = mode === "claude-haiku-5-5" ? "SIMPLE" : "COMPLEX";
+    const tier: ComplexityTier = mode === "claude-haiku-5-5" || mode === "gpt-6-luna" || mode === "deepseek-flash" ? "SIMPLE" : "COMPLEX";
     return { model: mode, tier, score: 0, method: "heuristic", signals: ["explicit-model"] };
   }
   const result = scorePrompt(prompt);
