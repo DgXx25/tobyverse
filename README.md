@@ -58,13 +58,13 @@ One-time (if `webframeworks` is off):
 firebase experiments:enable webframeworks
 ```
 
-Publish this repo to GitHub, build it, and deploy Hosting:
+Build this repo and deploy Hosting:
 
 ```bash
 npm run deploy
 ```
 
-`npm run deploy` stages and commits the current changes, pushes the current branch to `origin`, runs a production build, then runs `firebase deploy --only hosting`. It requires GitHub push access, the Firebase CLI, and `firebase login`. Live URL: [https://tobyverse.web.app](https://tobyverse.web.app).
+`npm run deploy` cleans the local Next build, runs a production build, then runs `firebase deploy --only hosting`. GitHub commits and pushes are separate steps. The command requires the Firebase CLI and `firebase login`. Live URL: [https://tobyverse.web.app](https://tobyverse.web.app).
 
 Do not set `hosting.public` to `public/`. That only uploads favicons and static files from `public/`; `/account` and the app shell keep coming from the last Cloud Run revision.
 
